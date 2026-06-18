@@ -27,6 +27,12 @@ export default function BabyCard({ baby }: BabyCardProps) {
           <p className="text-xs text-muted/70 mt-1">
             {new Date(baby.出生日期).toLocaleDateString('zh-CN')} 出生
           </p>
+          {(baby.妈妈名字 || baby.爸爸名字) && (
+            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-rule/40">
+              {baby.妈妈名字 && <span className="text-xs text-muted/80">👩 {baby.妈妈名字}</span>}
+              {baby.爸爸名字 && <span className="text-xs text-muted/80">👨 {baby.爸爸名字}</span>}
+            </div>
+          )}
         </div>
       </div>
     </div>
