@@ -3,6 +3,8 @@ export interface Baby {
   宝宝姓名: string;
   出生日期: string;
   性别: string;
+  妈妈名字?: string;
+  爸爸名字?: string;
   头像?: string;
   备注?: string;
 }
@@ -29,6 +31,8 @@ const DEMO_BABY: Baby = {
   宝宝姓名: '小宝',
   出生日期: '2025-06-15',
   性别: '男',
+  妈妈名字: '妈妈',
+  爸爸名字: '爸爸',
   备注: '一个可爱的小宝贝',
 };
 
