@@ -7,11 +7,16 @@ import NavHeader from '@/components/NavHeader';
 
 
 export default function TimelinePage() {
-  const { records, filterCategory, loading, fetchRecords, setFilterCategory } = useAppStore();
+  const { records, filterCategory, loading, fetchRecords, setFilterCategory, fetchBabies, currentBaby } = useAppStore();
+  const currentBabyId = currentBaby()?.record_id;
+
+  useEffect(() => {
+    fetchBabies();
+  }, [fetchBabies]);
 
   useEffect(() => {
     fetchRecords(filterCategory === '全部' ? undefined : filterCategory);
-  }, [fetchRecords, filterCategory]);
+  }, [fetchRecords, filterCategory, currentBabyId]);
 
   return (
     <div className="page-container">

@@ -50,4 +50,11 @@
   .timeline-dot {
     @apply w-3 h-3 rounded-full border-2 border-cream-light flex-shrink-0;
   }
+
+  .input-field {
+    @apply w-full bg-cream-light border border-rule rounded-btn p-3.5 text-ink
+           placeholder:text-muted/40 outline-none
+           focus:border-coral/50 focus:ring-4 focus:ring-coral/5
+           transition-all duration-200 text-[15px];
+  }
 }
