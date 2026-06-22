@@ -27,6 +27,14 @@ export default {
         muted: '#8B7D7A',
         rule: '#E8D5D0',
         skyblue: '#7BCEFF',
+        mint: {
+          DEFAULT: '#6FD3B5',
+          dark: '#4FB597',
+        },
+        sky: {
+          DEFAULT: '#7BCEFF',
+          dark: '#5BA8E0',
+        },
       },
       fontFamily: {
         outfit: ['Outfit', 'system-ui', 'sans-serif'],
