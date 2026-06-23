@@ -5,6 +5,7 @@ import TimelinePage from '@/pages/TimelinePage';
 import BabyDetailPage from '@/pages/BabyDetailPage';
 import BabyEditPage from '@/pages/BabyEditPage';
 import GrowthPage from '@/pages/GrowthPage';
+import SettingsPage from '@/pages/SettingsPage';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/baby/detail" element={<BabyDetailPage />} />
         <Route path="/baby/edit" element={<BabyEditPage />} />
         <Route path="/growth" element={<GrowthPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </Router>
   );
