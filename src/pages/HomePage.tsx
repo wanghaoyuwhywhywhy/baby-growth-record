@@ -6,7 +6,7 @@ import RecordItem from '@/components/RecordItem';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
 import { useNavigate } from 'react-router-dom';
-import { Activity } from 'lucide-react';
+import { Activity, Settings } from 'lucide-react';
 
 export default function HomePage() {
   const { currentBaby, fetchBabies } = useAppStore();
@@ -69,7 +69,7 @@ export default function HomePage() {
         {/* 身高体重入口 */}
         <button
           onClick={() => navigate('/growth')}
-          className="card-shadow w-full p-4 mb-6 flex items-center gap-3 hover:shadow-float transition-all duration-200 active:scale-[0.98]"
+          className="card-shadow w-full p-4 mb-3 flex items-center gap-3 hover:shadow-float transition-all duration-200 active:scale-[0.98]"
         >
           <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-mint to-sky flex items-center justify-center text-white shadow-soft">
             <Activity size={22} strokeWidth={2.5} />
@@ -77,6 +77,21 @@ export default function HomePage() {
           <div className="flex-1 text-left">
             <p className="text-sm font-outfit font-bold text-ink">身高体重</p>
             <p className="text-xs text-muted">记录成长曲线，见证每一厘米</p>
+          </div>
+          <span className="text-muted text-lg">›</span>
+        </button>
+
+        {/* 设置入口 */}
+        <button
+          onClick={() => navigate('/settings')}
+          className="card-shadow w-full p-4 mb-6 flex items-center gap-3 hover:shadow-float transition-all duration-200 active:scale-[0.98]"
+        >
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-cream-dark to-rule flex items-center justify-center text-ink shadow-soft">
+            <Settings size={22} strokeWidth={2.5} />
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-sm font-outfit font-bold text-ink">设置</p>
+            <p className="text-xs text-muted">AI 配置、数据管理</p>
           </div>
           <span className="text-muted text-lg">›</span>
         </button>

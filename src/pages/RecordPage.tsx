@@ -5,7 +5,8 @@ import CategoryPicker from '@/components/CategoryPicker';
 import NavHeader from '@/components/NavHeader';
 import MediaInput, { type MediaItem } from '@/components/MediaInput';
 import { feishuAPI } from '@/api/feishu';
-import { Check } from 'lucide-react';
+import { autoCategory, polishContent, hasApiKey } from '@/lib/ai';
+import { Check, Sparkles, Wand2, Loader2 } from 'lucide-react';
 
 export default function RecordPage() {
   const [content, setContent] = useState('');
@@ -14,10 +15,12 @@ export default function RecordPage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [aiLoading, setAiLoading] = useState<'category' | 'polish' | null>(null);
   const { createRecord } = useAppStore();
   const navigate = useNavigate();
 
   const canSubmit = content.trim().length > 0 && !submitting;
+  const aiEnabled = hasApiKey();
 
   const handleTranscriptChange = useCallback((text: string) => {
     setContent(text);
@@ -35,6 +38,32 @@ export default function RecordPage() {
     });
   }, []);
 
+  // AI 自动分类
+  async function handleAutoCategory() {
+    if (!content.trim() || !aiEnabled) return;
+    setAiLoading('category');
+    try {
+      const result = await autoCategory(content.trim());
+      setCategory(result);
+    } catch (e) {
+      console.error('自动分类失败:', e);
+    }
+    setAiLoading(null);
+  }
+
+  // AI 润色
+  async function handlePolish() {
+    if (!content.trim() || !aiEnabled) return;
+    setAiLoading('polish');
+    try {
+      const polished = await polishContent(content.trim());
+      if (polished) setContent(polished);
+    } catch (e) {
+      console.error('润色失败:', e);
+    }
+    setAiLoading(null);
+  }
+
   async function handleSubmit() {
     if (!canSubmit) return;
     setSubmitting(true);
@@ -45,14 +74,12 @@ export default function RecordPage() {
         是否为里程碑: isMilestone,
       });
 
-      // 保存媒体附件到 IndexedDB
       for (const media of mediaItems) {
         await feishuAPI.addMedia(media.id, media.type, media.blob, record.record_id);
       }
 
       setSubmitting(false);
       setSuccess(true);
-      // 清理 ObjectURL
       mediaItems.forEach((m) => URL.revokeObjectURL(m.url));
       setTimeout(() => navigate('/'), 800);
     } catch (e) {
@@ -81,12 +108,44 @@ export default function RecordPage() {
 
       <div className="flex-1 flex flex-col mt-6">
         <div className="mb-6">
-          <label className="block text-sm font-medium text-muted mb-3">选择分类</label>
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-sm font-medium text-muted">选择分类</label>
+            {aiEnabled && content.trim() && (
+              <button
+                onClick={handleAutoCategory}
+                disabled={aiLoading !== null}
+                className="text-xs text-coral font-medium flex items-center gap-1 hover:text-coral-dark transition-colors disabled:opacity-50"
+              >
+                {aiLoading === 'category' ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Sparkles size={12} />
+                )}
+                AI 分类
+              </button>
+            )}
+          </div>
           <CategoryPicker selected={category} onSelect={setCategory} />
         </div>
 
         <div className="flex-1 mb-4">
-          <label className="block text-sm font-medium text-muted mb-3">记录内容</label>
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-sm font-medium text-muted">记录内容</label>
+            {aiEnabled && content.trim().length > 5 && (
+              <button
+                onClick={handlePolish}
+                disabled={aiLoading !== null}
+                className="text-xs text-coral font-medium flex items-center gap-1 hover:text-coral-dark transition-colors disabled:opacity-50"
+              >
+                {aiLoading === 'polish' ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Wand2 size={12} />
+                )}
+                AI 润色
+              </button>
+            )}
+          </div>
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
@@ -145,6 +204,18 @@ export default function RecordPage() {
             <span>记录这一刻 📝</span>
           )}
         </button>
+
+        {!aiEnabled && (
+          <p className="text-xs text-center text-muted/60 mt-3">
+            想要 AI 智能分类和润色？
+            <button
+              onClick={() => navigate('/settings')}
+              className="text-coral ml-1 underline"
+            >
+              去配置
+            </button>
+          </p>
+        )}
       </div>
     </div>
   );
