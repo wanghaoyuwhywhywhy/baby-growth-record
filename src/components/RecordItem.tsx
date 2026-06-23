@@ -1,6 +1,14 @@
+import { useState, useEffect } from 'react';
 import { type DailyRecord } from '@/api/feishu';
 import { formatDate } from '@/utils/date';
 import { CATEGORY_MAP } from '@/utils/constants';
+import { feishuAPI } from '@/api/feishu';
+
+interface MediaInfo {
+  id: string;
+  type: 'image' | 'video';
+  url: string;
+}
 
 interface RecordItemProps {
   record: DailyRecord;
@@ -11,6 +19,34 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
   const category = CATEGORY_MAP[record.分类];
   const emoji = category?.emoji ?? '📝';
   const color = category?.color ?? '#8B7D7A';
+  const [mediaList, setMediaList] = useState<MediaInfo[]>([]);
+
+  useEffect(() => {
+    let revoked = false;
+    let urls: string[] = [];
+    async function loadMedia() {
+      if (!record.媒体附件 || record.媒体附件.length === 0) {
+        setMediaList([]);
+        return;
+      }
+      const items = await feishuAPI.getMediaByRecord(record.record_id);
+      if (revoked) {
+        urls.forEach((u) => URL.revokeObjectURL(u));
+        return;
+      }
+      const media = items.map((item) => {
+        const url = URL.createObjectURL(item.blob);
+        urls.push(url);
+        return { id: item.id, type: item.type, url };
+      });
+      setMediaList(media);
+    }
+    loadMedia();
+    return () => {
+      revoked = true;
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [record.record_id, record.媒体附件]);
 
   return (
     <div className="flex items-start gap-3 py-3 group">
@@ -35,6 +71,26 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
         <p className={`text-ink leading-relaxed ${compact ? 'text-sm' : 'text-[15px]'}`}>
           {record.记录内容}
         </p>
+        {/* 媒体附件 */}
+        {mediaList.length > 0 && (
+          <div className="flex gap-2 mt-2 overflow-x-auto">
+            {mediaList.map((media) => (
+              <div key={media.id} className="flex-shrink-0">
+                {media.type === 'image' ? (
+                  <img
+                    src={media.url}
+                    alt=""
+                    className={`rounded-lg object-cover border border-rule ${compact ? 'w-16 h-16' : 'w-20 h-20'}`}
+                  />
+                ) : (
+                  <div className={`rounded-lg bg-ink/80 flex items-center justify-center border border-rule ${compact ? 'w-16 h-16' : 'w-20 h-20'}`}>
+                    <span className="text-white text-lg">▶</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {compact && (
           <span className="text-xs text-muted/60 mt-0.5 block">{formatDate(record.记录时间)}</span>
         )}
