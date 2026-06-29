@@ -1,20 +1,26 @@
 export function calcAge(birthDate: string): string {
   const birth = new Date(birthDate);
   const now = new Date();
-  const diffMs = now.getTime() - birth.getTime();
-  const totalDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  const years = Math.floor(totalDays / 365);
-  const months = Math.floor((totalDays % 365) / 30);
+  let years = now.getFullYear() - birth.getFullYear();
+  let months = now.getMonth() - birth.getMonth();
+  let days = now.getDate() - birth.getDate();
 
-  if (years > 0) {
-    return `${years}岁${months > 0 ? months + '个月' : ''}`;
+  if (days < 0) {
+    months--;
+    const prevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    days += prevMonth.getDate();
   }
-  if (months > 0) {
-    return `${months}个月`;
+  if (months < 0) {
+    years--;
+    months += 12;
   }
-  const days = totalDays % 30;
-  return `${days}天`;
+
+  const parts: string[] = [];
+  if (years > 0) parts.push(`${years}岁`);
+  if (months > 0) parts.push(`${months}个月`);
+  if (days > 0 || parts.length === 0) parts.push(`${days}天`);
+  return parts.join('');
 }
 
 export function formatDate(dateStr: string): string {

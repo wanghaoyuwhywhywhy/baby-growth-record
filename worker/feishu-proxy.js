@@ -35,18 +35,25 @@ export default {
         });
       }
 
-      const token = await getTenantToken(env);
-
       let result;
       switch (path) {
-        case '/api/babies':
+        case '/api/babies': {
+          const token = await getTenantToken(env);
           result = await handleBabies(request, env, token);
           break;
-        case '/api/records':
+        }
+        case '/api/records': {
+          const token = await getTenantToken(env);
           result = await handleRecords(request, env, token);
           break;
-        case '/api/growth':
+        }
+        case '/api/growth': {
+          const token = await getTenantToken(env);
           result = await handleGrowth(request, env, token);
+          break;
+        }
+        case '/api/ai':
+          result = await handleAI(request, env);
           break;
         case '/api/health':
           result = { ok: true, message: 'Worker is running' };
@@ -199,4 +206,112 @@ async function handleGrowth(request, env, token) {
     return await bitableRequest(env, token, 'DELETE', tableId, {}, recordId);
   }
   return { error: 'Method not allowed' };
+}
+
+// AI 代理：调用 DeepSeek API
+async function handleAI(request, env) {
+  if (request.method !== 'POST') return { error: 'Method not allowed' };
+
+  const apiKey = env.DEEPSEEK_API_KEY;
+  if (!apiKey) return { error: 'DEEPSEEK_API_KEY 未配置' };
+
+  const body = await request.json();
+  const { action, data } = body;
+
+  let systemPrompt = '';
+  let userContent = '';
+  let temperature = 0.3;
+  let maxTokens = 200;
+
+  switch (action) {
+    case 'analyze': {
+      // AI 综合分析：宝宝档案 + 身高体重 + 成长时间线
+      const baby = data.baby || {};
+      const growthRecords = data.growthRecords || [];
+      const records = data.records || [];
+
+      systemPrompt = `你是一位专业的儿童成长分析师。请根据以下宝宝数据，从身体发育、成长趋势、行为发展等方面做综合分析，给出简洁专业的建议。用中文回答，分点阐述，语气温暖亲切。`;
+      userContent = `【宝宝档案】
+姓名：${baby.宝宝姓名 || '未知'}
+性别：${baby.性别 || '未知'}
+出生日期：${baby.出生日期 || '未知'}
+备注：${baby.备注 || '无'}
+
+【身高体重记录】
+${growthRecords.length > 0
+        ? growthRecords.map(g => `${g.测量日期}：身高${g.身高 || '-'}cm，体重${g.体重 || '-'}kg${g.备注 ? '，' + g.备注 : ''}`).join('\n')
+        : '暂无记录'}
+
+【成长时间线】
+${records.length > 0
+        ? records.slice(0, 20).map(r => `${r.记录时间?.split('T')?.[0] || ''} [${r.分类}] ${r.记录内容}${r.是否为里程碑 ? ' ⭐里程碑' : ''}`).join('\n')
+        : '暂无记录'}
+
+请综合分析这个宝宝的成长情况，包括：
+1. 身体发育评估（与同龄标准对比）
+2. 成长趋势分析
+3. 行为发展观察
+4. 个性化建议`;
+
+      temperature = 0.5;
+      maxTokens = 800;
+      break;
+    }
+    case 'category': {
+      const categoryList = data.categoryList || '';
+      systemPrompt = `你是一个宝宝成长记录分类助手。根据用户输入的记录内容，判断属于哪个分类。分类列表：${categoryList}。只返回分类名称，不要其他文字。`;
+      userContent = data.content;
+      temperature = 0;
+      maxTokens = 20;
+      break;
+    }
+    case 'polish': {
+      systemPrompt = '你是一个宝宝成长记录助手。请帮用户润色记录内容，使其更简洁、温暖、有画面感。保持原意，不要添加虚构内容。直接返回润色后的文字，不要加引号或解释。';
+      userContent = data.content;
+      temperature = 0.5;
+      maxTokens = 200;
+      break;
+    }
+    case 'suggest': {
+      const recentRecords = data.recentRecords || [];
+      systemPrompt = '你是一个宝宝成长记录助手。根据用户最近的记录，建议3条今天可能想记录的内容。每条不超过20字，用换行分隔。只返回建议内容，不要编号或解释。';
+      userContent = `最近记录：\n${recentRecords.join('\n')}`;
+      temperature = 0.8;
+      maxTokens = 150;
+      break;
+    }
+    default:
+      return { error: 'Unknown action' };
+  }
+
+  try {
+    const resp = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        temperature,
+        max_tokens: maxTokens,
+        stream: false,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return { error: `DeepSeek API 错误: ${resp.status}`, detail: errText.slice(0, 200) };
+    }
+
+    const result = await resp.json();
+    const content = result.choices?.[0]?.message?.content?.trim() || '';
+    return { ok: true, content };
+  } catch (e) {
+    return { error: e.message };
+  }
 }
