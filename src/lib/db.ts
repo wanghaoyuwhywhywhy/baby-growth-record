@@ -141,7 +141,9 @@ export async function dbGetRecords(babyId?: string): Promise<DailyRecord[]> {
   const db = await getDB();
   let records: DailyRecord[];
   if (babyId) {
-    records = await db.getAllFromIndex('records', 'by-baby', babyId);
+    // 关联宝宝是数组，不能用 index 直接查，改为 getAll 后过滤
+    const all = await db.getAll('records');
+    records = all.filter((r) => r.关联宝宝?.includes(babyId));
   } else {
     records = await db.getAll('records');
   }
@@ -157,7 +159,8 @@ export async function dbAddRecord(record: DailyRecord): Promise<void> {
 // Growth CRUD
 export async function dbGetGrowthRecords(babyId: string): Promise<GrowthRecord[]> {
   const db = await getDB();
-  const records = await db.getAllFromIndex('growth', 'by-baby', babyId);
+  const all = await db.getAll('growth');
+  const records = all.filter((r) => r.关联宝宝?.includes(babyId));
   records.sort((a, b) => new Date(a.测量日期).getTime() - new Date(b.测量日期).getTime());
   return records;
 }
@@ -186,4 +189,16 @@ export async function dbGetMediaByRecord(recordId: string): Promise<{ id: string
 export async function dbDeleteMedia(id: string): Promise<void> {
   const db = await getDB();
   await db.delete('media', id);
+}
+
+// 清空所有数据（同步时先清空再写入云端数据）
+export async function dbClearAll(): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['babies', 'records', 'growth'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('babies').clear(),
+    tx.objectStore('records').clear(),
+    tx.objectStore('growth').clear(),
+    tx.done,
+  ]);
 }

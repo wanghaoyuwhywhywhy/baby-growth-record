@@ -8,8 +8,13 @@ interface AppState {
   growthRecords: GrowthRecord[];
   filterCategory: string;
   loading: boolean;
+  initialized: boolean;
+  syncStatus: 'idle' | 'syncing' | 'success' | 'error';
+  lastSyncResult: { babies: number; records: number; growth: number } | null;
+  cloudConnected: boolean | null;
 
   currentBaby: () => Baby | null;
+  initApp: () => Promise<void>;
   fetchBabies: () => Promise<void>;
   switchBaby: (id: string) => void;
   addBaby: (data: Omit<Baby, 'record_id'>) => Promise<Baby>;
@@ -24,6 +29,9 @@ interface AppState {
   fetchGrowthRecords: () => Promise<void>;
   createGrowthRecord: (data: { 测量日期: string; 身高?: number; 体重?: number; 备注?: string }) => Promise<GrowthRecord>;
   deleteGrowthRecord: (record_id: string) => Promise<void>;
+
+  syncFromCloud: () => Promise<void>;
+  checkCloudConnection: () => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -33,6 +41,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   growthRecords: [],
   filterCategory: '全部',
   loading: false,
+  initialized: false,
+  syncStatus: 'idle',
+  lastSyncResult: null,
+  cloudConnected: null,
 
   currentBaby: () => {
     const { babies, currentBabyId } = get();
@@ -40,7 +52,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     return babies.find((b) => b.record_id === currentBabyId) ?? babies[0] ?? null;
   },
 
+  initApp: async () => {
+    if (get().initialized) return;
+    // 先从云端同步数据到本地，再加载本地数据（确保新设备能看到云端数据）
+    try {
+      await feishuAPI.syncFromCloud();
+    } catch {
+      // 云端同步失败不阻塞，继续用本地数据
+    }
+    const babies = await feishuAPI.getBabies();
+    const { currentBabyId } = get();
+    const stillExists = currentBabyId && babies.find((b) => b.record_id === currentBabyId);
+    set({
+      babies,
+      currentBabyId: stillExists ? currentBabyId : babies[0]?.record_id ?? null,
+      initialized: true,
+    });
+  },
+
   fetchBabies: async () => {
+    if (!get().initialized) return;
     const babies = await feishuAPI.getBabies();
     const { currentBabyId } = get();
     const stillExists = currentBabyId && babies.find((b) => b.record_id === currentBabyId);
@@ -51,7 +82,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   switchBaby: (id: string) => {
-    set({ currentBabyId: id, records: [], growthRecords: [] });
+    set({ currentBabyId: id });
+    // 切换宝宝后刷新相关数据
+    get().fetchRecords();
+    get().fetchGrowthRecords();
   },
 
   addBaby: async (data) => {
@@ -59,8 +93,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       babies: [...state.babies, baby],
       currentBabyId: baby.record_id,
-      records: [],
-      growthRecords: [],
     }));
     return baby;
   },
@@ -79,8 +111,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       babies: remaining,
       currentBabyId: currentBabyId === record_id ? remaining[0]?.record_id ?? null : currentBabyId,
-      records: [],
-      growthRecords: [],
     });
   },
 
@@ -138,5 +168,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       growthRecords: state.growthRecords.filter((r) => r.record_id !== record_id),
     }));
+  },
+
+  syncFromCloud: async () => {
+    set({ syncStatus: 'syncing' });
+    try {
+      const result = await feishuAPI.syncFromCloud();
+      // 同步后刷新本地数据
+      const { currentBabyId } = get();
+      const babies = await feishuAPI.getBabies();
+      const stillExists = currentBabyId && babies.find((b) => b.record_id === currentBabyId);
+      set({
+        syncStatus: 'success',
+        lastSyncResult: result,
+        babies,
+        currentBabyId: stillExists ? currentBabyId : babies[0]?.record_id ?? null,
+      });
+      // 刷新当前数据
+      await get().fetchRecords(get().filterCategory === '全部' ? undefined : get().filterCategory);
+      await get().fetchGrowthRecords();
+    } catch {
+      set({ syncStatus: 'error' });
+    }
+  },
+
+  checkCloudConnection: async () => {
+    const connected = await feishuAPI.checkCloudConnection();
+    set({ cloudConnected: connected });
   },
 }));

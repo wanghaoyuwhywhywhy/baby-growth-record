@@ -57,4 +57,22 @@
            focus:border-coral/50 focus:ring-4 focus:ring-coral/5
            transition-all duration-200 text-[15px];
   }
+
+  /* date input: 点击文本区域也能打开日期选择器 */
+  input[type="date"].input-field {
+    position: relative;
+  }
+  input[type="date"].input-field::-webkit-date-and-time-value {
+    display: flex;
+    align-items: center;
+    height: 1.5em;
+  }
+  input[type="date"].input-field::-webkit-calendar-picker-indicator {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+  }
 }
