@@ -6,7 +6,8 @@ import RecordItem from '@/components/RecordItem';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
 import { useNavigate } from 'react-router-dom';
-import { Activity } from 'lucide-react';
+import { Activity, Sparkles, Loader2, X } from 'lucide-react';
+import { analyzeBaby } from '@/lib/ai';
 
 export default function HomePage() {
   const currentBaby = useAppStore((s) => s.currentBaby);
@@ -17,6 +18,10 @@ export default function HomePage() {
 
   const baby = currentBaby();
   const records = useAppStore((s) => s.records);
+  const growthRecords = useAppStore((s) => s.growthRecords);
+
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
 
   // 首次加载和 records 变化时刷新最近记录
   useEffect(() => {
@@ -29,6 +34,19 @@ export default function HomePage() {
       fetchGrowthRecords();
     }
   }, [baby?.record_id, fetchGrowthRecords]);
+
+  async function handleAIAnalysis() {
+    if (!baby || aiAnalyzing) return;
+    setAiAnalyzing(true);
+    setAiResult(null);
+    try {
+      const result = await analyzeBaby(baby, growthRecords, records);
+      setAiResult(result);
+    } catch (e) {
+      setAiResult(`分析失败：${e instanceof Error ? e.message : '未知错误'}`);
+    }
+    setAiAnalyzing(false);
+  }
 
   if (!baby) {
     return (
@@ -70,6 +88,56 @@ export default function HomePage() {
           </div>
           <span className="text-muted text-lg">›</span>
         </button>
+
+        {/* AI 成长分析入口 */}
+        <button
+          onClick={handleAIAnalysis}
+          disabled={aiAnalyzing}
+          className="card-shadow w-full p-4 mb-3 flex items-center gap-3 hover:shadow-float transition-all duration-200 active:scale-[0.98]"
+        >
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-warm-orange to-coral flex items-center justify-center text-white shadow-soft">
+            {aiAnalyzing ? (
+              <Loader2 size={22} strokeWidth={2.5} className="animate-spin" />
+            ) : (
+              <Sparkles size={22} strokeWidth={2.5} />
+            )}
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-sm font-outfit font-bold text-ink">AI 成长分析</p>
+            <p className="text-xs text-muted">
+              {aiAnalyzing ? '正在分析中...' : '智能分析发育趋势与建议'}
+            </p>
+          </div>
+          <span className="text-muted text-lg">›</span>
+        </button>
+
+        {/* AI 分析结果弹窗 */}
+        {aiResult && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setAiResult(null)}>
+            <div
+              className="w-full max-w-lg bg-cream-light rounded-t-3xl p-6 pb-10 max-h-[80vh] overflow-y-auto animate-fade-up"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-warm-orange to-coral flex items-center justify-center text-white">
+                    <Sparkles size={16} />
+                  </div>
+                  <h3 className="text-base font-outfit font-bold text-ink">AI 成长分析</h3>
+                </div>
+                <button
+                  onClick={() => setAiResult(null)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors"
+                >
+                  <X size={18} className="text-muted" />
+                </button>
+              </div>
+              <div className="text-sm text-ink leading-relaxed whitespace-pre-wrap">
+                {aiResult}
+              </div>
+            </div>
+          </div>
+        )}
 
         <section className="mb-6">
           <div className="flex items-center justify-between mb-3">

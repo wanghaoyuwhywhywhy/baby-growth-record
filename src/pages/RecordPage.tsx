@@ -5,7 +5,7 @@ import CategoryPicker from '@/components/CategoryPicker';
 import NavHeader from '@/components/NavHeader';
 import MediaInput, { type MediaItem } from '@/components/MediaInput';
 import { feishuAPI } from '@/api/feishu';
-import { autoCategory, polishContent, hasApiKey } from '@/lib/ai';
+import { autoCategory, polishContent } from '@/lib/ai';
 import { Check, Sparkles, Wand2, Loader2 } from 'lucide-react';
 
 export default function RecordPage() {
@@ -20,7 +20,6 @@ export default function RecordPage() {
   const navigate = useNavigate();
 
   const canSubmit = content.trim().length > 0 && !submitting;
-  const aiEnabled = hasApiKey();
 
   const handleTranscriptChange = useCallback((text: string) => {
     setContent(text);
@@ -40,7 +39,7 @@ export default function RecordPage() {
 
   // AI 自动分类
   async function handleAutoCategory() {
-    if (!content.trim() || !aiEnabled) return;
+    if (!content.trim()) return;
     setAiLoading('category');
     try {
       const result = await autoCategory(content.trim());
@@ -53,7 +52,7 @@ export default function RecordPage() {
 
   // AI 润色
   async function handlePolish() {
-    if (!content.trim() || !aiEnabled) return;
+    if (!content.trim()) return;
     setAiLoading('polish');
     try {
       const polished = await polishContent(content.trim());
@@ -110,7 +109,7 @@ export default function RecordPage() {
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <label className="block text-sm font-medium text-muted">选择分类</label>
-            {aiEnabled && content.trim() && (
+            {content.trim() && (
               <button
                 onClick={handleAutoCategory}
                 disabled={aiLoading !== null}
@@ -131,7 +130,7 @@ export default function RecordPage() {
         <div className="flex-1 mb-4">
           <div className="flex items-center justify-between mb-3">
             <label className="block text-sm font-medium text-muted">记录内容</label>
-            {aiEnabled && content.trim().length > 5 && (
+            {content.trim().length > 5 && (
               <button
                 onClick={handlePolish}
                 disabled={aiLoading !== null}
@@ -204,18 +203,6 @@ export default function RecordPage() {
             <span>记录这一刻 📝</span>
           )}
         </button>
-
-        {!aiEnabled && (
-          <p className="text-xs text-center text-muted/60 mt-3">
-            想要 AI 智能分类和润色？
-            <button
-              onClick={() => navigate('/settings')}
-              className="text-coral ml-1 underline"
-            >
-              去配置
-            </button>
-          </p>
-        )}
       </div>
     </div>
   );
