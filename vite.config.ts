@@ -3,12 +3,9 @@ import react from '@vitejs/plugin-react'
 import tsconfigPaths from "vite-tsconfig-paths";
 import { VitePWA } from 'vite-plugin-pwa';
 
-const isPages = process.env.DEPLOY_TARGET === 'pages';
-const base = isPages ? '/baby-growth-record/' : '/';
-
 // https://vite.dev/config/
 export default defineConfig({
-  base,
+  base: '/',
   build: {
     sourcemap: 'hidden',
     outDir: 'docs',
@@ -33,17 +30,17 @@ export default defineConfig({
         background_color: '#FFF8F5',
         display: 'standalone',
         orientation: 'portrait',
-        scope: base,
-        start_url: base,
+        scope: '/',
+        start_url: '/',
         icons: [
           {
-            src: `${base}icons/icon-192.png`,
+            src: '/icons/icon-192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any maskable',
           },
           {
-            src: `${base}icons/icon-512.png`,
+            src: '/icons/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any maskable',
@@ -54,7 +51,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,ttf,woff,woff2}'],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        navigateFallback: `${base}index.html`,
+        navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
       },
     }),
