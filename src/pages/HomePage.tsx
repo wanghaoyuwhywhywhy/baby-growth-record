@@ -9,36 +9,26 @@ import { useNavigate } from 'react-router-dom';
 import { Activity, Settings } from 'lucide-react';
 
 export default function HomePage() {
-  const { currentBaby, fetchBabies } = useAppStore();
+  const currentBaby = useAppStore((s) => s.currentBaby);
+  const fetchRecentRecords = useAppStore((s) => s.fetchRecentRecords);
+  const fetchGrowthRecords = useAppStore((s) => s.fetchGrowthRecords);
   const [recentRecords, setRecentRecords] = useState<DailyRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  const currentBabyId = currentBaby()?.record_id;
-
-  useEffect(() => {
-    async function init() {
-      setLoading(true);
-      await fetchBabies();
-      const records = await useAppStore.getState().fetchRecentRecords();
-      setRecentRecords(records);
-      setLoading(false);
-    }
-    init();
-  }, [fetchBabies, currentBabyId]);
-
-  if (loading) {
-    return (
-      <div className="page-container flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
-          <p className="text-sm text-muted">加载中...</p>
-        </div>
-      </div>
-    );
-  }
-
   const baby = currentBaby();
+  const records = useAppStore((s) => s.records);
+
+  // 首次加载和 records 变化时刷新最近记录
+  useEffect(() => {
+    fetchRecentRecords().then(setRecentRecords);
+  }, [fetchRecentRecords, baby?.record_id, records]);
+
+  // 加载成长记录（用于 BabyCard 显示身高体重）
+  useEffect(() => {
+    if (baby?.record_id) {
+      fetchGrowthRecords();
+    }
+  }, [baby?.record_id, fetchGrowthRecords]);
 
   if (!baby) {
     return (

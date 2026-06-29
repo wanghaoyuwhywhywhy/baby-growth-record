@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import NavHeader from '@/components/NavHeader';
 import { getApiKey, setApiKey, hasApiKey } from '@/lib/ai';
-import { Check, Key, Sparkles, Eye, EyeOff } from 'lucide-react';
+import { useAppStore } from '@/store/useAppStore';
+import { Check, Key, Sparkles, Eye, EyeOff, Cloud, RefreshCw } from 'lucide-react';
 
 export default function SettingsPage() {
   const [apiKey, setApiKeyState] = useState(getApiKey());
@@ -9,6 +10,8 @@ export default function SettingsPage() {
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<'idle' | 'success' | 'fail'>('idle');
+
+  const { syncStatus, lastSyncResult, cloudConnected, syncFromCloud, checkCloudConnection } = useAppStore();
 
   function handleSave() {
     setApiKey(apiKey.trim());
@@ -149,6 +152,62 @@ export default function SettingsPage() {
           }`}>
             {hasApiKey() ? '已启用' : '未配置'}
           </span>
+        </div>
+
+        {/* 云端同步 */}
+        <div className="card-shadow p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sky to-blue-500 flex items-center justify-center text-white shadow-soft">
+              <Cloud size={22} strokeWidth={2.5} />
+            </div>
+            <div>
+              <h3 className="text-sm font-outfit font-bold text-ink">飞书云端同步</h3>
+              <p className="text-xs text-muted">数据备份到飞书多维表格</p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => { checkCloudConnection(); syncFromCloud(); }}
+              disabled={syncStatus === 'syncing'}
+              className="btn-primary flex-1 py-2.5 text-sm flex items-center justify-center gap-1.5"
+            >
+              {syncStatus === 'syncing' ? (
+                <>
+                  <RefreshCw size={16} className="animate-spin" />
+                  同步中...
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={16} />
+                  从云端拉取
+                </>
+              )}
+            </button>
+          </div>
+
+          {cloudConnected !== null && (
+            <p className={`text-xs mt-2 flex items-center gap-1 ${cloudConnected ? 'text-mint-dark' : 'text-coral'}`}>
+              <Check size={14} />
+              {cloudConnected ? '云端连接正常' : '云端连接失败'}
+            </p>
+          )}
+
+          {syncStatus === 'success' && lastSyncResult && (
+            <p className="text-xs text-mint-dark mt-1">
+              同步完成：新增 {lastSyncResult.babies} 个宝宝、{lastSyncResult.records} 条记录、{lastSyncResult.growth} 条成长数据
+            </p>
+          )}
+
+          {syncStatus === 'error' && (
+            <p className="text-xs text-coral mt-1">同步失败，请检查网络连接</p>
+          )}
+
+          <div className="mt-3 pt-3 border-t border-rule/40">
+            <p className="text-xs text-muted/50">
+              本地创建的记录会自动推送到云端
+            </p>
+          </div>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { type Baby } from '@/api/feishu';
+import { type Baby, type GrowthRecord } from '@/api/feishu';
 import { calcAge } from '@/utils/date';
 import { useAppStore } from '@/store/useAppStore';
 import { useNavigate } from 'react-router-dom';
@@ -12,10 +12,15 @@ interface BabyCardProps {
 export default function BabyCard({ baby }: BabyCardProps) {
   const age = calcAge(baby.出生日期);
   const initials = baby.宝宝姓名.charAt(0);
-  const { babies, switchBaby } = useAppStore();
+  const { babies, switchBaby, growthRecords } = useAppStore();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // 获取最新的身高体重
+  const latestGrowth = growthRecords.length > 0
+    ? growthRecords[growthRecords.length - 1]
+    : null;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -91,6 +96,16 @@ export default function BabyCard({ baby }: BabyCardProps) {
               {baby.性别 === '男' ? '👦 男宝' : '👧 女宝'}
             </span>
           </div>
+          {latestGrowth && (latestGrowth.身高 || latestGrowth.体重) && (
+            <div className="flex items-center gap-3 mt-1">
+              {latestGrowth.身高 != null && (
+                <span className="text-sm text-muted">📏 {latestGrowth.身高}cm</span>
+              )}
+              {latestGrowth.体重 != null && (
+                <span className="text-sm text-muted">⚖️ {latestGrowth.体重}kg</span>
+              )}
+            </div>
+          )}
           <p className="text-xs text-muted/70 mt-1">
             {new Date(baby.出生日期).toLocaleDateString('zh-CN')} 出生
           </p>

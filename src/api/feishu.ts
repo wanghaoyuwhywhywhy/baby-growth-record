@@ -1,10 +1,16 @@
 import {
-  seedIfEmpty,
   dbGetBabies, dbAddBaby, dbUpdateBaby, dbDeleteBaby,
   dbGetRecords, dbAddRecord,
   dbGetGrowthRecords, dbAddGrowthRecord, dbDeleteGrowthRecord,
   dbAddMedia, dbGetMediaByRecord, dbDeleteMedia,
+  dbClearAll,
 } from '@/lib/db';
+import {
+  cloudGetBabies, cloudCreateBaby, cloudUpdateBaby, cloudDeleteBaby,
+  cloudGetRecords, cloudCreateRecord, cloudUpdateRecord, cloudDeleteRecord,
+  cloudGetGrowth, cloudCreateGrowth, cloudUpdateGrowth, cloudDeleteGrowth,
+  cloudHealthCheck,
+} from '@/lib/cloud';
 
 export interface Baby {
   record_id: string;
@@ -50,23 +56,18 @@ export interface GrowthRecord {
   关联宝宝: string[];
 }
 
-let seeded = false;
-
-async function ensureSeed() {
-  if (!seeded) {
-    await seedIfEmpty();
-    seeded = true;
-  }
-}
-
 export const feishuAPI = {
   async getBabies(): Promise<Baby[]> {
-    await ensureSeed();
     return dbGetBabies();
   },
 
   async createBaby(data: Omit<Baby, 'record_id'>): Promise<Baby> {
     const baby: Baby = { ...data, record_id: `rec${Date.now()}` };
+    // 先写云端，拿到飞书的 record_id
+    const cloudId = await cloudCreateBaby(baby);
+    if (cloudId) {
+      baby.record_id = cloudId; // 用飞书返回的 ID 替换本地临时 ID
+    }
     await dbAddBaby(baby);
     return baby;
   },
@@ -77,15 +78,16 @@ export const feishuAPI = {
     if (!old) throw new Error('宝宝不存在');
     const updated = { ...old, ...data };
     await dbUpdateBaby(updated);
+    cloudUpdateBaby(updated); // 后台推送到云端
     return updated;
   },
 
   async deleteBaby(record_id: string): Promise<void> {
     await dbDeleteBaby(record_id);
+    cloudDeleteBaby(record_id); // 后台推送到云端
   },
 
   async getRecords(filter?: { category?: string; babyId?: string }): Promise<DailyRecord[]> {
-    await ensureSeed();
     let records = await dbGetRecords(filter?.babyId);
     if (filter?.category && filter.category !== '全部') {
       records = records.filter((r) => r.分类 === filter.category);
@@ -94,7 +96,6 @@ export const feishuAPI = {
   },
 
   async getRecentRecords(limit: number = 5, babyId?: string): Promise<DailyRecord[]> {
-    await ensureSeed();
     let records = await dbGetRecords(babyId);
     return records.slice(0, limit);
   },
@@ -115,12 +116,16 @@ export const feishuAPI = {
       关联宝宝: [record.关联宝宝],
       媒体附件: record.媒体附件,
     };
+    // 先写云端，拿到飞书的 record_id
+    const cloudId = await cloudCreateRecord(newRecord);
+    if (cloudId) {
+      newRecord.record_id = cloudId;
+    }
     await dbAddRecord(newRecord);
     return newRecord;
   },
 
   async getGrowthRecords(babyId: string): Promise<GrowthRecord[]> {
-    await ensureSeed();
     return dbGetGrowthRecords(babyId);
   },
 
@@ -139,12 +144,18 @@ export const feishuAPI = {
       备注: record.备注,
       关联宝宝: [record.关联宝宝],
     };
+    // 先写云端，拿到飞书的 record_id
+    const cloudId = await cloudCreateGrowth(newRecord);
+    if (cloudId) {
+      newRecord.record_id = cloudId;
+    }
     await dbAddGrowthRecord(newRecord);
     return newRecord;
   },
 
   async deleteGrowthRecord(record_id: string): Promise<void> {
     await dbDeleteGrowthRecord(record_id);
+    cloudDeleteGrowth(record_id); // 后台推送到云端
   },
 
   // 媒体附件
@@ -158,5 +169,41 @@ export const feishuAPI = {
 
   async deleteMedia(id: string): Promise<void> {
     await dbDeleteMedia(id);
+  },
+
+  // 云端同步：先清空本地再写入云端数据（确保多端一致）
+  async syncFromCloud(): Promise<{ babies: number; records: number; growth: number }> {
+    const [cloudBabies, cloudRecords, cloudGrowth] = await Promise.all([
+      cloudGetBabies(),
+      cloudGetRecords(),
+      cloudGetGrowth(),
+    ]);
+
+    // 先清空本地数据，再写入云端数据
+    await dbClearAll();
+
+    let babiesSynced = 0;
+    for (const baby of cloudBabies) {
+      await dbAddBaby(baby);
+      babiesSynced++;
+    }
+
+    let recordsSynced = 0;
+    for (const record of cloudRecords) {
+      await dbAddRecord(record);
+      recordsSynced++;
+    }
+
+    let growthSynced = 0;
+    for (const g of cloudGrowth) {
+      await dbAddGrowthRecord(g);
+      growthSynced++;
+    }
+
+    return { babies: babiesSynced, records: recordsSynced, growth: growthSynced };
+  },
+
+  async checkCloudConnection(): Promise<boolean> {
+    return cloudHealthCheck();
   },
 };
