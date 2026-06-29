@@ -5,6 +5,23 @@ import type { Baby, DailyRecord, GrowthRecord } from '@/api/feishu';
 
 const WORKER_URL = 'https://api.tongxi.xyz';
 
+// 飞书关联字段提取 record_ids
+// 飞书返回格式: [{record_ids: ["recxxx"], text: "名称", type: "text"}, ...]
+// 本地需要格式: ["recxxx"]
+function extractLinkedIds(field: any): string[] {
+  if (!field) return [];
+  if (Array.isArray(field)) {
+    // 如果是对象数组（飞书格式），提取 record_ids
+    if (field.length > 0 && typeof field[0] === 'object' && field[0].record_ids) {
+      return field.flatMap((item: any) => item.record_ids || []);
+    }
+    // 如果已经是字符串数组
+    return field.filter((v: any) => typeof v === 'string');
+  }
+  if (typeof field === 'string') return [field];
+  return [];
+}
+
 // 飞书多维表格字段 → 本地接口字段映射
 
 function feishuToBaby(item: any): Baby {
@@ -25,8 +42,6 @@ function feishuToBaby(item: any): Baby {
 
 function feishuToRecord(item: any): DailyRecord {
   const fields = item.fields || {};
-  let 关联宝宝: string[] = fields['关联宝宝'] || [];
-  if (typeof 关联宝宝 === 'string') 关联宝宝 = [关联宝宝];
   return {
     record_id: item.record_id || item.id,
     记录内容: fields['记录内容'] || '',
@@ -35,24 +50,22 @@ function feishuToRecord(item: any): DailyRecord {
       ? new Date(fields['记录时间']).toISOString()
       : fields['记录时间'] || '',
     是否为里程碑: fields['是否为里程碑'] || false,
-    关联宝宝,
+    关联宝宝: extractLinkedIds(fields['关联宝宝']),
     媒体附件: fields['媒体附件'] || [],
   };
 }
 
 function feishuToGrowth(item: any): GrowthRecord {
   const fields = item.fields || {};
-  let 关联宝宝: string[] = fields['关联宝宝'] || [];
-  if (typeof 关联宝宝 === 'string') 关联宝宝 = [关联宝宝];
   return {
     record_id: item.record_id || item.id,
     测量日期: typeof fields['测量日期'] === 'number'
       ? new Date(fields['测量日期']).toISOString().split('T')[0]
       : fields['测量日期'] || '',
-    身高: fields['身高'] || undefined,
-    体重: fields['体重'] || undefined,
+    身高: typeof fields['身高'] === 'string' ? parseFloat(fields['身高']) : fields['身高'] || undefined,
+    体重: typeof fields['体重'] === 'string' ? parseFloat(fields['体重']) : fields['体重'] || undefined,
     备注: fields['备注'] || '',
-    关联宝宝,
+    关联宝宝: extractLinkedIds(fields['关联宝宝']),
   };
 }
 
