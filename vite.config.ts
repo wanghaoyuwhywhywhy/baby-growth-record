@@ -53,6 +53,18 @@ export default defineConfig({
         clientsClaim: true,
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
+        // 运行时缓存策略：API 和媒体文件缓存最长1小时后过期
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/api\.tongxi\.xyz\/api\/asset/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'media-cache',
+              expiration: { maxAgeSeconds: 60 * 60 }, // 1小时
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
     }),
   ],
