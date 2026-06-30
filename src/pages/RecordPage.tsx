@@ -8,6 +8,8 @@ import { feishuAPI } from '@/api/feishu';
 import { autoCategory, polishContent } from '@/lib/ai';
 import { Check, Sparkles, Wand2, Loader2 } from 'lucide-react';
 
+type MediaType = 'text' | 'voice' | 'video' | 'photo';
+
 export default function RecordPage() {
   const [content, setContent] = useState('');
   const [category, setCategory] = useState('饮食');
@@ -16,6 +18,7 @@ export default function RecordPage() {
   const [success, setSuccess] = useState(false);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [aiLoading, setAiLoading] = useState<'category' | 'polish' | null>(null);
+  const [inputMethod, setInputMethod] = useState<MediaType>('text');
   const { createRecord } = useAppStore();
   const navigate = useNavigate();
 
@@ -23,19 +26,26 @@ export default function RecordPage() {
 
   const handleTranscriptChange = useCallback((text: string) => {
     setContent(text);
+    if (text.trim()) setInputMethod('voice');
   }, []);
 
   const handleMediaAdd = useCallback((media: MediaItem) => {
     setMediaItems((prev) => [...prev, media]);
+    setInputMethod(media.type === 'image' ? 'photo' : 'video');
   }, []);
 
   const handleMediaRemove = useCallback((id: string) => {
     setMediaItems((prev) => {
       const item = prev.find((m) => m.id === id);
       if (item) URL.revokeObjectURL(item.url);
-      return prev.filter((m) => m.id !== id);
+      const remaining = prev.filter((m) => m.id !== id);
+      // 如果没有媒体了，回退到 text 或 voice
+      if (remaining.length === 0) {
+        setInputMethod(content.trim() ? 'text' : 'text');
+      }
+      return remaining;
     });
-  }, []);
+  }, [content]);
 
   // AI 自动分类
   async function handleAutoCategory() {
@@ -67,10 +77,19 @@ export default function RecordPage() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
+      // 确定最终媒体类型：如果有媒体附件，优先用附件类型；如果语音输入则用 voice；否则 text
+      let finalMediaType: MediaType = inputMethod;
+      if (mediaItems.length > 0) {
+        const hasVideo = mediaItems.some(m => m.type === 'video');
+        const hasImage = mediaItems.some(m => m.type === 'image');
+        finalMediaType = hasVideo ? 'video' : hasImage ? 'photo' : inputMethod;
+      }
+
       const record = await createRecord({
         记录内容: content.trim(),
         分类: category,
         是否为里程碑: isMilestone,
+        媒体类型: finalMediaType,
       });
 
       for (const media of mediaItems) {
@@ -101,11 +120,26 @@ export default function RecordPage() {
     );
   }
 
+  const mediaTypeLabel: Record<MediaType, string> = {
+    text: '文字', voice: '语音', video: '视频', photo: '照片',
+  };
+  const mediaTypeEmoji: Record<MediaType, string> = {
+    text: '📝', voice: '🎙️', video: '🎬', photo: '📷',
+  };
+
   return (
     <div className="page-container flex flex-col">
       <NavHeader title="添加记录" showBack />
 
       <div className="flex-1 flex flex-col mt-6">
+        {/* 当前输入方式指示 */}
+        {inputMethod !== 'text' && (
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-sm">{mediaTypeEmoji[inputMethod]}</span>
+            <span className="text-xs text-muted">当前：{mediaTypeLabel[inputMethod]}记录</span>
+          </div>
+        )}
+
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <label className="block text-sm font-medium text-muted">选择分类</label>
@@ -147,7 +181,7 @@ export default function RecordPage() {
           </div>
           <textarea
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => { setContent(e.target.value); if (inputMethod === 'text' || !mediaItems.length) setInputMethod('text'); }}
             placeholder="今天宝宝做了什么？点击下方麦克风语音输入，或拍照记录"
             maxLength={500}
             rows={5}
@@ -200,7 +234,7 @@ export default function RecordPage() {
           {submitting ? (
             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
           ) : (
-            <span>记录这一刻 📝</span>
+            <span>记录这一刻 {mediaTypeEmoji[inputMethod]}</span>
           )}
         </button>
       </div>
