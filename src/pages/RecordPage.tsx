@@ -22,7 +22,7 @@ export default function RecordPage() {
   const { createRecord } = useAppStore();
   const navigate = useNavigate();
 
-  const canSubmit = content.trim().length > 0 && !submitting;
+  const canSubmit = (content.trim().length > 0 || mediaItems.length > 0) && !submitting;
 
   const handleTranscriptChange = useCallback((text: string) => {
     setContent(text);
@@ -85,11 +85,14 @@ export default function RecordPage() {
         finalMediaType = hasVideo ? 'video' : hasImage ? 'photo' : inputMethod;
       }
 
+      const mediaIds = mediaItems.map(m => m.id);
+
       const record = await createRecord({
         记录内容: content.trim(),
         分类: category,
         是否为里程碑: isMilestone,
         媒体类型: finalMediaType,
+        媒体附件: mediaIds.length > 0 ? mediaIds : undefined,
       });
 
       for (const media of mediaItems) {
@@ -182,7 +185,7 @@ export default function RecordPage() {
           <textarea
             value={content}
             onChange={(e) => { setContent(e.target.value); if (inputMethod === 'text' || !mediaItems.length) setInputMethod('text'); }}
-            placeholder="今天宝宝做了什么？点击下方麦克风语音输入，或拍照记录"
+            placeholder="记录内容（可选，也可直接拍照/录音）"
             maxLength={500}
             rows={5}
             className="w-full bg-cream-light border border-rule rounded-2xl p-4 text-ink
