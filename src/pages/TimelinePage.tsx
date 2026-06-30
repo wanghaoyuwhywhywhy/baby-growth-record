@@ -1,65 +1,222 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import RecordItem from '@/components/RecordItem';
-import FilterBar from '@/components/FilterBar';
+import { type DailyRecord } from '@/api/feishu';
+import { feishuAPI } from '@/api/feishu';
+import { CATEGORY_MAP } from '@/utils/constants';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
+import { FileText, Mic, Video, Camera, Play, Pause } from 'lucide-react';
 
+const MEDIA_TYPES = [
+  { key: '全部', label: '全部', icon: null },
+  { key: 'text', label: '文字', icon: FileText },
+  { key: 'voice', label: '语音', icon: Mic },
+  { key: 'video', label: '视频', icon: Video },
+  { key: 'photo', label: '照片', icon: Camera },
+] as const;
+
+const MEDIA_TYPE_STYLE: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
+  text: { bg: 'bg-blue-100', text: 'text-blue-600', icon: <FileText size={12} /> },
+  voice: { bg: 'bg-amber-100', text: 'text-amber-600', icon: <Mic size={12} /> },
+  video: { bg: 'bg-purple-100', text: 'text-purple-600', icon: <Video size={12} /> },
+  photo: { bg: 'bg-green-100', text: 'text-green-600', icon: <Camera size={12} /> },
+};
+
+function formatTimelineTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function VoicePlayer({ recordId, mediaIds }: { recordId: string; mediaIds: string[] }) {
+  const [playing, setPlaying] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    let url = '';
+    async function load() {
+      const items = await feishuAPI.getMediaByRecord(recordId);
+      if (items.length > 0) {
+        url = URL.createObjectURL(items[0].blob);
+        setAudioUrl(url);
+      }
+    }
+    load();
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [recordId]);
+
+  function toggle() {
+    if (!audioRef.current) return;
+    if (playing) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    } else {
+      audioRef.current.play();
+    }
+    setPlaying(!playing);
+  }
+
+  if (!audioUrl) return null;
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <button
+        onClick={toggle}
+        className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0"
+      >
+        {playing ? <Pause size={14} /> : <Play size={14} />}
+      </button>
+      <audio ref={audioRef} src={audioUrl} onEnded={() => setPlaying(false)} className="hidden" />
+      <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
+        <div className="h-full bg-amber-400 rounded-full" style={{ width: playing ? '100%' : '0%', transition: 'width 0.3s' }} />
+      </div>
+    </div>
+  );
+}
+
+function MediaPreview({ record }: { record: DailyRecord }) {
+  const [images, setImages] = useState<{ id: string; url: string }[]>([]);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let urls: string[] = [];
+    let revoked = false;
+    async function load() {
+      if (!record.媒体附件?.length) return;
+      const items = await feishuAPI.getMediaByRecord(record.record_id);
+      if (revoked) return;
+      if (record.媒体类型 === 'video' && items.length > 0) {
+        const u = URL.createObjectURL(items[0].blob);
+        urls.push(u);
+        setVideoUrl(u);
+      } else {
+        const imgs = items.filter(i => i.type === 'image').map(i => {
+          const u = URL.createObjectURL(i.blob);
+          urls.push(u);
+          return { id: i.id, url: u };
+        });
+        setImages(imgs);
+      }
+    }
+    load();
+    return () => { revoked = true; urls.forEach(u => URL.revokeObjectURL(u)); };
+  }, [record.record_id, record.媒体附件, record.媒体类型]);
+
+  if (videoUrl) {
+    return (
+      <div className="mt-2">
+        <video src={videoUrl} controls className="w-full max-h-48 rounded-lg" />
+      </div>
+    );
+  }
+  if (images.length > 0) {
+    return (
+      <div className="flex gap-2 mt-2 overflow-x-auto">
+        {images.map(img => (
+          <img key={img.id} src={img.url} alt="" className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0" />
+        ))}
+      </div>
+    );
+  }
+  return null;
+}
 
 export default function TimelinePage() {
-  const { records, filterCategory, loading, fetchRecords, setFilterCategory, fetchBabies, currentBaby } = useAppStore();
+  const { records, fetchRecords, fetchBabies, currentBaby } = useAppStore();
   const currentBabyId = currentBaby()?.record_id;
+  const [mediaFilter, setMediaFilter] = useState('全部');
 
-  useEffect(() => {
-    fetchBabies();
-  }, [fetchBabies]);
+  useEffect(() => { fetchBabies(); }, [fetchBabies]);
+  useEffect(() => { fetchRecords(); }, [fetchRecords, currentBabyId]);
 
-  useEffect(() => {
-    fetchRecords(filterCategory === '全部' ? undefined : filterCategory);
-  }, [fetchRecords, filterCategory, currentBabyId]);
+  const filtered = mediaFilter === '全部'
+    ? records
+    : records.filter(r => (r.媒体类型 || 'text') === mediaFilter);
 
   return (
     <div className="page-container">
       <NavHeader title="成长时间线" showBack />
 
-      <div className="mt-4 mb-5">
-        <FilterBar selected={filterCategory} onSelect={setFilterCategory} />
-      </div>
+      <div className="mt-4">
+        {/* 媒体类型筛选 */}
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-5 px-5 mb-3">
+          {MEDIA_TYPES.map(mt => {
+            const isActive = mediaFilter === mt.key;
+            return (
+              <button
+                key={mt.key}
+                onClick={() => setMediaFilter(mt.key)}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm whitespace-nowrap transition-all flex-shrink-0 ${
+                  isActive
+                    ? 'bg-coral text-white shadow-soft font-medium'
+                    : 'bg-cream-dark text-muted hover:bg-rule/50'
+                }`}
+              >
+                {mt.icon && <mt.icon size={14} />}
+                {mt.label}
+              </button>
+            );
+          })}
+        </div>
 
-      {loading ? (
-        <div className="flex justify-center py-20">
-          <div className="w-8 h-8 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
-        </div>
-      ) : records.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-muted">
-          <span className="text-5xl mb-3">📭</span>
-          <p className="text-sm">暂无记录</p>
-        </div>
-      ) : (
-        <div className="relative">
-          <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-rule/60" />
-          <div className="space-y-1">
-            {records.map((record, index) => (
-              <div key={record.record_id} className="relative pl-10 animate-fade-up" style={{ animationDelay: `${index * 50}ms` }}>
-                <div className="absolute left-[17px] top-4 w-2 h-2 rounded-full bg-coral shadow-sm" />
-                <div className="card-shadow p-3.5">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-xs text-muted/60">
-                      {new Date(record.记录时间).toLocaleDateString('zh-CN', {
-                        month: 'long',
-                        day: 'numeric',
-                        weekday: 'short',
-                      })}
-                    </span>
-                    {record.是否为里程碑 && <span className="text-xs">⭐ 里程碑</span>}
-                  </div>
-                  <RecordItem record={record} compact />
-                </div>
-              </div>
-            ))}
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-muted">
+            <span className="text-5xl mb-3">📭</span>
+            <p className="text-sm">暂无记录</p>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="relative">
+            <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-rule/60" />
+            <div className="space-y-1">
+              {filtered.map((record, index) => {
+                const mediaType = record.媒体类型 || 'text';
+                const style = MEDIA_TYPE_STYLE[mediaType];
+                const category = CATEGORY_MAP[record.分类];
+                const emoji = category?.emoji ?? '📝';
+                const color = category?.color ?? '#8B7D7A';
+
+                return (
+                  <div key={record.record_id} className="relative pl-10 animate-fade-up" style={{ animationDelay: `${index * 50}ms` }}>
+                    <div className="absolute left-[17px] top-4 w-2 h-2 rounded-full bg-coral shadow-sm" />
+                    <div className="card-shadow p-3.5">
+                      {/* 时间 + 标签 */}
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span className="text-xs text-muted/80 font-mono">
+                          {formatTimelineTime(record.记录时间)}
+                        </span>
+                        {style && (
+                          <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${style.bg} ${style.text}`}>
+                            {style.icon}{mediaType === 'text' ? '文字' : mediaType === 'voice' ? '语音' : mediaType === 'video' ? '视频' : '照片'}
+                          </span>
+                        )}
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: color + '18', color }}>
+                          {emoji} {record.分类}
+                        </span>
+                        {record.是否为里程碑 && <span className="text-xs">⭐</span>}
+                      </div>
+
+                      {/* 内容 */}
+                      <p className="text-sm text-ink leading-relaxed">
+                        {record.记录内容}
+                      </p>
+
+                      {/* 语音播放 */}
+                      {mediaType === 'voice' && record.媒体附件?.length ? (
+                        <VoicePlayer recordId={record.record_id} mediaIds={record.媒体附件} />
+                      ) : null}
+
+                      {/* 媒体预览（照片/视频） */}
+                      {(mediaType === 'photo' || mediaType === 'video') && record.媒体附件?.length ? (
+                        <MediaPreview record={record} />
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
 
       <FloatingButton />
     </div>

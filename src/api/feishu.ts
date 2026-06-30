@@ -37,6 +37,7 @@ export interface DailyRecord {
   是否为里程碑: boolean;
   关联宝宝: string[];
   媒体附件?: string[]; // media IDs
+  媒体类型?: 'text' | 'voice' | 'video' | 'photo'; // 记录输入方式
 }
 
 export interface Milestone {
@@ -105,6 +106,7 @@ export const feishuAPI = {
     分类: string;
     是否为里程碑: boolean;
     关联宝宝: string;
+    媒体类型?: 'text' | 'voice' | 'video' | 'photo';
     媒体附件?: string[];
   }): Promise<DailyRecord> {
     const newRecord: DailyRecord = {
@@ -115,6 +117,7 @@ export const feishuAPI = {
       是否为里程碑: record.是否为里程碑,
       关联宝宝: [record.关联宝宝],
       媒体附件: record.媒体附件,
+      媒体类型: record.媒体类型 || 'text',
     };
     // 先写云端，拿到飞书的 record_id
     const cloudId = await cloudCreateRecord(newRecord);
