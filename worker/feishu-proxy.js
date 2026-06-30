@@ -180,7 +180,10 @@ async function handleRecords(request, env, token) {
   }
   if (request.method === 'POST') {
     const body = await request.json();
-    return await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
+    // 创建记录前，确保"媒体类型"和"附件"字段存在
+    await ensureRecordFields(token, env);
+    const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
+    return result;
   }
   if (request.method === 'PUT') {
     const body = await request.json();
@@ -195,6 +198,44 @@ async function handleRecords(request, env, token) {
     return await bitableRequest(env, token, 'DELETE', tableId, {}, recordId);
   }
   return { error: 'Method not allowed' };
+}
+
+// 确保记录表有必要字段：媒体类型（单选）和附件
+async function ensureRecordFields(token, env) {
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/fields`;
+  const resp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const data = await resp.json();
+  const fields = data.data?.items || [];
+
+  const hasMediaType = fields.some(f => f.field_name === '媒体类型');
+  if (!hasMediaType) {
+    // 创建单选字段，预设选项
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        field_name: '媒体类型',
+        type: 3, // 单选
+        property: {
+          options: [
+            { name: 'text' },
+            { name: 'voice' },
+            { name: 'video' },
+            { name: 'photo' },
+          ]
+        }
+      }),
+    });
+  }
+
+  const hasAttachment = fields.some(f => f.field_name === '附件');
+  if (!hasAttachment) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field_name: '附件', type: 17 }),
+    });
+  }
 }
 
 async function handleGrowth(request, env, token) {
@@ -329,24 +370,6 @@ ${records.length > 0
   }
 }
 
-// 确保记录表有"附件"字段（type=17），返回字段信息
-async function ensureAttachmentField(token, env) {
-  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/fields`;
-  const resp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
-  const data = await resp.json();
-  const fields = data.data?.items || [];
-  const existing = fields.find(f => f.field_name === '附件');
-  if (existing) return existing;
-  // 创建附件字段
-  const createResp = await fetch(fieldsUrl, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ field_name: '附件', type: 17 }),
-  });
-  const createData = await createResp.json();
-  return createData.data?.field || {};
-}
-
 // 上传媒体文件到飞书多维表格附件字段
 // 正确流程：1. Drive API 上传文件获取 file_token  2. 更新记录的附件字段
 async function handleUpload(request, env, token) {
@@ -359,7 +382,7 @@ async function handleUpload(request, env, token) {
   if (!file || !recordId) return { error: 'file and record_id are required', debug_file_type: typeof file, debug_record_id: recordId };
 
   // 确保附件字段存在
-  await ensureAttachmentField(token, env);
+  await ensureRecordFields(token, env);
 
   const appToken = env.FEISHU_BASE_TOKEN;
   const tableId = env.FEISHU_TABLE_RECORD;

@@ -121,9 +121,10 @@ export const feishuAPI = {
     };
     // 先写云端，拿到飞书的 record_id
     const cloudId = await cloudCreateRecord(newRecord);
-    if (cloudId) {
-      newRecord.record_id = cloudId;
+    if (!cloudId) {
+      throw new Error('云端创建记录失败，请检查网络连接后重试');
     }
+    newRecord.record_id = cloudId;
     await dbAddRecord(newRecord);
     return newRecord;
   },

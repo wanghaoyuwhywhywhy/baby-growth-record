@@ -177,9 +177,18 @@ export async function cloudCreateRecord(record: DailyRecord): Promise<string | n
     if (record.媒体类型) fields['媒体类型'] = record.媒体类型;
     // 注意：附件字段通过上传 API 单独处理，不在创建记录时发送本地ID
     const data = await apiPost('/api/records', fields);
-    return data?.data?.record?.record_id || null;
+    // 检查飞书返回的错误
+    if (data.code !== 0) {
+      console.error('[cloudCreateRecord] 飞书返回错误:', data.code, data.msg, JSON.stringify(data).slice(0, 300));
+      return null;
+    }
+    const recordId = data?.data?.record?.record_id;
+    if (!recordId) {
+      console.error('[cloudCreateRecord] 未获取到 record_id, 飞书响应:', JSON.stringify(data).slice(0, 300));
+    }
+    return recordId || null;
   } catch (e) {
-    console.warn('云端创建记录失败:', e);
+    console.error('[cloudCreateRecord] 异常:', e);
     return null;
   }
 }
