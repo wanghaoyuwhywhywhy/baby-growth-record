@@ -120,8 +120,12 @@ export default function RecordPage() {
         // 存到本地 IndexedDB（用于即时预览）
         await feishuAPI.addMedia(media.id, media.type, media.blob, record.record_id);
         // 上传到飞书云端
-        const extMap: Record<string, string> = { video: 'mp4', image: 'jpg', voice: 'webm' };
-        const ext = extMap[media.type] || 'bin';
+        const extMap: Record<string, string> = { video: 'mp4', image: 'jpg' };
+        // 语音扩展名根据实际录制格式决定
+        let ext = extMap[media.type] || 'bin';
+        if (media.type === 'voice') {
+          ext = media.blob.type.includes('mp4') ? 'mp4' : 'webm';
+        }
         try {
           const fileToken = await cloudUploadMedia(record.record_id, media.blob, `${media.id}.${ext}`);
           if (fileToken) {

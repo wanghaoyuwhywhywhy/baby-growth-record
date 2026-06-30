@@ -66,7 +66,14 @@ export default function MediaInput({
     try {
       transcriptRef.current = '';
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      // Safari/iOS 不支持 webm，输出 mp4；Chrome/Firefox 输出 webm
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : '';
+      const options: MediaRecorderOptions = mimeType ? { mimeType } : {};
+      const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -75,7 +82,8 @@ export default function MediaInput({
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const actualType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+        const blob = new Blob(chunksRef.current, { type: actualType });
         const id = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const url = URL.createObjectURL(blob);
         onMediaAdd({ id, type: 'voice', blob, url });
