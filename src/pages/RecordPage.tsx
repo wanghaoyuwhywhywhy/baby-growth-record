@@ -98,14 +98,20 @@ export default function RecordPage() {
 
       // 上传媒体到飞书云端，获取 file_tokens
       const fileTokens: string[] = [];
+      const uploadErrors: string[] = [];
       for (const media of mediaItems) {
         // 存到本地 IndexedDB（用于即时预览）
         await feishuAPI.addMedia(media.id, media.type, media.blob, record.record_id);
         // 上传到飞书云端
         const ext = media.type === 'video' ? 'mp4' : 'jpg';
-        const fileToken = await cloudUploadMedia(record.record_id, media.blob, `${media.id}.${ext}`);
-        if (fileToken) {
-          fileTokens.push(fileToken);
+        try {
+          const fileToken = await cloudUploadMedia(record.record_id, media.blob, `${media.id}.${ext}`);
+          if (fileToken) {
+            fileTokens.push(fileToken);
+          }
+        } catch (uploadErr) {
+          console.error('图片上传失败:', uploadErr);
+          uploadErrors.push(uploadErr instanceof Error ? uploadErr.message : '上传失败');
         }
       }
 
@@ -113,6 +119,12 @@ export default function RecordPage() {
       if (fileTokens.length > 0) {
         record.媒体附件 = fileTokens;
         await feishuAPI.updateRecordMedia(record.record_id, fileTokens);
+      }
+
+      // 上传部分失败时提示
+      if (uploadErrors.length > 0 && mediaItems.length > 0) {
+        setSubmitting(false);
+        alert(`记录已保存，但图片上传失败：${uploadErrors.join('; ')}\n\n请打开浏览器控制台查看详细日志。`);
       }
 
       setSubmitting(false);

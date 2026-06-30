@@ -40,8 +40,11 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // 云端附件：媒体附件中非本地ID的都是云端file_token
+  // 本地ID格式: media_xxx, img_xxx, vid_xxx, voice_xxx
   const mediaAttachments = record.媒体附件 || [];
-  const cloudTokens = mediaAttachments.filter(t => !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_'));
+  const cloudTokens = mediaAttachments.filter(t =>
+    !t.startsWith('media_') && !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
+  );
 
   useEffect(() => {
     // 优先使用云端 URL
@@ -95,8 +98,11 @@ function MediaPreview({ record }: { record: DailyRecord }) {
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
 
   // 云端附件：媒体附件中非本地ID的都是云端file_token
+  // 本地ID格式: media_xxx, img_xxx, vid_xxx, voice_xxx
   const mediaAttachments = record.媒体附件 || [];
-  const cloudTokens = mediaAttachments.filter(t => !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_'));
+  const cloudTokens = mediaAttachments.filter(t =>
+    !t.startsWith('media_') && !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
+  );
 
   useEffect(() => {
     // 如果有云端 token，优先使用云端 URL，不需要加载本地
