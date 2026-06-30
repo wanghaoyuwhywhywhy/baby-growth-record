@@ -181,11 +181,22 @@ export const feishuAPI = {
 
   // 云端同步：先清空本地再写入云端数据（确保多端一致）
   async syncFromCloud(): Promise<{ babies: number; records: number; growth: number }> {
-    const [cloudBabies, cloudRecords, cloudGrowth] = await Promise.all([
+    // 使用 allSettled 避免单个请求失败导致整个同步中断
+    const [babiesResult, recordsResult, growthResult] = await Promise.allSettled([
       cloudGetBabies(),
       cloudGetRecords(),
       cloudGetGrowth(),
     ]);
+
+    const cloudBabies = babiesResult.status === 'fulfilled' ? babiesResult.value : [];
+    const cloudRecords = recordsResult.status === 'fulfilled' ? recordsResult.value : [];
+    const cloudGrowth = growthResult.status === 'fulfilled' ? growthResult.value : [];
+
+    if (cloudBabies.length === 0 && cloudRecords.length === 0 && cloudGrowth.length === 0) {
+      // 全部失败时不清空本地数据
+      console.warn('[syncFromCloud] 所有云端请求失败，保留本地数据');
+      return { babies: 0, records: 0, growth: 0 };
+    }
 
     // 先清空本地数据，再写入云端数据
     await dbClearAll();
