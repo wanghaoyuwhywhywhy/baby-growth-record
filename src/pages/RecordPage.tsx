@@ -13,19 +13,21 @@ type MediaType = 'text' | 'voice' | 'video' | 'photo';
 
 export default function RecordPage() {
   const [content, setContent] = useState('');
-  const [category, setCategory] = useState('饮食');
+  const [category, setCategory] = useState('');
+  const [categoryManuallySet, setCategoryManuallySet] = useState(false);
   const [isMilestone, setIsMilestone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
   const [aiLoading, setAiLoading] = useState<'category' | 'polish' | null>(null);
   const { createRecord } = useAppStore();
   const navigate = useNavigate();
 
   const canSubmit = (content.trim().length > 0 || mediaItems.length > 0) && !submitting;
 
-  const handleTranscriptChange = useCallback((text: string) => {
-    setContent(text);
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setVoiceTranscript(text);
   }, []);
 
   const handleMediaAdd = useCallback((media: MediaItem) => {
@@ -40,13 +42,20 @@ export default function RecordPage() {
     });
   }, []);
 
+  const handleCategorySelect = useCallback((cat: string) => {
+    setCategory(cat);
+    setCategoryManuallySet(true);
+  }, []);
+
   // AI 自动分类
   async function handleAutoCategory() {
-    if (!content.trim()) return;
+    const textToAnalyze = content.trim() || voiceTranscript.trim();
+    if (!textToAnalyze) return;
     setAiLoading('category');
     try {
-      const result = await autoCategory(content.trim());
+      const result = await autoCategory(textToAnalyze);
       setCategory(result);
+      setCategoryManuallySet(true);
     } catch (e) {
       console.error('自动分类失败:', e);
     }
@@ -78,14 +87,30 @@ export default function RecordPage() {
       if (mediaItems.some(m => m.type === 'video')) mediaTypes.push('video');
       if (mediaTypes.length === 0) mediaTypes.push('text');
 
+      // 分类自动识别：未手动选择时，自动 AI 识别
+      let finalCategory = category;
+      if (!categoryManuallySet || !category) {
+        const textToAnalyze = content.trim() || voiceTranscript.trim();
+        if (textToAnalyze) {
+          try {
+            finalCategory = await autoCategory(textToAnalyze);
+          } catch {
+            finalCategory = '其他';
+          }
+        } else {
+          finalCategory = '其他';
+        }
+      }
+
       const mediaIds = mediaItems.map(m => m.id);
 
       const record = await createRecord({
         记录内容: content.trim(),
-        分类: category,
+        分类: finalCategory,
         是否为里程碑: isMilestone,
         媒体类型: mediaTypes,
         媒体附件: mediaIds.length > 0 ? mediaIds : undefined,
+        语音转文字: voiceTranscript.trim() || undefined,
       });
 
       // 上传媒体到飞书云端，获取 file_tokens
@@ -152,7 +177,7 @@ export default function RecordPage() {
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <label className="block text-sm font-medium text-muted">选择分类</label>
-            {content.trim() && (
+            {(content.trim() || voiceTranscript.trim()) && (
               <button
                 onClick={handleAutoCategory}
                 disabled={aiLoading !== null}
@@ -167,7 +192,11 @@ export default function RecordPage() {
               </button>
             )}
           </div>
-          <CategoryPicker selected={category} onSelect={setCategory} />
+          <CategoryPicker
+            selected={category}
+            onSelect={handleCategorySelect}
+            placeholder="未选择（提交时自动识别）"
+          />
         </div>
 
         <div className="flex-1 mb-4">
@@ -207,11 +236,10 @@ export default function RecordPage() {
         <div className="mb-6">
           <label className="block text-sm font-medium text-muted mb-3">语音 / 图片 / 视频</label>
           <MediaInput
-            onTranscriptChange={handleTranscriptChange}
+            onVoiceTranscript={handleVoiceTranscript}
             onMediaAdd={handleMediaAdd}
             onMediaRemove={handleMediaRemove}
             mediaItems={mediaItems}
-            initialText=""
           />
         </div>
 

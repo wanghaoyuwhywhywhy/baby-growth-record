@@ -38,6 +38,7 @@ export interface DailyRecord {
   关联宝宝: string[];
   媒体附件?: string[]; // media IDs
   媒体类型?: ('text' | 'voice' | 'video' | 'photo')[]; // 多选：可同时包含多种
+  语音转文字?: string; // 语音识别转写的文字（独立字段，不填入记录内容）
 }
 
 export interface Milestone {
@@ -108,6 +109,7 @@ export const feishuAPI = {
     关联宝宝: string;
     媒体类型?: ('text' | 'voice' | 'video' | 'photo')[];
     媒体附件?: string[];
+    语音转文字?: string;
   }): Promise<DailyRecord> {
     const newRecord: DailyRecord = {
       record_id: `rec${Date.now()}`,
@@ -118,6 +120,7 @@ export const feishuAPI = {
       关联宝宝: [record.关联宝宝],
       媒体附件: record.媒体附件,
       媒体类型: record.媒体类型 || ['text'],
+      语音转文字: record.语音转文字,
     };
     // 先写云端，拿到飞书的 record_id
     const cloudId = await cloudCreateRecord(newRecord);

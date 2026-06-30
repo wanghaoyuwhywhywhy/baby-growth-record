@@ -23,7 +23,7 @@ interface AppState {
 
   fetchRecords: (category?: string) => Promise<void>;
   fetchRecentRecords: () => Promise<DailyRecord[]>;
-  createRecord: (data: { 记录内容: string; 分类: string; 是否为里程碑: boolean; 媒体类型?: ('text' | 'voice' | 'video' | 'photo')[]; 媒体附件?: string[] }) => Promise<DailyRecord>;
+  createRecord: (data: { 记录内容: string; 分类: string; 是否为里程碑: boolean; 媒体类型?: ('text' | 'voice' | 'video' | 'photo')[]; 媒体附件?: string[]; 语音转文字?: string }) => Promise<DailyRecord>;
   setFilterCategory: (category: string) => void;
 
   fetchGrowthRecords: () => Promise<void>;

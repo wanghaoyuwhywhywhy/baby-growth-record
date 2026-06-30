@@ -255,6 +255,16 @@ async function ensureRecordFields(token, env) {
       body: JSON.stringify({ field_name: '附件', type: 17 }),
     });
   }
+
+  // 确保"语音转文字"文本字段存在
+  const hasVoiceTranscript = fields.some(f => f.field_name === '语音转文字');
+  if (!hasVoiceTranscript) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field_name: '语音转文字', type: 1 }), // type 1 = 文本
+    });
+  }
 }
 
 async function handleGrowth(request, env, token) {

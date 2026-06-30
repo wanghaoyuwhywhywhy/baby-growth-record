@@ -10,19 +10,17 @@ export interface MediaItem {
 }
 
 interface MediaInputProps {
-  onTranscriptChange: (text: string) => void;
+  onVoiceTranscript: (text: string) => void;
   onMediaAdd: (media: MediaItem) => void;
   onMediaRemove: (id: string) => void;
   mediaItems: MediaItem[];
-  initialText?: string;
 }
 
 export default function MediaInput({
-  onTranscriptChange,
+  onVoiceTranscript,
   onMediaAdd,
   onMediaRemove,
   mediaItems,
-  initialText = '',
 }: MediaInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -31,6 +29,7 @@ export default function MediaInput({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number>(0);
+  const transcriptRef = useRef<string>(''); // 保存当前录音的转写文字
 
   // Web Speech API 用于录音同时转文字
   const {
@@ -43,13 +42,6 @@ export default function MediaInput({
     stopListening,
     resetTranscript,
   } = useSpeechRecognition();
-
-  // 同步语音转写结果到文本框
-  useEffect(() => {
-    if (isRecording && (transcript || interimTranscript)) {
-      onTranscriptChange(initialText + transcript + interimTranscript);
-    }
-  }, [transcript, interimTranscript, isRecording, initialText, onTranscriptChange]);
 
   // 录音时长计时
   useEffect(() => {
@@ -72,6 +64,7 @@ export default function MediaInput({
 
   async function startRecording() {
     try {
+      transcriptRef.current = '';
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -87,7 +80,12 @@ export default function MediaInput({
         const url = URL.createObjectURL(blob);
         onMediaAdd({ id, type: 'voice', blob, url });
         stream.getTracks().forEach(t => t.stop());
-        if (isSpeechListening) stopListening();
+        // 录音结束时，把最终转写文字传给父组件（独立字段，不填入文本框）
+        if (transcriptRef.current) {
+          onVoiceTranscript(transcriptRef.current);
+        }
+        // 确保关闭语音识别
+        stopListening();
       };
 
       mediaRecorder.start();
@@ -106,6 +104,8 @@ export default function MediaInput({
 
   function stopRecording() {
     if (mediaRecorderRef.current && isRecording) {
+      // 保存最终转写结果
+      transcriptRef.current = transcript || interimTranscript || '';
       mediaRecorderRef.current.stop();
       setIsRecording(false);
     }
@@ -128,6 +128,9 @@ export default function MediaInput({
     });
     e.target.value = '';
   }
+
+  // 实时显示的转写文字
+  const liveTranscript = isRecording ? (transcript || interimTranscript) : '';
 
   return (
     <div>
@@ -168,15 +171,25 @@ export default function MediaInput({
             </span>
             <span className="text-sm text-muted">
               录音中 {formatDuration(recordingDuration)}
-              {interimTranscript && <span className="text-coral/70 ml-1">{interimTranscript}</span>}
             </span>
           </div>
+          {liveTranscript && (
+            <span className="text-xs text-coral/70 flex-1 truncate">{liveTranscript}</span>
+          )}
           <button
             onClick={toggleRecording}
             className="w-8 h-8 rounded-full bg-coral text-white flex items-center justify-center"
           >
             <Square size={14} fill="white" />
           </button>
+        </div>
+      )}
+
+      {/* 已完成的语音转文字预览 */}
+      {!isRecording && mediaItems.some(m => m.type === 'voice') && transcriptRef.current && (
+        <div className="mb-3 p-2.5 bg-amber-50 rounded-lg border border-amber-200">
+          <p className="text-xs text-amber-600 mb-0.5 font-medium">语音转文字</p>
+          <p className="text-sm text-ink">{transcriptRef.current}</p>
         </div>
       )}
 

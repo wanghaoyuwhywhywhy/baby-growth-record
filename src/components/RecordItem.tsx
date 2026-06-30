@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { type DailyRecord } from '@/api/feishu';
 import { formatDate } from '@/utils/date';
 import { CATEGORY_MAP } from '@/utils/constants';
 import { feishuAPI } from '@/api/feishu';
 import { getCloudAssetUrl } from '@/lib/cloud';
+import { Play, Pause, Mic } from 'lucide-react';
 
 interface MediaInfo {
   id: string;
@@ -21,6 +22,7 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
   const emoji = category?.emoji ?? '📝';
   const color = category?.color ?? '#8B7D7A';
   const [mediaList, setMediaList] = useState<MediaInfo[]>([]);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!record.媒体附件 || record.媒体附件.length === 0) {
@@ -29,18 +31,43 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
     }
 
     // 判断云端 file_tokens（非本地ID格式）
-    // 本地ID格式: media_xxx, img_xxx, vid_xxx, voice_xxx
     const cloudTokens = record.媒体附件.filter(
       t => !t.startsWith('media_') && !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
     );
 
     if (cloudTokens.length > 0) {
-      // 使用云端 URL
-      const media = cloudTokens.map(token => ({
-        id: token,
-        type: ((record.媒体类型 || ['text']).includes('video') ? 'video' : (record.媒体类型 || ['text']).includes('voice') ? 'voice' : 'image') as 'image' | 'video' | 'voice',
-        url: getCloudAssetUrl(record.record_id, token),
-      }));
+      // 使用云端 URL，根据媒体类型分配每个 token 的类型
+      const mediaTypes = record.媒体类型 || ['text'];
+      const media = cloudTokens.map((token, index) => {
+        // 根据记录的媒体类型推断每个 token 的类型
+        let type: 'image' | 'video' | 'voice' = 'image';
+        if (mediaTypes.includes('voice') && index === 0 && !mediaTypes.includes('photo') && !mediaTypes.includes('video')) {
+          type = 'voice';
+        } else if (mediaTypes.includes('video') && index === 0 && !mediaTypes.includes('photo')) {
+          type = 'video';
+        }
+        // 如果有voice类型，第一个token是voice
+        if (mediaTypes.includes('voice')) {
+          const voiceCount = cloudTokens.length - (mediaTypes.includes('photo') ? cloudTokens.length - 1 : 0);
+          if (index < 1) type = 'voice'; // 第一个是语音
+          else type = 'image'; // 其余是图片
+        }
+        if (mediaTypes.includes('video') && !mediaTypes.includes('voice') && index === 0) {
+          type = 'video';
+        }
+        if (mediaTypes.includes('photo') && !mediaTypes.includes('voice') && !mediaTypes.includes('video')) {
+          type = 'image';
+        }
+        // 更精确：有voice类型时第一个是voice，其余根据类型判断
+        if (mediaTypes.includes('voice') && index === 0) {
+          type = 'voice';
+        } else if (mediaTypes.includes('video') && !mediaTypes.includes('photo') && index === 0 && !mediaTypes.includes('voice')) {
+          type = 'video';
+        } else {
+          type = 'image';
+        }
+        return { id: token, type, url: getCloudAssetUrl(record.record_id, token) };
+      });
       setMediaList(media);
       return;
     }
@@ -68,6 +95,10 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
     };
   }, [record.record_id, record.媒体附件, record.媒体类型]);
 
+  const voiceItems = mediaList.filter(m => m.type === 'voice');
+  const imageItems = mediaList.filter(m => m.type === 'image');
+  const videoItems = mediaList.filter(m => m.type === 'video');
+
   return (
     <div className="flex items-start gap-3 py-3 group">
       <div
@@ -91,34 +122,104 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
         <p className={`text-ink leading-relaxed ${compact ? 'text-sm' : 'text-[15px]'}`}>
           {record.记录内容}
         </p>
-        {/* 媒体附件 */}
-        {mediaList.length > 0 && (
+
+        {/* 语音播放 + 转文字 */}
+        {voiceItems.length > 0 && (
+          <VoicePlayerCompact url={voiceItems[0].url} transcript={record.语音转文字} />
+        )}
+
+        {/* 图片 */}
+        {imageItems.length > 0 && (
           <div className="flex gap-2 mt-2 overflow-x-auto">
-            {mediaList.map((media) => (
-              <div key={media.id} className="flex-shrink-0">
-                {media.type === 'voice' ? (
-                  <div className={`rounded-lg bg-coral/15 flex items-center justify-center border border-coral/30 ${compact ? 'w-16 h-16' : 'w-20 h-20'}`}>
-                    <span className="text-coral text-lg">🎙️</span>
-                  </div>
-                ) : media.type === 'image' ? (
-                  <img
-                    src={media.url}
-                    alt=""
-                    className={`rounded-lg object-cover border border-rule ${compact ? 'w-16 h-16' : 'w-20 h-20'}`}
-                  />
-                ) : (
-                  <div className={`rounded-lg bg-ink/80 flex items-center justify-center border border-rule ${compact ? 'w-16 h-16' : 'w-20 h-20'}`}>
-                    <span className="text-white text-lg">▶</span>
-                  </div>
-                )}
-              </div>
+            {imageItems.map((media) => (
+              <img
+                key={media.id}
+                src={media.url}
+                alt=""
+                className={`rounded-lg object-cover border border-rule cursor-pointer ${compact ? 'w-16 h-16' : 'w-20 h-20'}`}
+                onClick={() => setPreviewImage(media.url)}
+              />
             ))}
           </div>
         )}
+
+        {/* 视频 */}
+        {videoItems.length > 0 && (
+          <div className="flex gap-2 mt-2 overflow-x-auto">
+            {videoItems.map((media) => (
+              <video
+                key={media.id}
+                src={media.url}
+                controls
+                className="w-full max-h-48 rounded-lg"
+              />
+            ))}
+          </div>
+        )}
+
         {compact && (
           <span className="text-xs text-muted/60 mt-0.5 block">{formatDate(record.记录时间)}</span>
         )}
       </div>
+
+      {/* 图片全屏预览 */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+          onClick={() => setPreviewImage(null)}
+        >
+          <img src={previewImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 语音播放器（紧凑版，用于首页和时间线）
+function VoicePlayerCompact({ url, transcript }: { url: string; transcript?: string }) {
+  const [playing, setPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  function toggle() {
+    if (!audioRef.current) return;
+    if (playing) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    } else {
+      audioRef.current.play().catch(() => {});
+    }
+    setPlaying(!playing);
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={toggle}
+          className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform"
+        >
+          {playing ? <Pause size={14} /> : <Play size={14} />}
+        </button>
+        <audio
+          ref={audioRef}
+          src={url}
+          onEnded={() => setPlaying(false)}
+          onError={() => console.warn('语音播放失败:', url)}
+          className="hidden"
+        />
+        <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
+          <div className="h-full bg-amber-400 rounded-full" style={{ width: playing ? '100%' : '0%', transition: 'width 0.3s' }} />
+        </div>
+      </div>
+      {transcript && (
+        <div className="mt-1.5 p-2 bg-amber-50 rounded-lg border border-amber-200">
+          <div className="flex items-center gap-1 mb-0.5">
+            <Mic size={10} className="text-amber-500" />
+            <span className="text-[10px] text-amber-600 font-medium">语音转文字</span>
+          </div>
+          <p className="text-xs text-ink leading-relaxed">{transcript}</p>
+        </div>
+      )}
     </div>
   );
 }
