@@ -29,8 +29,9 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
     }
 
     // 判断云端 file_tokens（非本地ID格式）
+    // 本地ID格式: media_xxx, img_xxx, vid_xxx, voice_xxx
     const cloudTokens = record.媒体附件.filter(
-      t => !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
+      t => !t.startsWith('media_') && !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
     );
 
     if (cloudTokens.length > 0) {

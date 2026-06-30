@@ -356,7 +356,7 @@ async function handleUpload(request, env, token) {
   const file = formData.get('file');
   const recordId = formData.get('record_id');
 
-  if (!file || !recordId) return { error: 'file and record_id are required' };
+  if (!file || !recordId) return { error: 'file and record_id are required', debug_file_type: typeof file, debug_record_id: recordId };
 
   // 确保附件字段存在
   await ensureAttachmentField(token, env);
@@ -385,7 +385,12 @@ async function handleUpload(request, env, token) {
 
   const uploadData = await uploadResp.json();
   if (uploadData.code !== 0) {
-    return { error: uploadData.msg || '上传失败', code: uploadData.code, detail: JSON.stringify(uploadData).slice(0, 500) };
+    return {
+      error: `Drive上传失败: ${uploadData.msg || '未知'}`,
+      code: uploadData.code,
+      debug: { fileName, fileSize, parentType, recordId },
+      feishu_response: JSON.stringify(uploadData).slice(0, 500)
+    };
   }
 
   const fileToken = uploadData.data?.file_token;
@@ -422,8 +427,12 @@ async function handleUpload(request, env, token) {
 
   const updateData = await updateResp.json();
   if (updateData.code !== 0) {
-    console.warn('更新记录附件字段失败:', updateData.msg);
-    // 文件已上传成功，仍然返回 file_token
+    // 文件已上传成功，仍然返回 file_token，但记录更新失败
+    return {
+      ok: true,
+      file_token: fileToken,
+      warning: `附件已上传但写入记录失败: ${updateData.msg}`,
+    };
   }
 
   return { ok: true, file_token: fileToken };

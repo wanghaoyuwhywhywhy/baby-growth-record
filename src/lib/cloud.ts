@@ -313,17 +313,22 @@ export async function cloudUploadMedia(recordId: string, file: Blob, fileName: s
     formData.append('file', file, fileName);
     formData.append('record_id', recordId);
 
+    console.log('[上传] 开始上传, recordId:', recordId, 'fileName:', fileName, 'fileSize:', file.size, 'fileType:', file.type);
     const resp = await fetch(`${WORKER_URL}/api/upload`, {
       method: 'POST',
       body: formData,
     });
-    if (!resp.ok) throw new Error(`上传失败: ${resp.status}`);
-    const data = await resp.json();
-    if (!data.ok) throw new Error(data.error || '上传失败');
-    return data.file_token || null;
+    const respText = await resp.text();
+    console.log('[上传] Worker 响应:', resp.status, respText.slice(0, 500));
+    if (!resp.ok) throw new Error(`上传失败: HTTP ${resp.status}`);
+    const data = JSON.parse(respText);
+    if (!data.ok) throw new Error(data.error || data.detail || '上传失败');
+    if (!data.file_token) throw new Error('上传成功但未获取到 file_token');
+    console.log('[上传] 成功, file_token:', data.file_token);
+    return data.file_token;
   } catch (e) {
-    console.warn('云端上传媒体失败:', e);
-    return null;
+    console.error('[上传] 云端上传媒体失败:', e);
+    throw e; // 向上抛出，让调用方处理
   }
 }
 
