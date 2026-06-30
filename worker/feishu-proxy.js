@@ -1,37 +1,134 @@
 /**
- * 宝宝成长记录 - 飞书 API 代理
+ * 宝宝成长记录 - 飞书 API 代理（带密码保护）
  */
 const FEISHU_API = 'https://open.feishu.cn/open-apis';
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
+// 收紧 CORS：仅允许自己的前端域名
+const ALLOWED_ORIGINS = [
+  'https://tongxi.xyz',
+  'https://baby-growth-record.pages.dev',
+  'http://localhost:5173', // 本地开发
+];
+
+function getCORSHeaders(request) {
+  const origin = request.headers.get('Origin') || '';
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    'Access-Control-Allow-Origin': allowed,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token',
+  };
+}
+
+// ============ 密码认证 ============
+// 认证流程：
+// 1. 前端 POST /api/auth { password: "xxx" }
+// 2. Worker 用 SHA-256 比较 password 与环境变量 ACCESS_PASSWORD_HASH
+// 3. 通过后生成一个随机 token，返回给前端
+// 4. 前端后续请求带 X-Auth-Token 头
+// 5. Worker 校验 token 是否在有效 token 列表中
+
+// 简易 token 存储（内存中，Worker 重启后失效，用户需重新登录）
+const validTokens = new Set();
+
+// SHA-256 哈希
+async function sha256(str) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(str);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 生成随机 token
+function generateToken() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 校验请求的认证 token
+function isAuthenticated(request) {
+  const token = request.headers.get('X-Auth-Token');
+  // 也支持 query param 传 token（用于 /api/asset 的 <img>/<audio> 标签）
+  if (!token) {
+    const url = new URL(request.url);
+    const queryToken = url.searchParams.get('token');
+    return queryToken && validTokens.has(queryToken);
+  }
+  return validTokens.has(token);
+}
+
+// 处理认证请求
+async function handleAuth(request, env) {
+  if (request.method !== 'POST') return { error: 'Method not allowed' };
+
+  const body = await request.json();
+  const password = body.password;
+  if (!password) return { error: '请输入密码' };
+
+  // 环境变量存储的是密码的 SHA-256 哈希
+  const passwordHash = await sha256(password);
+  const expectedHash = env.ACCESS_PASSWORD_HASH;
+
+  if (!expectedHash) {
+    // 未配置密码，直接放行
+    const token = generateToken();
+    validTokens.add(token);
+    // 限制内存中的 token 数量
+    if (validTokens.size > 100) {
+      const first = validTokens.values().next().value;
+      validTokens.delete(first);
+    }
+    return { ok: true, token };
+  }
+
+  if (passwordHash !== expectedHash) {
+    return { error: '密码错误' };
+  }
+
+  const token = generateToken();
+  validTokens.add(token);
+  // 限制内存中的 token 数量
+  if (validTokens.size > 100) {
+    const first = validTokens.values().next().value;
+    validTokens.delete(first);
+  }
+  return { ok: true, token };
+}
 
 export default {
   async fetch(request, env) {
+    const corsHeaders = getCORSHeaders(request);
+
     if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: CORS_HEADERS });
+      return new Response(null, { headers: corsHeaders });
     }
 
     const url = new URL(request.url);
     const path = url.pathname;
 
     try {
-      // 调试接口：检查环境变量是否正确读取
-      if (path === '/api/debug') {
-        return new Response(JSON.stringify({
-          app_id_set: !!env.FEISHU_APP_ID,
-          app_id_prefix: env.FEISHU_APP_ID ? env.FEISHU_APP_ID.slice(0, 8) + '...' : 'NOT SET',
-          app_secret_set: !!env.FEISHU_APP_SECRET,
-          base_token_set: !!env.FEISHU_BASE_TOKEN,
-          base_token_value: env.FEISHU_BASE_TOKEN || 'NOT SET',
-          table_baby: env.FEISHU_TABLE_BABY || 'NOT SET',
-          table_record: env.FEISHU_TABLE_RECORD || 'NOT SET',
-          table_growth: env.FEISHU_TABLE_GROWTH || 'NOT SET',
-        }, null, 2), {
-          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+      // 认证接口（不需要 token）
+      if (path === '/api/auth') {
+        const result = await handleAuth(request, env);
+        return new Response(JSON.stringify(result), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
+      // 健康检查（不需要 token）
+      if (path === '/api/health') {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
+      // 所有其他接口需要认证
+      // 如果未配置密码哈希，则不校验（兼容未设置密码的情况）
+      if (env.ACCESS_PASSWORD_HASH && !isAuthenticated(request)) {
+        return new Response(JSON.stringify({ error: '未认证，请先登录', code: 401 }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       }
 
@@ -66,9 +163,6 @@ export default {
           binaryResponse = await handleAsset(request, env, token);
           break;
         }
-        case '/api/health':
-          result = { ok: true, message: 'Worker is running' };
-          break;
         default:
           result = { error: 'Not found', path };
       }
@@ -76,12 +170,12 @@ export default {
       if (binaryResponse) return binaryResponse;
 
       return new Response(JSON.stringify(result), {
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
       });
     } catch (e) {
       return new Response(JSON.stringify({ error: e.message }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        headers: { 'Content-Type': 'application/json', ...corsHeaders },
       });
     }
   },
@@ -180,7 +274,6 @@ async function handleRecords(request, env, token) {
   }
   if (request.method === 'POST') {
     const body = await request.json();
-    // 创建记录前，确保"媒体类型"和"附件"字段存在
     await ensureRecordFields(token, env);
     const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
     return result;
@@ -200,7 +293,6 @@ async function handleRecords(request, env, token) {
   return { error: 'Method not allowed' };
 }
 
-// 确保记录表有必要字段：媒体类型（多选）和附件
 async function ensureRecordFields(token, env) {
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/fields`;
   const resp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -209,25 +301,16 @@ async function ensureRecordFields(token, env) {
 
   const mediaTypeField = fields.find(f => f.field_name === '媒体类型');
   if (!mediaTypeField) {
-    // 创建多选字段，预设选项
     await fetch(fieldsUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         field_name: '媒体类型',
-        type: 4, // 多选
-        property: {
-          options: [
-            { name: 'text' },
-            { name: 'voice' },
-            { name: 'video' },
-            { name: 'photo' },
-          ]
-        }
+        type: 4,
+        property: { options: [{ name: 'text' }, { name: 'voice' }, { name: 'video' }, { name: 'photo' }] }
       }),
     });
   } else if (mediaTypeField.type === 3) {
-    // 单选不能直接改多选，需要删除后重建
     await fetch(`${fieldsUrl}/${mediaTypeField.field_id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
     await fetch(fieldsUrl, {
       method: 'POST',
@@ -235,14 +318,7 @@ async function ensureRecordFields(token, env) {
       body: JSON.stringify({
         field_name: '媒体类型',
         type: 4,
-        property: {
-          options: [
-            { name: 'text' },
-            { name: 'voice' },
-            { name: 'video' },
-            { name: 'photo' },
-          ]
-        }
+        property: { options: [{ name: 'text' }, { name: 'voice' }, { name: 'video' }, { name: 'photo' }] }
       }),
     });
   }
@@ -256,13 +332,12 @@ async function ensureRecordFields(token, env) {
     });
   }
 
-  // 确保"语音转文字"文本字段存在
   const hasVoiceTranscript = fields.some(f => f.field_name === '语音转文字');
   if (!hasVoiceTranscript) {
     await fetch(fieldsUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ field_name: '语音转文字', type: 1 }), // type 1 = 文本
+      body: JSON.stringify({ field_name: '语音转文字', type: 1 }),
     });
   }
 }
@@ -291,7 +366,6 @@ async function handleGrowth(request, env, token) {
   return { error: 'Method not allowed' };
 }
 
-// AI 代理：调用 DeepSeek API
 async function handleAI(request, env) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
@@ -308,11 +382,9 @@ async function handleAI(request, env) {
 
   switch (action) {
     case 'analyze': {
-      // AI 综合分析：宝宝档案 + 身高体重 + 成长时间线
       const baby = data.baby || {};
       const growthRecords = data.growthRecords || [];
       const records = data.records || [];
-
       systemPrompt = `你是一位专业的儿童成长分析师。请根据以下宝宝数据，从身体发育、成长趋势、行为发展等方面做综合分析，给出简洁专业的建议。用中文回答，分点阐述，语气温暖亲切。`;
       userContent = `【宝宝档案】
 姓名：${baby.宝宝姓名 || '未知'}
@@ -335,7 +407,6 @@ ${records.length > 0
 2. 成长趋势分析
 3. 行为发展观察
 4. 个性化建议`;
-
       temperature = 0.5;
       maxTokens = 800;
       break;
@@ -399,8 +470,6 @@ ${records.length > 0
   }
 }
 
-// 上传媒体文件到飞书多维表格附件字段
-// 正确流程：1. Drive API 上传文件获取 file_token  2. 更新记录的附件字段
 async function handleUpload(request, env, token) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
@@ -408,9 +477,8 @@ async function handleUpload(request, env, token) {
   const file = formData.get('file');
   const recordId = formData.get('record_id');
 
-  if (!file || !recordId) return { error: 'file and record_id are required', debug_file_type: typeof file, debug_record_id: recordId };
+  if (!file || !recordId) return { error: 'file and record_id are required' };
 
-  // 确保附件字段存在
   await ensureRecordFields(token, env);
 
   const appToken = env.FEISHU_BASE_TOKEN;
@@ -420,7 +488,6 @@ async function handleUpload(request, env, token) {
   const isImage = (file.type || '').startsWith('image/');
   const parentType = isImage ? 'bitable_image' : 'bitable_file';
 
-  // Step 1: 通过 Drive 上传素材 API 上传文件
   const driveForm = new FormData();
   driveForm.append('file_name', fileName);
   driveForm.append('parent_type', parentType);
@@ -437,20 +504,14 @@ async function handleUpload(request, env, token) {
 
   const uploadData = await uploadResp.json();
   if (uploadData.code !== 0) {
-    return {
-      error: `Drive上传失败: ${uploadData.msg || '未知'}`,
-      code: uploadData.code,
-      debug: { fileName, fileSize, parentType, recordId },
-      feishu_response: JSON.stringify(uploadData).slice(0, 500)
-    };
+    return { error: `Drive上传失败: ${uploadData.msg || '未知'}`, code: uploadData.code };
   }
 
   const fileToken = uploadData.data?.file_token;
   if (!fileToken) {
-    return { error: '上传成功但未获取到 file_token', detail: JSON.stringify(uploadData).slice(0, 500) };
+    return { error: '上传成功但未获取到 file_token' };
   }
 
-  // Step 2: 读取当前记录，获取现有附件
   const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
   const recordResp = await fetch(recordUrl, { headers: { 'Authorization': `Bearer ${token}` } });
   const recordData = await recordResp.json();
@@ -460,37 +521,25 @@ async function handleUpload(request, env, token) {
     .filter(a => a.file_token)
     .map(a => ({ file_token: a.file_token }));
 
-  // 添加新的 file_token
   const allAttachments = [...existingTokens, { file_token: fileToken }];
 
-  // Step 3: 更新记录的附件字段
   const updateResp = await fetch(recordUrl, {
     method: 'PUT',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      fields: {
-        '附件': allAttachments,
-      },
-    }),
+    body: JSON.stringify({ fields: { '附件': allAttachments } }),
   });
 
   const updateData = await updateResp.json();
   if (updateData.code !== 0) {
-    // 文件已上传成功，仍然返回 file_token，但记录更新失败
-    return {
-      ok: true,
-      file_token: fileToken,
-      warning: `附件已上传但写入记录失败: ${updateData.msg}`,
-    };
+    return { ok: true, file_token: fileToken, warning: `附件已上传但写入记录失败: ${updateData.msg}` };
   }
 
   return { ok: true, file_token: fileToken };
 }
 
-// 代理下载飞书附件
 async function handleAsset(request, env, token) {
   const url = new URL(request.url);
   const fileToken = url.searchParams.get('file_token');
@@ -498,17 +547,15 @@ async function handleAsset(request, env, token) {
 
   if (!fileToken) {
     return new Response(JSON.stringify({ error: 'file_token is required' }), {
-      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+      headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
     });
   }
 
   const appToken = env.FEISHU_BASE_TOKEN;
   const tableId = env.FEISHU_TABLE_RECORD;
 
-  // 通过 Drive 下载素材 API 下载文件
   let downloadUrl = `${FEISHU_API}/drive/v1/medias/${fileToken}/download`;
 
-  // 如果有 record_id，添加 extra 参数（用于高级权限 bitable）
   if (recordId) {
     try {
       const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
@@ -519,11 +566,7 @@ async function handleAsset(request, env, token) {
         const extra = JSON.stringify({
           bitablePerm: {
             tableId: tableId,
-            attachments: {
-              [attachmentField.field_id]: {
-                [recordId]: [fileToken]
-              }
-            }
+            attachments: { [attachmentField.field_id]: { [recordId]: [fileToken] } }
           }
         });
         downloadUrl += `?extra=${encodeURIComponent(extra)}`;
@@ -539,27 +582,21 @@ async function handleAsset(request, env, token) {
 
   if (!fileResp.ok) {
     return new Response(JSON.stringify({ error: '文件下载失败', status: fileResp.status }), {
-      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+      headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
     });
   }
 
   const feishuContentType = fileResp.headers.get('Content-Type') || 'application/octet-stream';
   const body = await fileResp.arrayBuffer();
 
-  // 根据文件魔数修正 Content-Type
-  // Safari/iOS 的 MediaRecorder 输出 MP4 但飞书可能标记为 video/webm
   let contentType = feishuContentType;
   if (body.byteLength >= 12) {
     const header = new Uint8Array(body.slice(0, 12));
-    // MP4/M4A: 以 ftyp 开头（偏移4）
     if (header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) {
-      // 纯音频 MP4 → audio/mp4，有视频轨 → video/mp4
       if (feishuContentType.startsWith('video/') || feishuContentType.startsWith('audio/')) {
         contentType = 'audio/mp4';
       }
-    }
-    // WebM/Matroska: 以 1A 45 DF A3 开头
-    else if (header[0] === 0x1A && header[1] === 0x45 && header[2] === 0xDF && header[3] === 0xA3) {
+    } else if (header[0] === 0x1A && header[1] === 0x45 && header[2] === 0xDF && header[3] === 0xA3) {
       if (feishuContentType === 'video/webm') {
         contentType = 'audio/webm';
       }
@@ -570,7 +607,7 @@ async function handleAsset(request, env, token) {
     headers: {
       'Content-Type': contentType,
       'Cache-Control': 'public, max-age=3600',
-      ...CORS_HEADERS,
+      ...getCORSHeaders(request),
     },
   });
 }

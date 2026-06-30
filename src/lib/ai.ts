@@ -1,11 +1,16 @@
 import { CATEGORIES } from '@/utils/constants';
+import { getAuthToken } from '@/lib/auth';
 
 const WORKER_URL = 'https://api.tongxi.xyz';
 
 async function callWorkerAI(action: string, data: Record<string, any>): Promise<string> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['X-Auth-Token'] = token;
+
   const response = await fetch(`${WORKER_URL}/api/ai`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ action, data }),
   });
 

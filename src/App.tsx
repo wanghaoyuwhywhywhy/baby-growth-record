@@ -1,6 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
+import { isAuthenticated, clearAuthToken } from '@/lib/auth';
+import LoginPage from '@/pages/LoginPage';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
 import TimelinePage from '@/pages/TimelinePage';
@@ -15,7 +17,6 @@ function setupAutoUpdate() {
 
   // 监听 SW 更新，检测到新版本自动刷新
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // 新 SW 已激活，自动刷新页面加载最新资源
     window.location.reload();
   });
 
@@ -27,7 +28,7 @@ function setupAutoUpdate() {
     });
   }, CHECK_INTERVAL);
 
-  // 页面可见性变化时也检查更新（用户切回页面时）
+  // 页面可见性变化时也检查更新
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       navigator.serviceWorker.getRegistration().then((reg) => {
@@ -37,15 +38,14 @@ function setupAutoUpdate() {
   });
 }
 
-// 启动时检查是否长时间未刷新，超过24小时自动清理缓存并刷新
+// 超过24小时自动清理缓存并刷新
 function checkStaleCache() {
   const LAST_REFRESH_KEY = 'last_refresh_time';
-  const STALE_THRESHOLD = 24 * 60 * 60 * 1000; // 24小时
+  const STALE_THRESHOLD = 24 * 60 * 60 * 1000;
   const now = Date.now();
   const lastRefresh = parseInt(localStorage.getItem(LAST_REFRESH_KEY) || '0', 10);
 
   if (lastRefresh && (now - lastRefresh > STALE_THRESHOLD)) {
-    // 超过24小时，清空缓存后刷新
     if ('caches' in window) {
       caches.keys().then((names) => {
         names.forEach((name) => caches.delete(name));
@@ -61,14 +61,52 @@ function checkStaleCache() {
 }
 
 export default function App() {
+  const [authed, setAuthed] = useState(isAuthenticated());
   const initApp = useAppStore((s) => s.initApp);
   const initialized = useAppStore((s) => s.initialized);
 
   useEffect(() => {
     checkStaleCache();
     setupAutoUpdate();
-    initApp();
-  }, [initApp]);
+  }, []);
+
+  useEffect(() => {
+    if (authed) initApp();
+  }, [authed, initApp]);
+
+  // API 401 时自动登出
+  useEffect(() => {
+    const handler = (e: ErrorEvent) => {
+      if (e.message === 'AUTH_EXPIRED') {
+        clearAuthToken();
+        setAuthed(false);
+      }
+    };
+    window.addEventListener('error', handler);
+    return () => window.removeEventListener('error', handler);
+  }, []);
+
+  // 全局 401 拦截
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const resp = await originalFetch(...args);
+      if (resp.status === 401) {
+        clearAuthToken();
+        setAuthed(false);
+      }
+      return resp;
+    };
+    return () => { window.fetch = originalFetch; };
+  }, []);
+
+  const handleLoginSuccess = useCallback(() => {
+    setAuthed(true);
+  }, []);
+
+  if (!authed) {
+    return <LoginPage onSuccess={handleLoginSuccess} />;
+  }
 
   if (!initialized) {
     return (
