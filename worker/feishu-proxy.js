@@ -227,11 +227,13 @@ async function ensureRecordFields(token, env) {
       }),
     });
   } else if (mediaTypeField.type === 3) {
-    // 如果是单选字段(type=3)，转换为多选(type=4)
-    await fetch(`${fieldsUrl}/${mediaTypeField.field_id}`, {
-      method: 'PUT',
+    // 单选不能直接改多选，需要删除后重建
+    await fetch(`${fieldsUrl}/${mediaTypeField.field_id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    await fetch(fieldsUrl, {
+      method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        field_name: '媒体类型',
         type: 4,
         property: {
           options: [
