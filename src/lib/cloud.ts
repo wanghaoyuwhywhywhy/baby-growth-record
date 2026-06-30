@@ -42,6 +42,17 @@ function feishuToBaby(item: any): Baby {
 
 function feishuToRecord(item: any): DailyRecord {
   const fields = item.fields || {};
+  // 提取附件字段的 file_tokens
+  const attachmentField = fields['附件'];
+  let mediaTokens: string[] = [];
+  if (Array.isArray(attachmentField)) {
+    mediaTokens = attachmentField
+      .filter((a: any) => a.file_token)
+      .map((a: any) => a.file_token);
+  }
+  // 也兼容旧的 媒体附件 文本字段
+  const legacyMedia = fields['媒体附件'] || [];
+
   return {
     record_id: item.record_id || item.id,
     记录内容: fields['记录内容'] || '',
@@ -51,7 +62,7 @@ function feishuToRecord(item: any): DailyRecord {
       : fields['记录时间'] || '',
     是否为里程碑: fields['是否为里程碑'] || false,
     关联宝宝: extractLinkedIds(fields['关联宝宝']),
-    媒体附件: fields['媒体附件'] || [],
+    媒体附件: mediaTokens.length > 0 ? mediaTokens : legacyMedia,
     媒体类型: fields['媒体类型'] || 'text',
   };
 }
@@ -293,4 +304,30 @@ export async function cloudHealthCheck(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// 上传媒体文件到飞书多维表格附件字段
+export async function cloudUploadMedia(recordId: string, file: Blob, fileName: string): Promise<string | null> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file, fileName);
+    formData.append('record_id', recordId);
+
+    const resp = await fetch(`${WORKER_URL}/api/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!resp.ok) throw new Error(`上传失败: ${resp.status}`);
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || '上传失败');
+    return data.file_token || null;
+  } catch (e) {
+    console.warn('云端上传媒体失败:', e);
+    return null;
+  }
+}
+
+// 获取云端媒体文件的代理 URL
+export function getCloudAssetUrl(recordId: string, fileToken: string): string {
+  return `${WORKER_URL}/api/asset?record_id=${encodeURIComponent(recordId)}&file_token=${encodeURIComponent(fileToken)}`;
 }

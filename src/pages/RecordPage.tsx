@@ -6,6 +6,7 @@ import NavHeader from '@/components/NavHeader';
 import MediaInput, { type MediaItem } from '@/components/MediaInput';
 import { feishuAPI } from '@/api/feishu';
 import { autoCategory, polishContent } from '@/lib/ai';
+import { cloudUploadMedia } from '@/lib/cloud';
 import { Check, Sparkles, Wand2, Loader2 } from 'lucide-react';
 
 type MediaType = 'text' | 'voice' | 'video' | 'photo';
@@ -96,7 +97,14 @@ export default function RecordPage() {
       });
 
       for (const media of mediaItems) {
+        // 存到本地 IndexedDB
         await feishuAPI.addMedia(media.id, media.type, media.blob, record.record_id);
+        // 上传到飞书云端
+        const ext = media.type === 'video' ? 'mp4' : 'jpg';
+        const fileToken = await cloudUploadMedia(record.record_id, media.blob, `${media.id}.${ext}`);
+        if (fileToken && !record.媒体附件?.includes(fileToken)) {
+          record.媒体附件 = [...(record.媒体附件 || []), fileToken];
+        }
       }
 
       setSubmitting(false);
