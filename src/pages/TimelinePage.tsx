@@ -34,36 +34,43 @@ function formatTimelineTime(dateStr: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// 判断是否为云端 file_token
+function isCloudToken(token: string): boolean {
+  return !token.startsWith('media_') && !token.startsWith('img_') && !token.startsWith('vid_') && !token.startsWith('voice_');
+}
+
+// 语音播放器组件
 function VoicePlayer({ record }: { record: DailyRecord }) {
   const [playing, setPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 云端附件：媒体附件中非本地ID的都是云端file_token
-  // 本地ID格式: media_xxx, img_xxx, vid_xxx, voice_xxx
   const mediaAttachments = record.媒体附件 || [];
-  const cloudTokens = mediaAttachments.filter(t =>
-    !t.startsWith('media_') && !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
-  );
+  const cloudTokens = mediaAttachments.filter(isCloudToken);
 
   useEffect(() => {
-    // 优先使用云端 URL
+    // 优先使用云端 URL，找第一个 voice 类型的 token
     if (cloudTokens.length > 0) {
-      setAudioUrl(getCloudAssetUrl(record.record_id, cloudTokens[0]));
-      return;
+      // 有 voice 媒体类型时，第一个 token 通常是语音
+      const mediaTypes = record.媒体类型 || ['text'];
+      if (mediaTypes.includes('voice')) {
+        setAudioUrl(getCloudAssetUrl(record.record_id, cloudTokens[0]));
+        return;
+      }
     }
     // 本地 fallback
     let url = '';
     async function load() {
       const items = await feishuAPI.getMediaByRecord(record.record_id);
-      if (items.length > 0) {
-        url = URL.createObjectURL(items[0].blob);
+      const voiceItem = items.find(i => i.type === 'voice');
+      if (voiceItem) {
+        url = URL.createObjectURL(voiceItem.blob);
         setAudioUrl(url);
       }
     }
     load();
     return () => { if (url) URL.revokeObjectURL(url); };
-  }, [record.record_id, cloudTokens.length]);
+  }, [record.record_id, record.媒体类型, cloudTokens.length]);
 
   function toggle() {
     if (!audioRef.current) return;
@@ -71,38 +78,48 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     } else {
-      audioRef.current.play();
+      audioRef.current.play().catch(() => {});
     }
     setPlaying(!playing);
   }
 
   if (!audioUrl) return null;
   return (
-    <div className="flex items-center gap-2 mt-1.5">
-      <button
-        onClick={toggle}
-        className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0"
-      >
-        {playing ? <Pause size={14} /> : <Play size={14} />}
-      </button>
-      <audio ref={audioRef} src={audioUrl} onEnded={() => setPlaying(false)} className="hidden" />
-      <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
-        <div className="h-full bg-amber-400 rounded-full" style={{ width: playing ? '100%' : '0%', transition: 'width 0.3s' }} />
+    <div className="mt-2">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={toggle}
+          className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform"
+        >
+          {playing ? <Pause size={14} /> : <Play size={14} />}
+        </button>
+        <audio ref={audioRef} src={audioUrl} onEnded={() => setPlaying(false)} onError={() => console.warn('语音播放失败')} className="hidden" />
+        <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
+          <div className="h-full bg-amber-400 rounded-full" style={{ width: playing ? '100%' : '0%', transition: 'width 0.3s' }} />
+        </div>
       </div>
+      {/* 语音转文字 */}
+      {record.语音转文字 && (
+        <div className="mt-1.5 p-2 bg-amber-50 rounded-lg border border-amber-200">
+          <div className="flex items-center gap-1 mb-0.5">
+            <Mic size={10} className="text-amber-500" />
+            <span className="text-[10px] text-amber-600 font-medium">语音转文字</span>
+          </div>
+          <p className="text-xs text-ink leading-relaxed">{record.语音转文字}</p>
+        </div>
+      )}
     </div>
   );
 }
 
+// 媒体预览组件（图片/视频）
 function MediaPreview({ record }: { record: DailyRecord }) {
   const [localImages, setLocalImages] = useState<{ id: string; url: string }[]>([]);
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // 云端附件：媒体附件中非本地ID的都是云端file_token
-  // 本地ID格式: media_xxx, img_xxx, vid_xxx, voice_xxx
   const mediaAttachments = record.媒体附件 || [];
-  const cloudTokens = mediaAttachments.filter(t =>
-    !t.startsWith('media_') && !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
-  );
+  const cloudTokens = mediaAttachments.filter(isCloudToken);
 
   useEffect(() => {
     // 如果有云端 token，优先使用云端 URL，不需要加载本地
@@ -131,21 +148,54 @@ function MediaPreview({ record }: { record: DailyRecord }) {
     return () => { revoked = true; urls.forEach(u => URL.revokeObjectURL(u)); };
   }, [record.record_id, record.媒体类型, cloudTokens.length]);
 
-  // 优先使用云端 URL
+  const mediaTypes = record.媒体类型 || ['text'];
+
+  // 云端 URL
   if (cloudTokens.length > 0) {
-    const hasVideo = (record.媒体类型 || ['text']).includes('video');
-    if (hasVideo) {
+    // 分离 voice token 和 photo/video token
+    const voiceTokens: string[] = [];
+    const mediaTokens: string[] = [];
+
+    if (mediaTypes.includes('voice')) {
+      // 第一个是 voice，其余是 photo/video
+      voiceTokens.push(cloudTokens[0]);
+      mediaTokens.push(...cloudTokens.slice(1));
+    } else {
+      mediaTokens.push(...cloudTokens);
+    }
+
+    const hasVideo = mediaTypes.includes('video');
+
+    if (hasVideo && mediaTokens.length > 0) {
       return (
         <div className="mt-2">
-          <video src={getCloudAssetUrl(record.record_id, cloudTokens[0])} controls className="w-full max-h-48 rounded-lg" />
+          <video src={getCloudAssetUrl(record.record_id, mediaTokens[0])} controls className="w-full max-h-48 rounded-lg" />
         </div>
       );
     }
+
     return (
-      <div className="flex gap-2 mt-2 overflow-x-auto">
-        {cloudTokens.map(token => (
-          <img key={token} src={getCloudAssetUrl(record.record_id, token)} alt="" className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0" />
-        ))}
+      <div>
+        <div className="flex gap-2 mt-2 overflow-x-auto">
+          {mediaTokens.map(token => (
+            <img
+              key={token}
+              src={getCloudAssetUrl(record.record_id, token)}
+              alt=""
+              className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0 cursor-pointer"
+              onClick={() => setPreviewImage(getCloudAssetUrl(record.record_id, token))}
+            />
+          ))}
+        </div>
+        {/* 图片全屏预览 */}
+        {previewImage && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+            onClick={() => setPreviewImage(null)}
+          >
+            <img src={previewImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
+          </div>
+        )}
       </div>
     );
   }
@@ -160,10 +210,26 @@ function MediaPreview({ record }: { record: DailyRecord }) {
   }
   if (localImages.length > 0) {
     return (
-      <div className="flex gap-2 mt-2 overflow-x-auto">
-        {localImages.map(img => (
-          <img key={img.id} src={img.url} alt="" className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0" />
-        ))}
+      <div>
+        <div className="flex gap-2 mt-2 overflow-x-auto">
+          {localImages.map(img => (
+            <img
+              key={img.id}
+              src={img.url}
+              alt=""
+              className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0 cursor-pointer"
+              onClick={() => setPreviewImage(img.url)}
+            />
+          ))}
+        </div>
+        {previewImage && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+            onClick={() => setPreviewImage(null)}
+          >
+            <img src={previewImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
+          </div>
+        )}
       </div>
     );
   }
@@ -183,16 +249,12 @@ export default function TimelinePage() {
     const mediaTypes = r.媒体类型 || ['text'];
     let matchMedia = true;
     if (mediaFilter === 'text') {
-      // 文字：只展示纯文字（只有text，没有其他媒体类型）
       matchMedia = mediaTypes.length === 1 && mediaTypes[0] === 'text';
     } else if (mediaFilter === 'voice') {
-      // 语音：展示包含语音的（纯语音 + 文字+语音）
       matchMedia = mediaTypes.includes('voice');
     } else if (mediaFilter === 'photo') {
-      // 图片：展示包含图片的
       matchMedia = mediaTypes.includes('photo');
     } else if (mediaFilter === 'video') {
-      // 视频：展示包含视频的
       matchMedia = mediaTypes.includes('video');
     }
     const matchCategory = categoryFilter === '全部' || r.分类 === categoryFilter;
@@ -257,7 +319,6 @@ export default function TimelinePage() {
             <div className="space-y-1">
               {filtered.map((record, index) => {
                 const mediaTypes = record.媒体类型 || ['text'];
-                // 显示第一个非text的媒体类型图标，或者text
                 const primaryMedia = mediaTypes.find(t => t !== 'text') || 'text';
                 const style = MEDIA_TYPE_STYLE[primaryMedia] || MEDIA_TYPE_STYLE['text'];
                 const category = CATEGORY_MAP[record.分类];
@@ -289,7 +350,7 @@ export default function TimelinePage() {
                         {record.记录内容}
                       </p>
 
-                      {/* 语音播放 */}
+                      {/* 语音播放 + 转文字 */}
                       {mediaTypes.includes('voice') ? (
                         <VoicePlayer record={record} />
                       ) : null}

@@ -77,6 +77,7 @@ function feishuToRecord(item: any): DailyRecord {
     关联宝宝: extractLinkedIds(fields['关联宝宝']),
     媒体附件: mediaTokens.length > 0 ? mediaTokens : legacyMedia,
     媒体类型: parseMediaTypes(fields['媒体类型']),
+    语音转文字: fields['语音转文字'] || '',
   };
 }
 
@@ -188,6 +189,7 @@ export async function cloudCreateRecord(record: DailyRecord): Promise<string | n
       '关联宝宝': record.关联宝宝,
     };
     if (record.媒体类型?.length) fields['媒体类型'] = record.媒体类型;
+    if (record.语音转文字) fields['语音转文字'] = record.语音转文字;
     // 注意：附件字段通过上传 API 单独处理，不在创建记录时发送本地ID
     const data = await apiPost('/api/records', fields);
     // 检查飞书返回的错误
