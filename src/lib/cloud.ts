@@ -175,7 +175,7 @@ export async function cloudCreateRecord(record: DailyRecord): Promise<string | n
       '关联宝宝': record.关联宝宝,
     };
     if (record.媒体类型) fields['媒体类型'] = record.媒体类型;
-    if (record.媒体附件?.length) fields['媒体附件'] = record.媒体附件;
+    // 注意：附件字段通过上传 API 单独处理，不在创建记录时发送本地ID
     const data = await apiPost('/api/records', fields);
     return data?.data?.record?.record_id || null;
   } catch (e) {
@@ -250,7 +250,7 @@ export async function cloudUpdateRecord(record: DailyRecord): Promise<boolean> {
       '关联宝宝': record.关联宝宝,
     };
     if (record.媒体类型) fields['媒体类型'] = record.媒体类型;
-    if (record.媒体附件?.length) fields['媒体附件'] = record.媒体附件;
+    // 注意：附件字段通过上传 API 单独处理，不在更新记录时发送
     await apiPut('/api/records', record.record_id, fields);
     return true;
   } catch (e) {
