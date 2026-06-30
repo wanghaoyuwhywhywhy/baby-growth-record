@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { type DailyRecord } from '@/api/feishu';
 import { feishuAPI } from '@/api/feishu';
-import { CATEGORY_MAP } from '@/utils/constants';
+import { CATEGORIES, CATEGORY_MAP } from '@/utils/constants';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
 import { FileText, Mic, Video, Camera, Play, Pause } from 'lucide-react';
@@ -14,6 +14,11 @@ const MEDIA_TYPES = [
   { key: 'video', label: '视频', icon: Video },
   { key: 'photo', label: '照片', icon: Camera },
 ] as const;
+
+const CATEGORY_FILTERS = [
+  { key: '全部', label: '全部', emoji: '📋' },
+  ...CATEGORIES.map(c => ({ key: c.key, label: c.label, emoji: c.emoji })),
+];
 
 const MEDIA_TYPE_STYLE: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
   text: { bg: 'bg-blue-100', text: 'text-blue-600', icon: <FileText size={12} /> },
@@ -124,19 +129,43 @@ export default function TimelinePage() {
   const { records, fetchRecords, fetchBabies, currentBaby } = useAppStore();
   const currentBabyId = currentBaby()?.record_id;
   const [mediaFilter, setMediaFilter] = useState('全部');
+  const [categoryFilter, setCategoryFilter] = useState('全部');
 
   useEffect(() => { fetchBabies(); }, [fetchBabies]);
   useEffect(() => { fetchRecords(); }, [fetchRecords, currentBabyId]);
 
-  const filtered = mediaFilter === '全部'
-    ? records
-    : records.filter(r => (r.媒体类型 || 'text') === mediaFilter);
+  const filtered = records.filter(r => {
+    const matchMedia = mediaFilter === '全部' || (r.媒体类型 || 'text') === mediaFilter;
+    const matchCategory = categoryFilter === '全部' || r.分类 === categoryFilter;
+    return matchMedia && matchCategory;
+  });
 
   return (
     <div className="page-container">
       <NavHeader title="成长时间线" showBack />
 
       <div className="mt-4">
+        {/* 分类筛选 */}
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-5 px-5 mb-2">
+          {CATEGORY_FILTERS.map(cf => {
+            const isActive = categoryFilter === cf.key;
+            return (
+              <button
+                key={cf.key}
+                onClick={() => setCategoryFilter(cf.key)}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-all flex-shrink-0 ${
+                  isActive
+                    ? 'bg-ink text-white shadow-soft font-medium'
+                    : 'bg-cream-dark text-muted hover:bg-rule/50'
+                }`}
+              >
+                <span className="text-xs">{cf.emoji}</span>
+                {cf.label}
+              </button>
+            );
+          })}
+        </div>
+
         {/* 媒体类型筛选 */}
         <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-5 px-5 mb-3">
           {MEDIA_TYPES.map(mt => {
