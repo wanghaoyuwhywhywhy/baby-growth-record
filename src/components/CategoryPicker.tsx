@@ -7,7 +7,7 @@ interface CategoryPickerProps {
 
 export default function CategoryPicker({ selected, onSelect }: CategoryPickerProps) {
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-5 px-5">
       {CATEGORIES.map((cat) => {
         const isSelected = selected === cat.key;
         return (
@@ -16,18 +16,15 @@ export default function CategoryPicker({ selected, onSelect }: CategoryPickerPro
             type="button"
             onClick={() => onSelect(cat.key)}
             className={`
-              flex flex-col items-center gap-1.5 py-4 rounded-2xl transition-all duration-200
+              flex items-center gap-1 px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-all duration-200 flex-shrink-0
               ${isSelected
-                ? 'bg-coral/10 shadow-soft scale-105'
-                : 'bg-cream-dark hover:bg-cream-dark/80 active:scale-95'
+                ? 'bg-coral text-white shadow-soft font-medium'
+                : 'bg-cream-dark text-muted hover:bg-cream-dark/80 active:scale-95'
               }
             `}
-            style={isSelected ? { borderColor: cat.color, borderWidth: '2px', borderStyle: 'solid' } : {}}
           >
-            <span className="text-2xl">{cat.emoji}</span>
-            <span className={`text-xs font-medium ${isSelected ? 'text-coral-dark' : 'text-muted'}`}>
-              {cat.label}
-            </span>
+            <span className="text-sm">{cat.emoji}</span>
+            <span>{cat.label}</span>
           </button>
         );
       })}

@@ -39,8 +39,9 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 云端附件 file_tokens
-  const cloudTokens = (record.媒体附件 || []).filter(t => t.startsWith('boxcn') || t.startsWith('boxc'));
+  // 云端附件：媒体附件中非本地ID的都是云端file_token
+  const mediaAttachments = record.媒体附件 || [];
+  const cloudTokens = mediaAttachments.filter(t => !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_'));
 
   useEffect(() => {
     // 优先使用云端 URL
@@ -93,8 +94,9 @@ function MediaPreview({ record }: { record: DailyRecord }) {
   const [localImages, setLocalImages] = useState<{ id: string; url: string }[]>([]);
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
 
-  // 云端附件 file_tokens
-  const cloudTokens = (record.媒体附件 || []).filter(t => t.startsWith('boxcn') || t.startsWith('boxc'));
+  // 云端附件：媒体附件中非本地ID的都是云端file_token
+  const mediaAttachments = record.媒体附件 || [];
+  const cloudTokens = mediaAttachments.filter(t => !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_'));
 
   useEffect(() => {
     // 如果有云端 token，优先使用云端 URL，不需要加载本地

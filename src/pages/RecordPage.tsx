@@ -96,20 +96,23 @@ export default function RecordPage() {
         媒体附件: mediaIds.length > 0 ? mediaIds : undefined,
       });
 
+      // 上传媒体到飞书云端，获取 file_tokens
+      const fileTokens: string[] = [];
       for (const media of mediaItems) {
-        // 存到本地 IndexedDB
+        // 存到本地 IndexedDB（用于即时预览）
         await feishuAPI.addMedia(media.id, media.type, media.blob, record.record_id);
         // 上传到飞书云端
         const ext = media.type === 'video' ? 'mp4' : 'jpg';
         const fileToken = await cloudUploadMedia(record.record_id, media.blob, `${media.id}.${ext}`);
-        if (fileToken && !record.媒体附件?.includes(fileToken)) {
-          record.媒体附件 = [...(record.媒体附件 || []), fileToken];
+        if (fileToken) {
+          fileTokens.push(fileToken);
         }
       }
 
-      // 持久化更新后的媒体附件到本地 IndexedDB
-      if (record.媒体附件 && record.媒体附件.length > 0) {
-        await feishuAPI.updateRecordMedia(record.record_id, record.媒体附件);
+      // 用云端 file_tokens 替换本地 media IDs，持久化到 IndexedDB
+      if (fileTokens.length > 0) {
+        record.媒体附件 = fileTokens;
+        await feishuAPI.updateRecordMedia(record.record_id, fileTokens);
       }
 
       setSubmitting(false);
