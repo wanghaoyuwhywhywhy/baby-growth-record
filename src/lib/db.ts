@@ -148,11 +148,12 @@ export async function dbDeleteMedia(id: string): Promise<void> {
 // 清空所有数据（同步时先清空再写入云端数据）
 export async function dbClearAll(): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['babies', 'records', 'growth'], 'readwrite');
+  const tx = db.transaction(['babies', 'records', 'growth', 'media'], 'readwrite');
   await Promise.all([
     tx.objectStore('babies').clear(),
     tx.objectStore('records').clear(),
     tx.objectStore('growth').clear(),
+    tx.objectStore('media').clear(),
     tx.done,
   ]);
 }

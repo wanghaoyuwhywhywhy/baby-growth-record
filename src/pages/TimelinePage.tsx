@@ -28,7 +28,7 @@ function formatTimelineTime(dateStr: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function VoicePlayer({ recordId, mediaIds }: { recordId: string; mediaIds: string[] }) {
+function VoicePlayer({ recordId }: { recordId: string }) {
   const [playing, setPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -82,9 +82,8 @@ function MediaPreview({ record }: { record: DailyRecord }) {
     let urls: string[] = [];
     let revoked = false;
     async function load() {
-      if (!record.媒体附件?.length) return;
       const items = await feishuAPI.getMediaByRecord(record.record_id);
-      if (revoked) return;
+      if (revoked || items.length === 0) return;
       if (record.媒体类型 === 'video' && items.length > 0) {
         const u = URL.createObjectURL(items[0].blob);
         urls.push(u);
@@ -100,7 +99,7 @@ function MediaPreview({ record }: { record: DailyRecord }) {
     }
     load();
     return () => { revoked = true; urls.forEach(u => URL.revokeObjectURL(u)); };
-  }, [record.record_id, record.媒体附件, record.媒体类型]);
+  }, [record.record_id, record.媒体类型]);
 
   if (videoUrl) {
     return (
@@ -201,12 +200,12 @@ export default function TimelinePage() {
                       </p>
 
                       {/* 语音播放 */}
-                      {mediaType === 'voice' && record.媒体附件?.length ? (
-                        <VoicePlayer recordId={record.record_id} mediaIds={record.媒体附件} />
+                      {mediaType === 'voice' ? (
+                        <VoicePlayer recordId={record.record_id} />
                       ) : null}
 
                       {/* 媒体预览（照片/视频） */}
-                      {(mediaType === 'photo' || mediaType === 'video') && record.媒体附件?.length ? (
+                      {(mediaType === 'photo' || mediaType === 'video') ? (
                         <MediaPreview record={record} />
                       ) : null}
                     </div>
