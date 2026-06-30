@@ -329,23 +329,26 @@ ${records.length > 0
   }
 }
 
-// 确保记录表有"附件"字段（type=17）
+// 确保记录表有"附件"字段（type=17），返回字段信息
 async function ensureAttachmentField(token, env) {
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/fields`;
   const resp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
   const data = await resp.json();
   const fields = data.data?.items || [];
-  const hasAttachment = fields.some(f => f.field_name === '附件');
-  if (!hasAttachment) {
-    await fetch(fieldsUrl, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ field_name: '附件', type: 17 }),
-    });
-  }
+  const existing = fields.find(f => f.field_name === '附件');
+  if (existing) return existing;
+  // 创建附件字段
+  const createResp = await fetch(fieldsUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ field_name: '附件', type: 17 }),
+  });
+  const createData = await createResp.json();
+  return createData.data?.field || {};
 }
 
 // 上传媒体文件到飞书多维表格附件字段
+// 正确流程：1. Drive API 上传文件获取 file_token  2. 更新记录的附件字段
 async function handleUpload(request, env, token) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
@@ -358,59 +361,127 @@ async function handleUpload(request, env, token) {
   // 确保附件字段存在
   await ensureAttachmentField(token, env);
 
-  // 上传到飞书多维表格附件（field_code 需要 URL 编码中文）
-  const fieldCode = encodeURIComponent('附件');
-  const uploadUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/records/${recordId}/attachments?field_code=${fieldCode}`;
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const tableId = env.FEISHU_TABLE_RECORD;
+  const fileName = file.name || 'upload.jpg';
+  const fileSize = file.size || 0;
+  const isImage = (file.type || '').startsWith('image/');
+  const parentType = isImage ? 'bitable_image' : 'bitable_file';
 
-  const uploadForm = new FormData();
-  uploadForm.append('file', file);
+  // Step 1: 通过 Drive 上传素材 API 上传文件
+  const driveForm = new FormData();
+  driveForm.append('file_name', fileName);
+  driveForm.append('parent_type', parentType);
+  driveForm.append('parent_node', appToken);
+  driveForm.append('size', String(fileSize));
+  driveForm.append('extra', JSON.stringify({ drive_route_token: appToken }));
+  driveForm.append('file', file, fileName);
 
-  const resp = await fetch(uploadUrl, {
+  const uploadResp = await fetch('https://open.feishu.cn/open-apis/drive/v1/medias/upload_all', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token}` },
-    body: uploadForm,
+    body: driveForm,
   });
 
-  const data = await resp.json();
-  if (data.code !== 0) return { error: data.msg || '上传失败', code: data.code, feishu_response: JSON.stringify(data).slice(0, 500) };
+  const uploadData = await uploadResp.json();
+  if (uploadData.code !== 0) {
+    return { error: uploadData.msg || '上传失败', code: uploadData.code, detail: JSON.stringify(uploadData).slice(0, 500) };
+  }
 
-  // 飞书返回格式: data.attachment.file_token 或 data.file_token
-  const attachment = data.data?.attachment || data.data || {};
-  const fileToken = attachment.file_token || '';
+  const fileToken = uploadData.data?.file_token;
+  if (!fileToken) {
+    return { error: '上传成功但未获取到 file_token', detail: JSON.stringify(uploadData).slice(0, 500) };
+  }
+
+  // Step 2: 读取当前记录，获取现有附件
+  const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+  const recordResp = await fetch(recordUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const recordData = await recordResp.json();
+
+  const existingAttachments = recordData.data?.record?.fields?.['附件'] || [];
+  const existingTokens = existingAttachments
+    .filter(a => a.file_token)
+    .map(a => ({ file_token: a.file_token }));
+
+  // 添加新的 file_token
+  const allAttachments = [...existingTokens, { file_token: fileToken }];
+
+  // Step 3: 更新记录的附件字段
+  const updateResp = await fetch(recordUrl, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      fields: {
+        '附件': allAttachments,
+      },
+    }),
+  });
+
+  const updateData = await updateResp.json();
+  if (updateData.code !== 0) {
+    console.warn('更新记录附件字段失败:', updateData.msg);
+    // 文件已上传成功，仍然返回 file_token
+  }
+
   return { ok: true, file_token: fileToken };
 }
 
-// 代理下载飞书多维表格附件
+// 代理下载飞书附件
 async function handleAsset(request, env, token) {
   const url = new URL(request.url);
-  const recordId = url.searchParams.get('record_id');
   const fileToken = url.searchParams.get('file_token');
+  const recordId = url.searchParams.get('record_id');
 
-  if (!recordId || !fileToken) {
-    return new Response(JSON.stringify({ error: 'record_id and file_token are required' }), {
+  if (!fileToken) {
+    return new Response(JSON.stringify({ error: 'file_token is required' }), {
       headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     });
   }
 
-  // 读取记录获取附件的 tmp_url
-  const recordUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/records/${recordId}`;
-  const recordResp = await fetch(recordUrl, {
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const tableId = env.FEISHU_TABLE_RECORD;
+
+  // 通过 Drive 下载素材 API 下载文件
+  let downloadUrl = `${FEISHU_API}/drive/v1/medias/${fileToken}/download`;
+
+  // 如果有 record_id，添加 extra 参数（用于高级权限 bitable）
+  if (recordId) {
+    try {
+      const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+      const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const fieldsData = await fieldsResp.json();
+      const attachmentField = (fieldsData.data?.items || []).find(f => f.field_name === '附件');
+      if (attachmentField) {
+        const extra = JSON.stringify({
+          bitablePerm: {
+            tableId: tableId,
+            attachments: {
+              [attachmentField.field_id]: {
+                [recordId]: [fileToken]
+              }
+            }
+          }
+        });
+        downloadUrl += `?extra=${encodeURIComponent(extra)}`;
+      }
+    } catch (e) {
+      // extra 参数获取失败，继续无 extra 下载
+    }
+  }
+
+  const fileResp = await fetch(downloadUrl, {
     headers: { 'Authorization': `Bearer ${token}` },
   });
-  const recordData = await recordResp.json();
 
-  const fields = recordData.data?.record?.fields || {};
-  const attachments = fields['附件'] || [];
-  const attachment = attachments.find(a => a.file_token === fileToken);
-
-  if (!attachment?.tmp_url) {
-    return new Response(JSON.stringify({ error: '文件未找到' }), {
+  if (!fileResp.ok) {
+    return new Response(JSON.stringify({ error: '文件下载失败', status: fileResp.status }), {
       headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     });
   }
 
-  // 下载文件
-  const fileResp = await fetch(attachment.tmp_url);
   const contentType = fileResp.headers.get('Content-Type') || 'application/octet-stream';
   const body = await fileResp.arrayBuffer();
 
