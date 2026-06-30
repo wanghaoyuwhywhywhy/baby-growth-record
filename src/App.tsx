@@ -74,30 +74,14 @@ export default function App() {
     if (authed) initApp();
   }, [authed, initApp]);
 
-  // API 401 时自动登出
+  // API 401 时通过自定义事件通知 App 登出
   useEffect(() => {
-    const handler = (e: ErrorEvent) => {
-      if (e.message === 'AUTH_EXPIRED') {
-        clearAuthToken();
-        setAuthed(false);
-      }
+    const handler = () => {
+      clearAuthToken();
+      setAuthed(false);
     };
-    window.addEventListener('error', handler);
-    return () => window.removeEventListener('error', handler);
-  }, []);
-
-  // 全局 401 拦截
-  useEffect(() => {
-    const originalFetch = window.fetch;
-    window.fetch = async (...args) => {
-      const resp = await originalFetch(...args);
-      if (resp.status === 401) {
-        clearAuthToken();
-        setAuthed(false);
-      }
-      return resp;
-    };
-    return () => { window.fetch = originalFetch; };
+    window.addEventListener('auth-expired', handler);
+    return () => window.removeEventListener('auth-expired', handler);
   }, []);
 
   const handleLoginSuccess = useCallback(() => {
