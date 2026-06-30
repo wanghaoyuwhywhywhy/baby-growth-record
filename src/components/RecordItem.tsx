@@ -3,6 +3,7 @@ import { type DailyRecord } from '@/api/feishu';
 import { formatDate } from '@/utils/date';
 import { CATEGORY_MAP } from '@/utils/constants';
 import { feishuAPI } from '@/api/feishu';
+import { getCloudAssetUrl } from '@/lib/cloud';
 
 interface MediaInfo {
   id: string;
@@ -22,13 +23,31 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
   const [mediaList, setMediaList] = useState<MediaInfo[]>([]);
 
   useEffect(() => {
+    if (!record.媒体附件 || record.媒体附件.length === 0) {
+      setMediaList([]);
+      return;
+    }
+
+    // 判断云端 file_tokens（非本地ID格式）
+    const cloudTokens = record.媒体附件.filter(
+      t => !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
+    );
+
+    if (cloudTokens.length > 0) {
+      // 使用云端 URL
+      const media = cloudTokens.map(token => ({
+        id: token,
+        type: (record.媒体类型 === 'video' ? 'video' : 'image') as 'image' | 'video',
+        url: getCloudAssetUrl(record.record_id, token),
+      }));
+      setMediaList(media);
+      return;
+    }
+
+    // 本地 fallback
     let revoked = false;
     let urls: string[] = [];
     async function loadMedia() {
-      if (!record.媒体附件 || record.媒体附件.length === 0) {
-        setMediaList([]);
-        return;
-      }
       const items = await feishuAPI.getMediaByRecord(record.record_id);
       if (revoked) {
         urls.forEach((u) => URL.revokeObjectURL(u));
@@ -46,7 +65,7 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
       revoked = true;
       urls.forEach((u) => URL.revokeObjectURL(u));
     };
-  }, [record.record_id, record.媒体附件]);
+  }, [record.record_id, record.媒体附件, record.媒体类型]);
 
   return (
     <div className="flex items-start gap-3 py-3 group">
