@@ -22,6 +22,19 @@ function extractLinkedIds(field: any): string[] {
   return [];
 }
 
+// 解析媒体类型：兼容多选数组、旧单选字符串、逗号分隔字符串
+function parseMediaTypes(value: any): ('text' | 'voice' | 'video' | 'photo')[] {
+  if (Array.isArray(value)) {
+    // 飞书多选字段返回 ["text", "photo"]
+    return value.filter((v: any) => typeof v === 'string') as any;
+  }
+  if (typeof value === 'string' && value.includes(',')) {
+    return value.split(',').map((v: string) => v.trim()) as any;
+  }
+  if (typeof value === 'string' && value) return [value] as any;
+  return ['text'];
+}
+
 // 飞书多维表格字段 → 本地接口字段映射
 
 function feishuToBaby(item: any): Baby {
@@ -63,7 +76,7 @@ function feishuToRecord(item: any): DailyRecord {
     是否为里程碑: fields['是否为里程碑'] || false,
     关联宝宝: extractLinkedIds(fields['关联宝宝']),
     媒体附件: mediaTokens.length > 0 ? mediaTokens : legacyMedia,
-    媒体类型: fields['媒体类型'] || 'text',
+    媒体类型: parseMediaTypes(fields['媒体类型']),
   };
 }
 
@@ -174,7 +187,7 @@ export async function cloudCreateRecord(record: DailyRecord): Promise<string | n
       '是否为里程碑': record.是否为里程碑,
       '关联宝宝': record.关联宝宝,
     };
-    if (record.媒体类型) fields['媒体类型'] = record.媒体类型;
+    if (record.媒体类型?.length) fields['媒体类型'] = record.媒体类型;
     // 注意：附件字段通过上传 API 单独处理，不在创建记录时发送本地ID
     const data = await apiPost('/api/records', fields);
     // 检查飞书返回的错误
@@ -258,7 +271,7 @@ export async function cloudUpdateRecord(record: DailyRecord): Promise<boolean> {
       '是否为里程碑': record.是否为里程碑,
       '关联宝宝': record.关联宝宝,
     };
-    if (record.媒体类型) fields['媒体类型'] = record.媒体类型;
+    if (record.媒体类型?.length) fields['媒体类型'] = record.媒体类型;
     // 注意：附件字段通过上传 API 单独处理，不在更新记录时发送
     await apiPut('/api/records', record.record_id, fields);
     return true;

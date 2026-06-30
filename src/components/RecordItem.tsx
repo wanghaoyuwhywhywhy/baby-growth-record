@@ -7,7 +7,7 @@ import { getCloudAssetUrl } from '@/lib/cloud';
 
 interface MediaInfo {
   id: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'voice';
   url: string;
 }
 
@@ -38,7 +38,7 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
       // 使用云端 URL
       const media = cloudTokens.map(token => ({
         id: token,
-        type: (record.媒体类型 === 'video' ? 'video' : 'image') as 'image' | 'video',
+        type: ((record.媒体类型 || ['text']).includes('video') ? 'video' : (record.媒体类型 || ['text']).includes('voice') ? 'voice' : 'image') as 'image' | 'video' | 'voice',
         url: getCloudAssetUrl(record.record_id, token),
       }));
       setMediaList(media);
@@ -96,7 +96,11 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
           <div className="flex gap-2 mt-2 overflow-x-auto">
             {mediaList.map((media) => (
               <div key={media.id} className="flex-shrink-0">
-                {media.type === 'image' ? (
+                {media.type === 'voice' ? (
+                  <div className={`rounded-lg bg-coral/15 flex items-center justify-center border border-coral/30 ${compact ? 'w-16 h-16' : 'w-20 h-20'}`}>
+                    <span className="text-coral text-lg">🎙️</span>
+                  </div>
+                ) : media.type === 'image' ? (
                   <img
                     src={media.url}
                     alt=""
