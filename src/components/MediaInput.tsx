@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Camera, ImagePlus, Video, X, Mic, Square } from 'lucide-react';
+import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 
 export interface MediaItem {
   id: string;
@@ -27,10 +28,28 @@ export default function MediaInput({
   const [recordingDuration, setRecordingDuration] = useState(0);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number>(0);
+
+  // Web Speech API 用于录音同时转文字
+  const {
+    isListening: isSpeechListening,
+    transcript,
+    interimTranscript,
+    error: speechError,
+    isSupported: speechSupported,
+    startListening,
+    stopListening,
+    resetTranscript,
+  } = useSpeechRecognition();
+
+  // 同步语音转写结果到文本框
+  useEffect(() => {
+    if (isRecording && (transcript || interimTranscript)) {
+      onTranscriptChange(initialText + transcript + interimTranscript);
+    }
+  }, [transcript, interimTranscript, isRecording, initialText, onTranscriptChange]);
 
   // 录音时长计时
   useEffect(() => {
@@ -45,7 +64,6 @@ export default function MediaInput({
     return () => clearInterval(timerRef.current);
   }, [isRecording]);
 
-  // 格式化时长 mm:ss
   const formatDuration = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -60,9 +78,7 @@ export default function MediaInput({
       chunksRef.current = [];
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
+        if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
       mediaRecorder.onstop = () => {
@@ -70,12 +86,18 @@ export default function MediaInput({
         const id = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const url = URL.createObjectURL(blob);
         onMediaAdd({ id, type: 'voice', blob, url });
-        // 停止所有音频轨道
         stream.getTracks().forEach(t => t.stop());
+        if (isSpeechListening) stopListening();
       };
 
       mediaRecorder.start();
       setIsRecording(true);
+
+      // 同时启动语音识别转文字
+      if (speechSupported) {
+        resetTranscript();
+        startListening();
+      }
     } catch (err) {
       console.error('录音失败:', err);
       alert('无法访问麦克风，请检查权限设置');
@@ -90,20 +112,19 @@ export default function MediaInput({
   }
 
   function toggleRecording() {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
+    if (isRecording) stopRecording();
+    else startRecording();
   }
 
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video') {
+  // 通用文件选择（自动识别图片/视频）
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files) return;
     Array.from(files).forEach((file) => {
+      const isVideo = file.type.startsWith('video/');
       const id = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const url = URL.createObjectURL(file);
-      onMediaAdd({ id, type, blob: file, url });
+      onMediaAdd({ id, type: isVideo ? 'video' : 'image', blob: file, url });
     });
     e.target.value = '';
   }
@@ -147,6 +168,7 @@ export default function MediaInput({
             </span>
             <span className="text-sm text-muted">
               录音中 {formatDuration(recordingDuration)}
+              {interimTranscript && <span className="text-coral/70 ml-1">{interimTranscript}</span>}
             </span>
           </div>
           <button
@@ -158,70 +180,54 @@ export default function MediaInput({
         </div>
       )}
 
-      {/* 输入工具栏 */}
-      <div className="flex items-center gap-2">
-        {/* 语音录音按钮 */}
+      {speechError && !isRecording && (
+        <p className="text-xs text-muted/50 mb-2">语音转文字不可用（{speechError}），录音功能正常</p>
+      )}
+
+      {/* 输入工具栏：录音 | 相机 | 相册 */}
+      <div className="flex items-center gap-3">
         <button
           onClick={toggleRecording}
-          className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
+          className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
             isRecording
               ? 'bg-coral text-white shadow-float animate-pulse'
               : 'bg-cream-dark text-coral hover:bg-coral/10'
           }`}
           aria-label="录音"
         >
-          <Mic size={20} />
+          <Mic size={22} />
         </button>
 
-        {/* 拍照按钮 */}
         <button
           onClick={() => cameraInputRef.current?.click()}
-          className="w-11 h-11 rounded-full bg-cream-dark text-ink flex items-center justify-center hover:bg-rule/50 transition-all"
-          aria-label="拍照"
+          className="w-12 h-12 rounded-full bg-cream-dark text-ink flex items-center justify-center hover:bg-rule/50 transition-all"
+          aria-label="拍照/录像"
         >
-          <Camera size={20} />
+          <Camera size={22} />
         </button>
         <input
           ref={cameraInputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           capture="environment"
           multiple
-          onChange={(e) => handleFileSelect(e, 'image')}
+          onChange={handleFileSelect}
           className="hidden"
         />
 
-        {/* 相册按钮 */}
         <button
           onClick={() => galleryInputRef.current?.click()}
-          className="w-11 h-11 rounded-full bg-cream-dark text-ink flex items-center justify-center hover:bg-rule/50 transition-all"
+          className="w-12 h-12 rounded-full bg-cream-dark text-ink flex items-center justify-center hover:bg-rule/50 transition-all"
           aria-label="从相册选择"
         >
-          <ImagePlus size={20} />
+          <ImagePlus size={22} />
         </button>
         <input
           ref={galleryInputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           multiple
-          onChange={(e) => handleFileSelect(e, 'image')}
-          className="hidden"
-        />
-
-        {/* 视频按钮 */}
-        <button
-          onClick={() => videoInputRef.current?.click()}
-          className="w-11 h-11 rounded-full bg-cream-dark text-ink flex items-center justify-center hover:bg-rule/50 transition-all"
-          aria-label="录制视频"
-        >
-          <Video size={20} />
-        </button>
-        <input
-          ref={videoInputRef}
-          type="file"
-          accept="video/*"
-          capture="environment"
-          onChange={(e) => handleFileSelect(e, 'video')}
+          onChange={handleFileSelect}
           className="hidden"
         />
       </div>

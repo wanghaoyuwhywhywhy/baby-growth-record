@@ -12,8 +12,8 @@ const MEDIA_TYPES = [
   { key: '全部', label: '全部', icon: null },
   { key: 'text', label: '文字', icon: FileText },
   { key: 'voice', label: '语音', icon: Mic },
+  { key: 'photo', label: '图片', icon: Camera },
   { key: 'video', label: '视频', icon: Video },
-  { key: 'photo', label: '照片', icon: Camera },
 ] as const;
 
 const CATEGORY_FILTERS = [
@@ -180,9 +180,21 @@ export default function TimelinePage() {
   useEffect(() => { fetchRecords(); }, [fetchRecords, currentBabyId]);
 
   const filtered = records.filter(r => {
-    // 多选匹配：媒体类型数组中任一匹配即显示
     const mediaTypes = r.媒体类型 || ['text'];
-    const matchMedia = mediaFilter === '全部' || mediaTypes.includes(mediaFilter as any);
+    let matchMedia = true;
+    if (mediaFilter === 'text') {
+      // 文字：只展示纯文字（只有text，没有其他媒体类型）
+      matchMedia = mediaTypes.length === 1 && mediaTypes[0] === 'text';
+    } else if (mediaFilter === 'voice') {
+      // 语音：展示包含语音的（纯语音 + 文字+语音）
+      matchMedia = mediaTypes.includes('voice');
+    } else if (mediaFilter === 'photo') {
+      // 图片：展示包含图片的
+      matchMedia = mediaTypes.includes('photo');
+    } else if (mediaFilter === 'video') {
+      // 视频：展示包含视频的
+      matchMedia = mediaTypes.includes('video');
+    }
     const matchCategory = categoryFilter === '全部' || r.分类 === categoryFilter;
     return matchMedia && matchCategory;
   });

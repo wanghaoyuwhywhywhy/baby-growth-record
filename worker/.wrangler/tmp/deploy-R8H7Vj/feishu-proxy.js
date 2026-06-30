@@ -208,10 +208,12 @@ async function ensureRecordFields(token, env) {
       })
     });
   } else if (mediaTypeField.type === 3) {
-    await fetch(`${fieldsUrl}/${mediaTypeField.field_id}`, {
-      method: "PUT",
+    await fetch(`${fieldsUrl}/${mediaTypeField.field_id}`, { method: "DELETE", headers: { "Authorization": `Bearer ${token}` } });
+    await fetch(fieldsUrl, {
+      method: "POST",
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
+        field_name: "\u5A92\u4F53\u7C7B\u578B",
         type: 4,
         property: {
           options: [
