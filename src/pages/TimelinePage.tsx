@@ -3,6 +3,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { type DailyRecord } from '@/api/feishu';
 import { feishuAPI } from '@/api/feishu';
 import { CATEGORIES, CATEGORY_MAP } from '@/utils/constants';
+import { getCloudAssetUrl } from '@/lib/cloud';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
 import { FileText, Mic, Video, Camera, Play, Pause } from 'lucide-react';
@@ -33,15 +34,24 @@ function formatTimelineTime(dateStr: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function VoicePlayer({ recordId }: { recordId: string }) {
+function VoicePlayer({ record }: { record: DailyRecord }) {
   const [playing, setPlaying] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // 云端附件 file_tokens
+  const cloudTokens = (record.媒体附件 || []).filter(t => t.startsWith('boxcn') || t.startsWith('boxc'));
+
   useEffect(() => {
+    // 优先使用云端 URL
+    if (cloudTokens.length > 0) {
+      setAudioUrl(getCloudAssetUrl(record.record_id, cloudTokens[0]));
+      return;
+    }
+    // 本地 fallback
     let url = '';
     async function load() {
-      const items = await feishuAPI.getMediaByRecord(recordId);
+      const items = await feishuAPI.getMediaByRecord(record.record_id);
       if (items.length > 0) {
         url = URL.createObjectURL(items[0].blob);
         setAudioUrl(url);
@@ -49,7 +59,7 @@ function VoicePlayer({ recordId }: { recordId: string }) {
     }
     load();
     return () => { if (url) URL.revokeObjectURL(url); };
-  }, [recordId]);
+  }, [record.record_id, cloudTokens.length]);
 
   function toggle() {
     if (!audioRef.current) return;
@@ -80,10 +90,16 @@ function VoicePlayer({ recordId }: { recordId: string }) {
 }
 
 function MediaPreview({ record }: { record: DailyRecord }) {
-  const [images, setImages] = useState<{ id: string; url: string }[]>([]);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [localImages, setLocalImages] = useState<{ id: string; url: string }[]>([]);
+  const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
+
+  // 云端附件 file_tokens
+  const cloudTokens = (record.媒体附件 || []).filter(t => t.startsWith('boxcn') || t.startsWith('boxc'));
 
   useEffect(() => {
+    // 如果有云端 token，优先使用云端 URL，不需要加载本地
+    if (cloudTokens.length > 0) return;
+
     let urls: string[] = [];
     let revoked = false;
     async function load() {
@@ -92,31 +108,50 @@ function MediaPreview({ record }: { record: DailyRecord }) {
       if (record.媒体类型 === 'video' && items.length > 0) {
         const u = URL.createObjectURL(items[0].blob);
         urls.push(u);
-        setVideoUrl(u);
+        setLocalVideoUrl(u);
       } else {
         const imgs = items.filter(i => i.type === 'image').map(i => {
           const u = URL.createObjectURL(i.blob);
           urls.push(u);
           return { id: i.id, url: u };
         });
-        setImages(imgs);
+        setLocalImages(imgs);
       }
     }
     load();
     return () => { revoked = true; urls.forEach(u => URL.revokeObjectURL(u)); };
-  }, [record.record_id, record.媒体类型]);
+  }, [record.record_id, record.媒体类型, cloudTokens.length]);
 
-  if (videoUrl) {
+  // 优先使用云端 URL
+  if (cloudTokens.length > 0) {
+    if (record.媒体类型 === 'video') {
+      return (
+        <div className="mt-2">
+          <video src={getCloudAssetUrl(record.record_id, cloudTokens[0])} controls className="w-full max-h-48 rounded-lg" />
+        </div>
+      );
+    }
     return (
-      <div className="mt-2">
-        <video src={videoUrl} controls className="w-full max-h-48 rounded-lg" />
+      <div className="flex gap-2 mt-2 overflow-x-auto">
+        {cloudTokens.map(token => (
+          <img key={token} src={getCloudAssetUrl(record.record_id, token)} alt="" className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0" />
+        ))}
       </div>
     );
   }
-  if (images.length > 0) {
+
+  // 本地 fallback
+  if (localVideoUrl) {
+    return (
+      <div className="mt-2">
+        <video src={localVideoUrl} controls className="w-full max-h-48 rounded-lg" />
+      </div>
+    );
+  }
+  if (localImages.length > 0) {
     return (
       <div className="flex gap-2 mt-2 overflow-x-auto">
-        {images.map(img => (
+        {localImages.map(img => (
           <img key={img.id} src={img.url} alt="" className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0" />
         ))}
       </div>
@@ -230,7 +265,7 @@ export default function TimelinePage() {
 
                       {/* 语音播放 */}
                       {mediaType === 'voice' ? (
-                        <VoicePlayer recordId={record.record_id} />
+                        <VoicePlayer record={record} />
                       ) : null}
 
                       {/* 媒体预览（照片/视频） */}

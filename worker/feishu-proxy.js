@@ -36,6 +36,7 @@ export default {
       }
 
       let result;
+      let binaryResponse = null;
       switch (path) {
         case '/api/babies': {
           const token = await getTenantToken(env);
@@ -55,12 +56,24 @@ export default {
         case '/api/ai':
           result = await handleAI(request, env);
           break;
+        case '/api/upload': {
+          const token = await getTenantToken(env);
+          result = await handleUpload(request, env, token);
+          break;
+        }
+        case '/api/asset': {
+          const token = await getTenantToken(env);
+          binaryResponse = await handleAsset(request, env, token);
+          break;
+        }
         case '/api/health':
           result = { ok: true, message: 'Worker is running' };
           break;
         default:
           result = { error: 'Not found', path };
       }
+
+      if (binaryResponse) return binaryResponse;
 
       return new Response(JSON.stringify(result), {
         headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
@@ -314,4 +327,95 @@ ${records.length > 0
   } catch (e) {
     return { error: e.message };
   }
+}
+
+// 确保记录表有"附件"字段（type=17）
+async function ensureAttachmentField(token, env) {
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/fields`;
+  const resp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const data = await resp.json();
+  const fields = data.data?.items || [];
+  const hasAttachment = fields.some(f => f.field_name === '附件');
+  if (!hasAttachment) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field_name: '附件', type: 17 }),
+    });
+  }
+}
+
+// 上传媒体文件到飞书多维表格附件字段
+async function handleUpload(request, env, token) {
+  if (request.method !== 'POST') return { error: 'Method not allowed' };
+
+  const formData = await request.formData();
+  const file = formData.get('file');
+  const recordId = formData.get('record_id');
+
+  if (!file || !recordId) return { error: 'file and record_id are required' };
+
+  // 确保附件字段存在
+  await ensureAttachmentField(token, env);
+
+  // 上传到飞书多维表格附件
+  const uploadUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/records/${recordId}/attachments?field_code=附件`;
+
+  const uploadForm = new FormData();
+  uploadForm.append('file', file);
+
+  const resp = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+    body: uploadForm,
+  });
+
+  const data = await resp.json();
+  if (data.code !== 0) return { error: data.msg || '上传失败', code: data.code };
+
+  const fileToken = data.data?.file_token || data.data?.attachment?.file_token || '';
+  return { ok: true, file_token: fileToken };
+}
+
+// 代理下载飞书多维表格附件
+async function handleAsset(request, env, token) {
+  const url = new URL(request.url);
+  const recordId = url.searchParams.get('record_id');
+  const fileToken = url.searchParams.get('file_token');
+
+  if (!recordId || !fileToken) {
+    return new Response(JSON.stringify({ error: 'record_id and file_token are required' }), {
+      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+    });
+  }
+
+  // 读取记录获取附件的 tmp_url
+  const recordUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/records/${recordId}`;
+  const recordResp = await fetch(recordUrl, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  const recordData = await recordResp.json();
+
+  const fields = recordData.data?.record?.fields || {};
+  const attachments = fields['附件'] || [];
+  const attachment = attachments.find(a => a.file_token === fileToken);
+
+  if (!attachment?.tmp_url) {
+    return new Response(JSON.stringify({ error: '文件未找到' }), {
+      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+    });
+  }
+
+  // 下载文件
+  const fileResp = await fetch(attachment.tmp_url);
+  const contentType = fileResp.headers.get('Content-Type') || 'application/octet-stream';
+  const body = await fileResp.arrayBuffer();
+
+  return new Response(body, {
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=3600',
+      ...CORS_HEADERS,
+    },
+  });
 }
