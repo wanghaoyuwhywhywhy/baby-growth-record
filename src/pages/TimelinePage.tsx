@@ -113,7 +113,8 @@ function MediaPreview({ record }: { record: DailyRecord }) {
     async function load() {
       const items = await feishuAPI.getMediaByRecord(record.record_id);
       if (revoked || items.length === 0) return;
-      if (record.媒体类型 === 'video' && items.length > 0) {
+      const hasVideo = (record.媒体类型 || ['text']).includes('video');
+      if (hasVideo && items.length > 0) {
         const u = URL.createObjectURL(items[0].blob);
         urls.push(u);
         setLocalVideoUrl(u);
@@ -132,7 +133,8 @@ function MediaPreview({ record }: { record: DailyRecord }) {
 
   // 优先使用云端 URL
   if (cloudTokens.length > 0) {
-    if (record.媒体类型 === 'video') {
+    const hasVideo = (record.媒体类型 || ['text']).includes('video');
+    if (hasVideo) {
       return (
         <div className="mt-2">
           <video src={getCloudAssetUrl(record.record_id, cloudTokens[0])} controls className="w-full max-h-48 rounded-lg" />
@@ -178,7 +180,9 @@ export default function TimelinePage() {
   useEffect(() => { fetchRecords(); }, [fetchRecords, currentBabyId]);
 
   const filtered = records.filter(r => {
-    const matchMedia = mediaFilter === '全部' || (r.媒体类型 || 'text') === mediaFilter;
+    // 多选匹配：媒体类型数组中任一匹配即显示
+    const mediaTypes = r.媒体类型 || ['text'];
+    const matchMedia = mediaFilter === '全部' || mediaTypes.includes(mediaFilter as any);
     const matchCategory = categoryFilter === '全部' || r.分类 === categoryFilter;
     return matchMedia && matchCategory;
   });
@@ -240,8 +244,10 @@ export default function TimelinePage() {
             <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-rule/60" />
             <div className="space-y-1">
               {filtered.map((record, index) => {
-                const mediaType = record.媒体类型 || 'text';
-                const style = MEDIA_TYPE_STYLE[mediaType];
+                const mediaTypes = record.媒体类型 || ['text'];
+                // 显示第一个非text的媒体类型图标，或者text
+                const primaryMedia = mediaTypes.find(t => t !== 'text') || 'text';
+                const style = MEDIA_TYPE_STYLE[primaryMedia] || MEDIA_TYPE_STYLE['text'];
                 const category = CATEGORY_MAP[record.分类];
                 const emoji = category?.emoji ?? '📝';
                 const color = category?.color ?? '#8B7D7A';
@@ -257,7 +263,7 @@ export default function TimelinePage() {
                         </span>
                         {style && (
                           <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${style.bg} ${style.text}`}>
-                            {style.icon}{mediaType === 'text' ? '文字' : mediaType === 'voice' ? '语音' : mediaType === 'video' ? '视频' : '照片'}
+                            {style.icon}{primaryMedia === 'text' ? '文字' : primaryMedia === 'voice' ? '语音' : primaryMedia === 'video' ? '视频' : '照片'}
                           </span>
                         )}
                         <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: color + '18', color }}>
@@ -272,12 +278,12 @@ export default function TimelinePage() {
                       </p>
 
                       {/* 语音播放 */}
-                      {mediaType === 'voice' ? (
+                      {mediaTypes.includes('voice') ? (
                         <VoicePlayer record={record} />
                       ) : null}
 
                       {/* 媒体预览（照片/视频） */}
-                      {(mediaType === 'photo' || mediaType === 'video') ? (
+                      {(mediaTypes.includes('photo') || mediaTypes.includes('video')) ? (
                         <MediaPreview record={record} />
                       ) : null}
                     </div>

@@ -200,22 +200,39 @@ async function handleRecords(request, env, token) {
   return { error: 'Method not allowed' };
 }
 
-// 确保记录表有必要字段：媒体类型（单选）和附件
+// 确保记录表有必要字段：媒体类型（多选）和附件
 async function ensureRecordFields(token, env) {
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/fields`;
   const resp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
   const data = await resp.json();
   const fields = data.data?.items || [];
 
-  const hasMediaType = fields.some(f => f.field_name === '媒体类型');
-  if (!hasMediaType) {
-    // 创建单选字段，预设选项
+  const mediaTypeField = fields.find(f => f.field_name === '媒体类型');
+  if (!mediaTypeField) {
+    // 创建多选字段，预设选项
     await fetch(fieldsUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         field_name: '媒体类型',
-        type: 3, // 单选
+        type: 4, // 多选
+        property: {
+          options: [
+            { name: 'text' },
+            { name: 'voice' },
+            { name: 'video' },
+            { name: 'photo' },
+          ]
+        }
+      }),
+    });
+  } else if (mediaTypeField.type === 3) {
+    // 如果是单选字段(type=3)，转换为多选(type=4)
+    await fetch(`${fieldsUrl}/${mediaTypeField.field_id}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 4,
         property: {
           options: [
             { name: 'text' },

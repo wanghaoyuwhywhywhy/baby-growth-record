@@ -1,10 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Camera, ImagePlus, Video, X, Mic, Square } from 'lucide-react';
-import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 
 export interface MediaItem {
   id: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'voice';
   blob: Blob;
   url: string;
 }
@@ -24,26 +23,79 @@ export default function MediaInput({
   mediaItems,
   initialText = '',
 }: MediaInputProps) {
-  const [showActions, setShowActions] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<number>(0);
 
-  const {
-    isListening,
-    transcript,
-    interimTranscript,
-    error: speechError,
-    isSupported: speechSupported,
-    startListening,
-    stopListening,
-    resetTranscript,
-  } = useSpeechRecognition();
-
-  // 同步语音转写结果到外部
+  // 录音时长计时
   useEffect(() => {
-    onTranscriptChange(initialText + transcript + interimTranscript);
-  }, [transcript, interimTranscript, initialText, onTranscriptChange]);
+    if (isRecording) {
+      timerRef.current = window.setInterval(() => {
+        setRecordingDuration(d => d + 1);
+      }, 1000);
+    } else {
+      clearInterval(timerRef.current);
+      setRecordingDuration(0);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isRecording]);
+
+  // 格式化时长 mm:ss
+  const formatDuration = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const id = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const url = URL.createObjectURL(blob);
+        onMediaAdd({ id, type: 'voice', blob, url });
+        // 停止所有音频轨道
+        stream.getTracks().forEach(t => t.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('录音失败:', err);
+      alert('无法访问麦克风，请检查权限设置');
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }
+
+  function toggleRecording() {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video') {
     const files = e.target.files;
@@ -54,16 +106,6 @@ export default function MediaInput({
       onMediaAdd({ id, type, blob: file, url });
     });
     e.target.value = '';
-    setShowActions(false);
-  }
-
-  function toggleListening() {
-    if (isListening) {
-      stopListening();
-    } else {
-      resetTranscript();
-      startListening();
-    }
   }
 
   return (
@@ -75,6 +117,10 @@ export default function MediaInput({
             <div key={item.id} className="relative flex-shrink-0 group">
               {item.type === 'image' ? (
                 <img src={item.url} alt="" className="w-20 h-20 rounded-xl object-cover border border-rule" />
+              ) : item.type === 'voice' ? (
+                <div className="w-20 h-20 rounded-xl bg-coral/15 flex items-center justify-center border border-coral/30">
+                  <Mic size={24} className="text-coral" />
+                </div>
               ) : (
                 <div className="w-20 h-20 rounded-xl bg-ink/80 flex items-center justify-center border border-rule">
                   <Video size={24} className="text-white" />
@@ -91,8 +137,8 @@ export default function MediaInput({
         </div>
       )}
 
-      {/* 语音输入状态 */}
-      {isListening && (
+      {/* 录音状态 */}
+      {isRecording && (
         <div className="card-shadow p-3 mb-3 flex items-center gap-3 animate-fade-up">
           <div className="flex items-center gap-2 flex-1">
             <span className="relative flex h-3 w-3">
@@ -100,11 +146,11 @@ export default function MediaInput({
               <span className="relative inline-flex rounded-full h-3 w-3 bg-coral"></span>
             </span>
             <span className="text-sm text-muted">
-              {interimTranscript || '正在聆听...'}
+              录音中 {formatDuration(recordingDuration)}
             </span>
           </div>
           <button
-            onClick={toggleListening}
+            onClick={toggleRecording}
             className="w-8 h-8 rounded-full bg-coral text-white flex items-center justify-center"
           >
             <Square size={14} fill="white" />
@@ -112,26 +158,20 @@ export default function MediaInput({
         </div>
       )}
 
-      {speechError && (
-        <p className="text-xs text-coral mb-2">{speechError}</p>
-      )}
-
       {/* 输入工具栏 */}
       <div className="flex items-center gap-2">
-        {/* 语音按钮 */}
-        {speechSupported && (
-          <button
-            onClick={toggleListening}
-            className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-              isListening
-                ? 'bg-coral text-white shadow-float animate-pulse'
-                : 'bg-cream-dark text-coral hover:bg-coral/10'
-            }`}
-            aria-label="语音输入"
-          >
-            <Mic size={20} />
-          </button>
-        )}
+        {/* 语音录音按钮 */}
+        <button
+          onClick={toggleRecording}
+          className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
+            isRecording
+              ? 'bg-coral text-white shadow-float animate-pulse'
+              : 'bg-cream-dark text-coral hover:bg-coral/10'
+          }`}
+          aria-label="录音"
+        >
+          <Mic size={20} />
+        </button>
 
         {/* 拍照按钮 */}
         <button

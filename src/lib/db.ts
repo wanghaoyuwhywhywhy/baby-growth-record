@@ -18,7 +18,7 @@ interface BabyGrowthDB extends DBSchema {
   };
   media: {
     key: string;
-    value: { id: string; type: 'image' | 'video'; blob: Blob; recordId: string; createdAt: string };
+    value: { id: string; type: 'image' | 'video' | 'voice'; blob: Blob; recordId: string; createdAt: string };
     indexes: { 'by-record': string };
   };
 }
@@ -139,12 +139,12 @@ export async function dbDeleteGrowthRecord(record_id: string): Promise<void> {
 }
 
 // Media CRUD
-export async function dbAddMedia(id: string, type: 'image' | 'video', blob: Blob, recordId: string): Promise<void> {
+export async function dbAddMedia(id: string, type: 'image' | 'video' | 'voice', blob: Blob, recordId: string): Promise<void> {
   const db = await getDB();
   await db.put('media', { id, type, blob, recordId, createdAt: new Date().toISOString() });
 }
 
-export async function dbGetMediaByRecord(recordId: string): Promise<{ id: string; type: 'image' | 'video'; blob: Blob; recordId: string; createdAt: string }[]> {
+export async function dbGetMediaByRecord(recordId: string): Promise<{ id: string; type: 'image' | 'video' | 'voice'; blob: Blob; recordId: string; createdAt: string }[]> {
   const db = await getDB();
   return db.getAllFromIndex('media', 'by-record', recordId);
 }
