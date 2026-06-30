@@ -20,16 +20,13 @@ function getCORSHeaders(request) {
   };
 }
 
-// ============ 密码认证 ============
+// ============ 密码认证（无状态） ============
 // 认证流程：
 // 1. 前端 POST /api/auth { password: "xxx" }
 // 2. Worker 用 SHA-256 比较 password 与环境变量 ACCESS_PASSWORD_HASH
-// 3. 通过后生成一个随机 token，返回给前端
+// 3. 通过后用密码哈希派生确定性 token（SHA256(passwordHash + salt)），返回给前端
 // 4. 前端后续请求带 X-Auth-Token 头
-// 5. Worker 校验 token 是否在有效 token 列表中
-
-// 简易 token 存储（内存中，Worker 重启后失效，用户需重新登录）
-const validTokens = new Set();
+// 5. Worker 重新计算期望 token 并比较（无需内存存储，Worker 重启不影响）
 
 // SHA-256 哈希
 async function sha256(str) {
@@ -39,23 +36,18 @@ async function sha256(str) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// 生成随机 token
-function generateToken() {
-  const arr = new Uint8Array(32);
-  crypto.getRandomValues(arr);
-  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+// 从密码哈希派生确定性 token（同一密码永远生成同一 token）
+async function deriveToken(passwordHash) {
+  return await sha256(passwordHash + ':baby-growth-auth-v1');
 }
 
-// 校验请求的认证 token
-function isAuthenticated(request) {
-  const token = request.headers.get('X-Auth-Token');
-  // 也支持 query param 传 token（用于 /api/asset 的 <img>/<audio> 标签）
-  if (!token) {
-    const url = new URL(request.url);
-    const queryToken = url.searchParams.get('token');
-    return queryToken && validTokens.has(queryToken);
-  }
-  return validTokens.has(token);
+// 校验请求的认证 token（无状态：重新计算期望值比较）
+async function isAuthenticated(request, env) {
+  const token = request.headers.get('X-Auth-Token')
+    || new URL(request.url).searchParams.get('token');
+  if (!token) return false;
+  const expectedToken = await deriveToken(env.ACCESS_PASSWORD_HASH);
+  return token === expectedToken;
 }
 
 // 处理认证请求
@@ -66,33 +58,21 @@ async function handleAuth(request, env) {
   const password = body.password;
   if (!password) return { error: '请输入密码' };
 
-  // 环境变量存储的是密码的 SHA-256 哈希
-  const passwordHash = await sha256(password);
   const expectedHash = env.ACCESS_PASSWORD_HASH;
 
   if (!expectedHash) {
-    // 未配置密码，直接放行
-    const token = generateToken();
-    validTokens.add(token);
-    // 限制内存中的 token 数量
-    if (validTokens.size > 100) {
-      const first = validTokens.values().next().value;
-      validTokens.delete(first);
-    }
+    // 未配置密码，直接派生 token 放行
+    const fakeHash = await sha256('no-password');
+    const token = await deriveToken(fakeHash);
     return { ok: true, token };
   }
 
+  const passwordHash = await sha256(password);
   if (passwordHash !== expectedHash) {
     return { error: '密码错误' };
   }
 
-  const token = generateToken();
-  validTokens.add(token);
-  // 限制内存中的 token 数量
-  if (validTokens.size > 100) {
-    const first = validTokens.values().next().value;
-    validTokens.delete(first);
-  }
+  const token = await deriveToken(passwordHash);
   return { ok: true, token };
 }
 
@@ -125,7 +105,7 @@ export default {
 
       // 所有其他接口需要认证
       // 如果未配置密码哈希，则不校验（兼容未设置密码的情况）
-      if (env.ACCESS_PASSWORD_HASH && !isAuthenticated(request)) {
+      if (env.ACCESS_PASSWORD_HASH && !(await isAuthenticated(request, env))) {
         return new Response(JSON.stringify({ error: '未认证，请先登录', code: 401 }), {
           status: 401,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
