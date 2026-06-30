@@ -110,6 +110,15 @@ export async function dbAddRecord(record: DailyRecord): Promise<void> {
   await db.put('records', record);
 }
 
+export async function dbUpdateRecordMedia(recordId: string, mediaTokens: string[]): Promise<void> {
+  const db = await getDB();
+  const record = await db.get('records', recordId);
+  if (record) {
+    record.媒体附件 = mediaTokens;
+    await db.put('records', record);
+  }
+}
+
 // Growth CRUD
 export async function dbGetGrowthRecords(babyId: string): Promise<GrowthRecord[]> {
   const db = await getDB();

@@ -358,8 +358,9 @@ async function handleUpload(request, env, token) {
   // 确保附件字段存在
   await ensureAttachmentField(token, env);
 
-  // 上传到飞书多维表格附件
-  const uploadUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/records/${recordId}/attachments?field_code=附件`;
+  // 上传到飞书多维表格附件（field_code 需要 URL 编码中文）
+  const fieldCode = encodeURIComponent('附件');
+  const uploadUrl = `${FEISHU_API}/bitable/v1/apps/${env.FEISHU_BASE_TOKEN}/tables/${env.FEISHU_TABLE_RECORD}/records/${recordId}/attachments?field_code=${fieldCode}`;
 
   const uploadForm = new FormData();
   uploadForm.append('file', file);
@@ -371,9 +372,11 @@ async function handleUpload(request, env, token) {
   });
 
   const data = await resp.json();
-  if (data.code !== 0) return { error: data.msg || '上传失败', code: data.code };
+  if (data.code !== 0) return { error: data.msg || '上传失败', code: data.code, feishu_response: JSON.stringify(data).slice(0, 500) };
 
-  const fileToken = data.data?.file_token || data.data?.attachment?.file_token || '';
+  // 飞书返回格式: data.attachment.file_token 或 data.file_token
+  const attachment = data.data?.attachment || data.data || {};
+  const fileToken = attachment.file_token || '';
   return { ok: true, file_token: fileToken };
 }
 
