@@ -1,6 +1,6 @@
 import {
   dbGetBabies, dbAddBaby, dbUpdateBaby, dbDeleteBaby,
-  dbGetRecords, dbAddRecord,
+  dbGetRecords, dbAddRecord, dbUpdateRecordMedia,
   dbGetGrowthRecords, dbAddGrowthRecord, dbDeleteGrowthRecord,
   dbAddMedia, dbGetMediaByRecord, dbDeleteMedia,
   dbClearAll,
@@ -164,6 +164,10 @@ export const feishuAPI = {
   // 媒体附件
   async addMedia(id: string, type: 'image' | 'video', blob: Blob, recordId: string): Promise<void> {
     await dbAddMedia(id, type, blob, recordId);
+  },
+
+  async updateRecordMedia(recordId: string, mediaTokens: string[]): Promise<void> {
+    await dbUpdateRecordMedia(recordId, mediaTokens);
   },
 
   async getMediaByRecord(recordId: string): Promise<{ id: string; type: 'image' | 'video'; blob: Blob; recordId: string; createdAt: string }[]> {

@@ -107,6 +107,11 @@ export default function RecordPage() {
         }
       }
 
+      // 持久化更新后的媒体附件到本地 IndexedDB
+      if (record.媒体附件 && record.媒体附件.length > 0) {
+        await feishuAPI.updateRecordMedia(record.record_id, record.媒体附件);
+      }
+
       setSubmitting(false);
       setSuccess(true);
       mediaItems.forEach((m) => URL.revokeObjectURL(m.url));
