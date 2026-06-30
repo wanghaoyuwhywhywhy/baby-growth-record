@@ -543,8 +543,28 @@ async function handleAsset(request, env, token) {
     });
   }
 
-  const contentType = fileResp.headers.get('Content-Type') || 'application/octet-stream';
+  const feishuContentType = fileResp.headers.get('Content-Type') || 'application/octet-stream';
   const body = await fileResp.arrayBuffer();
+
+  // 根据文件魔数修正 Content-Type
+  // Safari/iOS 的 MediaRecorder 输出 MP4 但飞书可能标记为 video/webm
+  let contentType = feishuContentType;
+  if (body.byteLength >= 12) {
+    const header = new Uint8Array(body.slice(0, 12));
+    // MP4/M4A: 以 ftyp 开头（偏移4）
+    if (header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) {
+      // 纯音频 MP4 → audio/mp4，有视频轨 → video/mp4
+      if (feishuContentType.startsWith('video/') || feishuContentType.startsWith('audio/')) {
+        contentType = 'audio/mp4';
+      }
+    }
+    // WebM/Matroska: 以 1A 45 DF A3 开头
+    else if (header[0] === 0x1A && header[1] === 0x45 && header[2] === 0xDF && header[3] === 0xA3) {
+      if (feishuContentType === 'video/webm') {
+        contentType = 'audio/webm';
+      }
+    }
+  }
 
   return new Response(body, {
     headers: {
