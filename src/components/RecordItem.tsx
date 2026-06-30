@@ -178,39 +178,84 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
 // 语音播放器（紧凑版，用于首页和时间线）
 function VoicePlayerCompact({ url, transcript }: { url: string; transcript?: string }) {
   const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0); // 0-100
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [loadError, setLoadError] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  function handleTimeUpdate() {
+    const audio = audioRef.current;
+    if (!audio || !audio.duration) return;
+    setCurrentTime(audio.currentTime);
+    setProgress((audio.currentTime / audio.duration) * 100);
+  }
+
+  function handleLoadedMetadata() {
+    const audio = audioRef.current;
+    if (audio && isFinite(audio.duration)) {
+      setDuration(audio.duration);
+    }
+  }
+
+  function handleEnded() {
+    setPlaying(false);
+    setProgress(0);
+    setCurrentTime(0);
+  }
+
   function toggle() {
-    if (!audioRef.current) return;
+    const audio = audioRef.current;
+    if (!audio) return;
     if (playing) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+      audio.pause();
     } else {
-      audioRef.current.play().catch(() => {});
+      audio.currentTime = 0;
+      audio.play().catch((e) => {
+        console.warn('语音播放失败:', e);
+        setLoadError(true);
+      });
     }
     setPlaying(!playing);
   }
+
+  const formatTime = (s: number) => {
+    if (!isFinite(s) || s < 0) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className="mt-2">
       <div className="flex items-center gap-2">
         <button
           onClick={toggle}
-          className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform"
+          disabled={loadError}
+          className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center flex-shrink-0 active:scale-95 transition-transform disabled:opacity-50"
         >
           {playing ? <Pause size={14} /> : <Play size={14} />}
         </button>
         <audio
           ref={audioRef}
           src={url}
-          onEnded={() => setPlaying(false)}
-          onError={() => console.warn('语音播放失败:', url)}
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={handleLoadedMetadata}
+          onEnded={handleEnded}
+          onError={() => { setLoadError(true); setPlaying(false); }}
+          preload="metadata"
           className="hidden"
         />
         <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
-          <div className="h-full bg-amber-400 rounded-full" style={{ width: playing ? '100%' : '0%', transition: 'width 0.3s' }} />
+          <div className="h-full bg-amber-400 rounded-full transition-[width] duration-200 ease-linear" style={{ width: `${progress}%` }} />
         </div>
+        <span className="text-[10px] text-muted/70 flex-shrink-0 tabular-nums w-10 text-right">
+          {playing ? formatTime(currentTime) : formatTime(duration)}
+        </span>
       </div>
+      {loadError && (
+        <p className="text-[10px] text-red-400 mt-1">语音加载失败</p>
+      )}
       {transcript && (
         <div className="mt-1.5 p-2 bg-amber-50 rounded-lg border border-amber-200">
           <div className="flex items-center gap-1 mb-0.5">
