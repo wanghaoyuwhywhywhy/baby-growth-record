@@ -37,6 +37,7 @@ interface AppState {
 
   fetchVaccines: () => Promise<void>;
   updateVaccineStatus: (record_id: string, 接种时间: string) => Promise<void>;
+  updateVaccineExpectedDate: (record_id: string, 预计接种时间: string) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -244,6 +245,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         vaccines: state.vaccines.map((v) =>
           v.record_id === record_id
             ? { ...v, 接种状态: '已接种' as const, 接种时间, 预计接种时间: 接种时间 }
+            : v
+        ),
+      }));
+    }
+  },
+
+  updateVaccineExpectedDate: async (record_id, 预计接种时间) => {
+    const ok = await feishuAPI.updateVaccine(record_id, {
+      预计接种时间,
+    });
+    if (ok) {
+      set((state) => ({
+        vaccines: state.vaccines.map((v) =>
+          v.record_id === record_id
+            ? { ...v, 预计接种时间 }
             : v
         ),
       }));
