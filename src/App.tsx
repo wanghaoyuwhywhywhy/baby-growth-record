@@ -84,8 +84,32 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (authed) initApp();
+    if (authed) {
+      initApp();
+      // 验证账号是否仍有效（防止已被删除的账号仍保持登录）
+      verifyAccount();
+    }
   }, [authed, initApp]);
+
+  // 验证当前账号是否仍存在于账号表中
+  async function verifyAccount() {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+    try {
+      const resp = await fetch('https://api.tongxi.xyz/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', token }),
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        clearAuthInfo();
+        setAuthed(false);
+      }
+    } catch {
+      // 网络错误不登出，保持现有状态
+    }
+  }
 
   // initialized 变为 true 时（数据加载完成），滚动到顶部
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { login, type AuthRole, getAuthToken } from '@/lib/auth';
-import { User, Lock, Loader2 } from 'lucide-react';
+import { User, Loader2, Eye, EyeOff } from 'lucide-react';
 import { cloudLogAccess } from '@/lib/cloud';
 
 const WORKER_URL = 'https://api.tongxi.xyz';
@@ -15,6 +15,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSetupModal, setShowSetupModal] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,9 +25,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     const result = await login(account.trim(), password || undefined);
     setLoading(false);
     if (result.ok) {
-      // 异步记录登录日志
       cloudLogAccess('login');
-      // 异步触发数据迁移（创建字段、回填上传时间、创建日志表、创建账号表）
       const token = getAuthToken();
       if (token) {
         fetch(`${WORKER_URL}/api/migrate`, {
@@ -44,12 +43,11 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
   return (
     <div className="bg-gradient-to-br from-cream via-cream-light to-cream-dark flex items-center justify-center px-5" style={{ minHeight: '100dvh' }}>
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center mx-auto mb-4 shadow-float">
+        <div className="mb-8">
+          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center mb-4 shadow-float">
             <User size={32} className="text-white" />
           </div>
           <h1 className="text-2xl font-outfit font-bold text-ink">宝宝成长记录</h1>
-          <p className="text-sm text-muted mt-1">请输入账号进入</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -58,33 +56,40 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
               type="text"
               value={account}
               onChange={(e) => { setAccount(e.target.value); setError(''); }}
-              placeholder="账号名"
+              placeholder="账号"
               className="w-full bg-white border border-rule rounded-2xl px-4 py-3.5 text-ink
                          placeholder:text-muted/40 outline-none
                          focus:border-coral/50 focus:ring-4 focus:ring-coral/5
-                         transition-all duration-200 text-center text-lg"
+                         transition-all duration-200 text-lg"
               autoFocus
               disabled={loading}
             />
           </div>
 
-          <div>
+          <div className="relative">
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => { setPassword(e.target.value); setError(''); }}
               placeholder="密码"
               required
-              className="w-full bg-white border border-rule rounded-2xl px-4 py-3.5 text-ink
+              className="w-full bg-white border border-rule rounded-2xl px-4 py-3.5 pr-12 text-ink
                          placeholder:text-muted/40 outline-none
                          focus:border-coral/50 focus:ring-4 focus:ring-coral/5
-                         transition-all duration-200 text-center text-lg tracking-widest"
+                         transition-all duration-200 text-lg"
               disabled={loading}
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors"
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
           </div>
 
           {error && (
-            <p className="text-sm text-red-500 text-center">{error}</p>
+            <p className="text-sm text-red-500">{error}</p>
           )}
 
           <button
@@ -99,17 +104,6 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
             )}
           </button>
         </form>
-
-        <div className="mt-6 space-y-2">
-          <div className="flex items-center gap-2 text-xs text-muted/50">
-            <Lock size={12} />
-            <span>所有账号均需输入密码</span>
-          </div>
-        </div>
-
-        <p className="text-xs text-muted/40 text-center mt-8">
-          数据安全存储于飞书云端
-        </p>
       </div>
 
       {showSetupModal && (

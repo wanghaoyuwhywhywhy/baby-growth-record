@@ -237,6 +237,27 @@ async function handleAuth(request, env) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
   const body = await request.json();
+
+  // verify action: 验证token是否仍有效（账号是否仍存在）
+  if (body.action === 'verify' && body.token) {
+    const auth = await parseAuth(body.token, env);
+    if (!auth.valid || !auth.accountName || auth.accountName === 'legacy') {
+      return { ok: true }; // 旧格式token不验证
+    }
+    // 检查账号是否仍存在于账号表中
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountTable(feishuToken, env);
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const filterStr = `CurrentValue.[账号名]="${auth.accountName}"`;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
+    if (listData.code !== 0 || !listData.data?.items || listData.data.items.length === 0) {
+      return { ok: false, error: '账号已不存在' };
+    }
+    return { ok: true };
+  }
+
   const account = body.account;
   const password = body.password;
 

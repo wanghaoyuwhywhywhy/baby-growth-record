@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
-import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2 } from 'lucide-react';
+import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff } from 'lucide-react';
 import { clearAuthInfo, getAuthRole, getAuthAccount, isAdmin } from '@/lib/auth';
 import { cloudLogAccess } from '@/lib/cloud';
 import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, type AccountRecord } from '@/lib/cloud';
@@ -20,6 +20,7 @@ export default function SettingsPage() {
   const [formRole, setFormRole] = useState('view');
   const [formError, setFormError] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
+  const [showFormPassword, setShowFormPassword] = useState(false);
 
   function handleLogout() {
     clearAuthInfo();
@@ -178,12 +179,14 @@ export default function SettingsPage() {
                       >
                         <Edit3 size={14} />
                       </button>
-                      <button
-                        onClick={() => handleDeleteAccount(acc)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {acc.账号名 !== accountName && (
+                        <button
+                          onClick={() => handleDeleteAccount(acc)}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -220,15 +223,24 @@ export default function SettingsPage() {
                   className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5"
                   disabled={formSubmitting}
                 />
-                <input
-                  type="password"
-                  value={formPassword}
-                  onChange={e => { setFormPassword(e.target.value); setFormError(''); }}
-                  placeholder={editingAccount ? '新密码' : '密码'}
-                  required={!editingAccount}
-                  className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5"
-                  disabled={formSubmitting}
-                />
+                <div className="relative">
+                  <input
+                    type={showFormPassword ? 'text' : 'password'}
+                    value={formPassword}
+                    onChange={e => { setFormPassword(e.target.value); setFormError(''); }}
+                    placeholder={editingAccount ? '新密码' : '密码'}
+                    required={!editingAccount}
+                    className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 pr-10 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5"
+                    disabled={formSubmitting}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowFormPassword(!showFormPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors"
+                  >
+                    {showFormPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
                 <select
                   value={formRole}
                   onChange={e => setFormRole(e.target.value)}
