@@ -81,6 +81,9 @@ function feishuToRecord(item: any): DailyRecord {
     记录时间: typeof fields['记录时间'] === 'number'
       ? new Date(fields['记录时间']).toISOString()
       : fields['记录时间'] || '',
+    上传时间: typeof fields['上传时间'] === 'number'
+      ? new Date(fields['上传时间']).toISOString()
+      : fields['上传时间'] || '',
     是否为里程碑: fields['是否为里程碑'] || false,
     关联宝宝: extractLinkedIds(fields['关联宝宝']),
     媒体附件: mediaTokens.length > 0 ? mediaTokens : legacyMedia,
@@ -394,4 +397,23 @@ export function getCloudAssetUrl(recordId: string, fileToken: string, type?: 'vo
   const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
   const typeParam = type ? `&type=${type}` : '';
   return `${WORKER_URL}/api/asset?record_id=${encodeURIComponent(recordId)}&file_token=${encodeURIComponent(fileToken)}${tokenParam}${typeParam}`;
+}
+
+// 记录登录/登出日志
+export async function cloudLogAccess(action: 'login' | 'logout'): Promise<void> {
+  try {
+    const device = navigator.userAgent;
+    await fetch(`${WORKER_URL}/api/log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        action,
+        ip: '',
+        device,
+        timestamp: Date.now(),
+      }),
+    });
+  } catch (e) {
+    console.warn('登录日志记录失败:', e);
+  }
 }

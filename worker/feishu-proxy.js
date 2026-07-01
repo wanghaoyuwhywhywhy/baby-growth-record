@@ -138,6 +138,15 @@ export default {
         });
       }
 
+      // /api/log 仅需认证，不需要编辑权限（view 也可以记录登录）
+      if (path === '/api/log') {
+        const token = await getTenantToken(env);
+        const result = await handleLog(request, env, token);
+        return new Response(JSON.stringify(result), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
       // 写操作需要编辑权限
       const isWriteOp = request.method !== 'GET';
       if (hasAnyPassword && isWriteOp && auth.role !== 'edit') {
@@ -197,6 +206,7 @@ export default {
 };
 
 let tokenCache = { token: null, expires: 0 };
+let logTableIdCache = null; // 缓存"登录日志"表 ID
 
 async function getTenantToken(env) {
   if (tokenCache.token && Date.now() < tokenCache.expires) {
@@ -290,6 +300,10 @@ async function handleRecords(request, env, token) {
   if (request.method === 'POST') {
     const body = await request.json();
     await ensureRecordFields(token, env);
+    // 如果前端没传"上传时间"，自动填充为当前时间戳
+    if (!body.fields['上传时间']) {
+      body.fields['上传时间'] = Date.now();
+    }
     const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
     return result;
   }
@@ -355,6 +369,15 @@ async function ensureRecordFields(token, env) {
       body: JSON.stringify({ field_name: '语音转文字', type: 1 }),
     });
   }
+
+  const hasUploadTime = fields.some(f => f.field_name === '上传时间');
+  if (!hasUploadTime) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field_name: '上传时间', type: 5 }),
+    });
+  }
 }
 
 async function handleGrowth(request, env, token) {
@@ -379,6 +402,89 @@ async function handleGrowth(request, env, token) {
     return await bitableRequest(env, token, 'DELETE', tableId, {}, recordId);
   }
   return { error: 'Method not allowed' };
+}
+
+// 查找或创建"登录日志"表，返回表 ID
+async function ensureLogTable(token, env) {
+  if (logTableIdCache) return logTableIdCache;
+
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+
+  // 列出所有表，查找"登录日志"
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const listData = await listResp.json();
+  const tables = listData.data?.items || [];
+  const existing = tables.find(t => t.name === '登录日志');
+  if (existing) {
+    logTableIdCache = existing.table_id;
+    return logTableIdCache;
+  }
+
+  // 创建"登录日志"表
+  const createResp = await fetch(listUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: { name: '登录日志' } }),
+  });
+  const createData = await createResp.json();
+  if (createData.code !== 0) {
+    throw new Error(`创建登录日志表失败: ${createData.msg}`);
+  }
+
+  const tableId = createData.data?.table_id;
+  if (!tableId) {
+    throw new Error('创建登录日志表成功但未获取到 table_id');
+  }
+
+  // 创建字段：时间（日期）、操作（文本）、IP（文本）、设备型号（文本）
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  const logFields = [
+    { field_name: '时间', type: 5 },
+    { field_name: '操作', type: 1 },
+    { field_name: 'IP', type: 1 },
+    { field_name: '设备型号', type: 1 },
+  ];
+  for (const field of logFields) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(field),
+    });
+  }
+
+  logTableIdCache = tableId;
+  return tableId;
+}
+
+// 处理登录日志请求
+async function handleLog(request, env, token) {
+  if (request.method !== 'POST') return { error: 'Method not allowed' };
+
+  const body = await request.json();
+  const tableId = await ensureLogTable(token, env);
+
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+
+  const resp = await fetch(recordUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        '时间': body.timestamp || Date.now(),
+        '操作': body.action || 'login',
+        'IP': body.ip || '',
+        '设备型号': body.device || '',
+      },
+    }),
+  });
+
+  const result = await resp.json();
+  if (result.code !== 0) {
+    return { error: `写入登录日志失败: ${result.msg}` };
+  }
+  return { ok: true };
 }
 
 async function handleAI(request, env) {

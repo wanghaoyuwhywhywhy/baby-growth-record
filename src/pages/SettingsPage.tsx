@@ -2,12 +2,14 @@ import NavHeader from '@/components/NavHeader';
 import { useAppStore } from '@/store/useAppStore';
 import { Cloud, RefreshCw, Check, LogOut, User } from 'lucide-react';
 import { clearAuthInfo, getAuthRole } from '@/lib/auth';
+import { cloudLogAccess } from '@/lib/cloud';
 
 export default function SettingsPage() {
   const { syncStatus, lastSyncResult, cloudConnected, syncFromCloud, checkCloudConnection } = useAppStore();
   const role = getAuthRole();
 
-  function handleLogout() {
+  async function handleLogout() {
+    await cloudLogAccess('logout'); // 记录登出日志
     clearAuthInfo();
     window.location.reload();
   }

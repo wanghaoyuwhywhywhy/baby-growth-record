@@ -24,6 +24,7 @@ interface AppState {
   fetchRecords: (category?: string) => Promise<void>;
   fetchRecentRecords: () => Promise<DailyRecord[]>;
   createRecord: (data: { 记录内容: string; 分类: string; 是否为里程碑: boolean; 媒体类型?: ('text' | 'voice' | 'video' | 'photo')[]; 媒体附件?: string[]; 语音转文字?: string }) => Promise<DailyRecord>;
+  updateRecord: (record_id: string, data: { 记录时间?: string; 分类?: string }) => Promise<DailyRecord | null>;
   setFilterCategory: (category: string) => void;
 
   fetchGrowthRecords: () => Promise<void>;
@@ -145,6 +146,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     set((state) => ({ records: [record, ...state.records] }));
     return record;
+  },
+
+  updateRecord: async (record_id, data) => {
+    const updated = await feishuAPI.updateRecord(record_id, data);
+    if (updated) {
+      set((state) => ({
+        records: state.records.map((r) => (r.record_id === record_id ? updated : r)),
+      }));
+    }
+    return updated;
   },
 
   setFilterCategory: (category: string) => {

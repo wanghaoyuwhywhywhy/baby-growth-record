@@ -9,7 +9,7 @@ import {
   cloudGetBabies, cloudCreateBaby, cloudUpdateBaby, cloudDeleteBaby,
   cloudGetRecords, cloudCreateRecord, cloudUpdateRecord, cloudDeleteRecord,
   cloudGetGrowth, cloudCreateGrowth, cloudUpdateGrowth, cloudDeleteGrowth,
-  cloudHealthCheck,
+  cloudHealthCheck, cloudLogAccess,
 } from '@/lib/cloud';
 
 export interface Baby {
@@ -34,6 +34,7 @@ export interface DailyRecord {
   记录内容: string;
   分类: string;
   记录时间: string;
+  上传时间?: string; // 上传时间，后端字段，前端不展示
   是否为里程碑: boolean;
   关联宝宝: string[];
   媒体附件?: string[]; // media IDs
@@ -136,6 +137,16 @@ export const feishuAPI = {
     return dbGetGrowthRecords(babyId);
   },
 
+  async updateRecord(record_id: string, data: { 记录时间?: string; 分类?: string }): Promise<DailyRecord | null> {
+    const allRecords = await dbGetRecords();
+    const old = allRecords.find(r => r.record_id === record_id);
+    if (!old) return null;
+    const updated = { ...old, ...data };
+    await dbAddRecord(updated); // put 会覆盖
+    cloudUpdateRecord(updated); // 后台推送到云端
+    return updated;
+  },
+
   async createGrowthRecord(record: {
     测量日期: string;
     身高?: number;
@@ -215,5 +226,9 @@ export const feishuAPI = {
 
   async checkCloudConnection(): Promise<boolean> {
     return cloudHealthCheck();
+  },
+
+  async logAccess(action: 'login' | 'logout'): Promise<void> {
+    return cloudLogAccess(action);
   },
 };
