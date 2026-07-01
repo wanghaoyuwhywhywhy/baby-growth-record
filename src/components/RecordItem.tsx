@@ -153,12 +153,7 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
         {videoItems.length > 0 && (
           <div className="flex gap-2 mt-2 overflow-x-auto">
             {videoItems.map((media) => (
-              <video
-                key={media.id}
-                src={media.url}
-                controls
-                className="w-full max-h-48 rounded-lg"
-              />
+              <VideoWithRetry key={media.id} src={media.url} />
             ))}
           </div>
         )}
@@ -181,6 +176,26 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
   );
 }
 
+// 视频 + 自动重试
+function VideoWithRetry({ src }: { src: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const retryCount = useRef(0);
+  return (
+    <video
+      ref={ref}
+      src={src}
+      controls
+      className="w-full max-h-48 rounded-lg"
+      onError={() => {
+        if (retryCount.current < 2) {
+          retryCount.current++;
+          setTimeout(() => { if (ref.current) ref.current.load(); }, 1000 * retryCount.current);
+        }
+      }}
+    />
+  );
+}
+
 // 语音播放器（紧凑版，用于首页和时间线）
 function VoicePlayerCompact({ url, transcript }: { url: string; transcript?: string }) {
   const [playing, setPlaying] = useState(false);
@@ -189,6 +204,7 @@ function VoicePlayerCompact({ url, transcript }: { url: string; transcript?: str
   const [currentTime, setCurrentTime] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const retryCount = useRef(0);
 
   function handleTimeUpdate() {
     const audio = audioRef.current;
@@ -259,7 +275,15 @@ function VoicePlayerCompact({ url, transcript }: { url: string; transcript?: str
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={handleEnded}
-          onError={() => { setLoadError(true); setPlaying(false); }}
+          onError={() => {
+            if (retryCount.current < 2) {
+              retryCount.current++;
+              setTimeout(() => { if (audioRef.current) audioRef.current.load(); }, 1000 * retryCount.current);
+            } else {
+              setLoadError(true);
+              setPlaying(false);
+            }
+          }}
           preload="auto"
           className="hidden"
         />

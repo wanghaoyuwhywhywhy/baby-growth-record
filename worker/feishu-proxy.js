@@ -1049,8 +1049,11 @@ async function handleAsset(request, env, token) {
       });
     }
 
-    // 照片/视频：302 重定向到飞书 CDN
-    return Response.redirect(downloadUrl, 302);
+    // 照片/视频：302 重定向到飞书 CDN（带 CORS 头）
+    return new Response(null, {
+      status: 302,
+      headers: { 'Location': downloadUrl, ...getCORSHeaders(request) },
+    });
   } catch (e) {
     console.error('[handleAsset] 异常:', e.message);
     return new Response(JSON.stringify({ error: '文件下载异常' }), {

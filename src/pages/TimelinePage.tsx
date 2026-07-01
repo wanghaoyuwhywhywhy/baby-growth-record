@@ -56,6 +56,26 @@ function assignTokenTypes(tokens: string[], mediaTypes: string[]): { id: string;
   return result;
 }
 
+// 视频 + 自动重试
+function VideoWithRetry({ src }: { src: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const retryCount = useRef(0);
+  return (
+    <video
+      ref={ref}
+      src={src}
+      controls
+      className="w-full max-h-48 rounded-lg"
+      onError={() => {
+        if (retryCount.current < 2) {
+          retryCount.current++;
+          setTimeout(() => { if (ref.current) ref.current.load(); }, 1000 * retryCount.current);
+        }
+      }}
+    />
+  );
+}
+
 // 语音播放器组件
 function VoicePlayer({ record }: { record: DailyRecord }) {
   const [playing, setPlaying] = useState(false);
@@ -65,6 +85,7 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const retryCount = useRef(0);
 
   const mediaAttachments = record.媒体附件 || [];
   const cloudTokens = mediaAttachments.filter(isCloudToken);
@@ -167,7 +188,15 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={handleEnded}
-          onError={() => { setLoadError(true); setPlaying(false); }}
+          onError={() => {
+            if (retryCount.current < 2) {
+              retryCount.current++;
+              setTimeout(() => { if (audioRef.current) audioRef.current.load(); }, 1000 * retryCount.current);
+            } else {
+              setLoadError(true);
+              setPlaying(false);
+            }
+          }}
           preload="auto"
           className="hidden"
         />
@@ -243,7 +272,7 @@ function MediaPreview({ record }: { record: DailyRecord }) {
     if (videoTokens.length > 0) {
       return (
         <div className="mt-2">
-          <video src={getCloudAssetUrl(record.record_id, videoTokens[0].id, 'video')} controls className="w-full max-h-48 rounded-lg" />
+          <VideoWithRetry src={getCloudAssetUrl(record.record_id, videoTokens[0].id, 'video')} />
         </div>
       );
     }
