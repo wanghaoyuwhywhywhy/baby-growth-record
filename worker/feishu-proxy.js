@@ -852,7 +852,7 @@ async function handleUpload(request, env, token) {
 async function handleAsset(request, env, token) {
   const url = new URL(request.url);
   const fileToken = url.searchParams.get('file_token');
-  const recordId = url.searchParams.get('record_id');
+  const mediaType = url.searchParams.get('type'); // voice / photo / video
 
   if (!fileToken) {
     return new Response(JSON.stringify({ error: 'file_token is required' }), {
@@ -860,77 +860,64 @@ async function handleAsset(request, env, token) {
     });
   }
 
-  const appToken = env.FEISHU_BASE_TOKEN;
-  const tableId = env.FEISHU_TABLE_RECORD;
+  try {
+    // 使用 batch_get_tmp_download_url 获取临时下载链接
+    const tmpUrl = `${FEISHU_API}/drive/v1/medias/batch_get_tmp_download_url?file_tokens=${encodeURIComponent(fileToken)}`;
+    const tmpResp = await fetch(tmpUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const tmpData = await tmpResp.json();
 
-  let downloadUrl = `${FEISHU_API}/drive/v1/medias/${fileToken}/download`;
-
-  if (recordId) {
-    try {
-      const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
-      const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
-      const fieldsData = await fieldsResp.json();
-      const attachmentField = (fieldsData.data?.items || []).find(f => f.field_name === '附件');
-      if (attachmentField) {
-        const extra = JSON.stringify({
-          bitablePerm: {
-            tableId: tableId,
-            attachments: { [attachmentField.field_id]: { [recordId]: [fileToken] } }
-          }
-        });
-        downloadUrl += `?extra=${encodeURIComponent(extra)}`;
-      }
-    } catch (e) {
-      // extra 参数获取失败，继续无 extra 下载
+    if (tmpData.code !== 0 || !tmpData.data?.tmp_download_urls?.[0]?.tmp_download_url) {
+      console.error('[handleAsset] 获取临时链接失败:', JSON.stringify(tmpData));
+      return new Response(JSON.stringify({ error: '获取文件下载链接失败' }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
+      });
     }
-  }
 
-  const fileResp = await fetch(downloadUrl, {
-    headers: { 'Authorization': `Bearer ${token}` },
-  });
+    const downloadUrl = tmpData.data.tmp_download_urls[0].tmp_download_url;
 
-  if (!fileResp.ok) {
-    return new Response(JSON.stringify({ error: '文件下载失败', status: fileResp.status }), {
+    // 语音文件需要代理下载并修正 Content-Type（飞书返回 video/webm，Safari 无法播放）
+    // 照片和视频直接 302 重定向到飞书 CDN，避免大文件代理
+    if (mediaType === 'voice') {
+      const fileResp = await fetch(downloadUrl);
+      if (!fileResp.ok) {
+        return new Response(JSON.stringify({ error: '语音文件下载失败' }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
+        });
+      }
+      const body = await fileResp.arrayBuffer();
+      const feishuContentType = fileResp.headers.get('Content-Type') || 'application/octet-stream';
+
+      // 根据文件魔数修正 Content-Type
+      let contentType = feishuContentType;
+      if (body.byteLength >= 8) {
+        const header = new Uint8Array(body.slice(0, 8));
+        const isMP4 = header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70;
+        const isWebM = header[0] === 0x1A && header[1] === 0x45 && header[2] === 0xDF && header[3] === 0xA3;
+        if (isMP4) contentType = 'audio/mp4';
+        else if (isWebM) contentType = 'audio/webm';
+        else contentType = feishuContentType.replace(/^video\//, 'audio/');
+      } else {
+        contentType = feishuContentType.replace(/^video\//, 'audio/');
+      }
+
+      return new Response(body, {
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=3600',
+          ...getCORSHeaders(request),
+        },
+      });
+    }
+
+    // 照片/视频：302 重定向到飞书 CDN
+    return Response.redirect(downloadUrl, 302);
+  } catch (e) {
+    console.error('[handleAsset] 异常:', e.message);
+    return new Response(JSON.stringify({ error: '文件下载异常' }), {
+      status: 500,
       headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
     });
   }
-
-  const feishuContentType = fileResp.headers.get('Content-Type') || 'application/octet-stream';
-  const body = await fileResp.arrayBuffer();
-
-  // 根据 URL 参数 type 和文件魔数修正 Content-Type
-  const mediaType = url.searchParams.get('type'); // voice / photo / video
-  let contentType = feishuContentType;
-  if (body.byteLength >= 12) {
-    const header = new Uint8Array(body.slice(0, 12));
-    const isMP4 = header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70;
-    const isWebM = header[0] === 0x1A && header[1] === 0x45 && header[2] === 0xDF && header[3] === 0xA3;
-
-    if (isMP4) {
-      // 有 type 参数时精确判断：voice→audio/mp4, video→video/mp4, photo→image/xxx
-      if (mediaType === 'voice') {
-        contentType = 'audio/mp4';
-      } else if (mediaType === 'video') {
-        contentType = 'video/mp4';
-      } else if (mediaType === 'photo') {
-        contentType = feishuContentType.startsWith('video/') ? 'image/jpeg' : feishuContentType;
-      } else {
-        // 无 type 参数，回退：飞书 video/mp4 保持，video/webm 改为 audio
-        if (feishuContentType === 'video/webm') {
-          contentType = 'audio/mp4';
-        }
-        // 其他保持飞书原始 Content-Type
-      }
-    } else if (isWebM) {
-      contentType = mediaType === 'voice' ? 'audio/webm' : feishuContentType;
-    }
-  }
-
-  return new Response(body, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'public, max-age=3600',
-      ...getCORSHeaders(request),
-    },
-  });
 }
