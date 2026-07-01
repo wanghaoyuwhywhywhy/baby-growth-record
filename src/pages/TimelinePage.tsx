@@ -40,6 +40,22 @@ function isCloudToken(token: string): boolean {
   return !token.startsWith('media_') && !token.startsWith('img_') && !token.startsWith('vid_') && !token.startsWith('voice_');
 }
 
+// 根据媒体类型优先级分配 token：voice → video → photo
+function assignTokenTypes(tokens: string[], mediaTypes: string[]): { id: string; type: 'voice' | 'video' | 'image' }[] {
+  const result: { id: string; type: 'voice' | 'video' | 'image' }[] = [];
+  let idx = 0;
+  if (mediaTypes.includes('voice') && idx < tokens.length) {
+    result.push({ id: tokens[idx], type: 'voice' }); idx++;
+  }
+  if (mediaTypes.includes('video') && idx < tokens.length) {
+    result.push({ id: tokens[idx], type: 'video' }); idx++;
+  }
+  while (idx < tokens.length) {
+    result.push({ id: tokens[idx], type: 'image' }); idx++;
+  }
+  return result;
+}
+
 // 语音播放器组件
 function VoicePlayer({ record }: { record: DailyRecord }) {
   const [playing, setPlaying] = useState(false);
@@ -54,12 +70,16 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
   const cloudTokens = mediaAttachments.filter(isCloudToken);
 
   useEffect(() => {
-    // 优先使用云端 URL，找第一个 voice 类型的 token
     if (cloudTokens.length > 0) {
       const mediaTypes = record.媒体类型 || ['text'];
       if (mediaTypes.includes('voice')) {
-        setAudioUrl(getCloudAssetUrl(record.record_id, cloudTokens[0], 'voice'));
-        return;
+        // 使用 assignTokenTypes 正确找到 voice token
+        const assigned = assignTokenTypes(cloudTokens, mediaTypes);
+        const voiceToken = assigned.find(a => a.type === 'voice');
+        if (voiceToken) {
+          setAudioUrl(getCloudAssetUrl(record.record_id, voiceToken.id, 'voice'));
+          return;
+        }
       }
     }
     // 本地 fallback
@@ -203,52 +223,45 @@ function MediaPreview({ record }: { record: DailyRecord }) {
 
   // 云端 URL
   if (cloudTokens.length > 0) {
-    // 分离 voice token 和 photo/video token
-    const voiceTokens: string[] = [];
-    const mediaTokens: string[] = [];
+    // 使用 assignTokenTypes 正确分配 token 类型
+    const assigned = assignTokenTypes(cloudTokens, mediaTypes);
+    const videoTokens = assigned.filter(a => a.type === 'video');
+    const imageTokens = assigned.filter(a => a.type === 'image');
 
-    if (mediaTypes.includes('voice')) {
-      // 第一个是 voice，其余是 photo/video
-      voiceTokens.push(cloudTokens[0]);
-      mediaTokens.push(...cloudTokens.slice(1));
-    } else {
-      mediaTokens.push(...cloudTokens);
-    }
-
-    const hasVideo = mediaTypes.includes('video');
-
-    if (hasVideo && mediaTokens.length > 0) {
+    if (videoTokens.length > 0) {
       return (
         <div className="mt-2">
-          <video src={getCloudAssetUrl(record.record_id, mediaTokens[0], 'video')} controls className="w-full max-h-48 rounded-lg" />
+          <video src={getCloudAssetUrl(record.record_id, videoTokens[0].id, 'video')} controls className="w-full max-h-48 rounded-lg" />
         </div>
       );
     }
 
-    return (
-      <div>
-        <div className="flex gap-2 mt-2 overflow-x-auto">
-          {mediaTokens.map(token => (
-            <img
-              key={token}
-              src={getCloudAssetUrl(record.record_id, token, 'photo')}
-              alt=""
-              className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0 cursor-pointer"
-              onClick={() => setPreviewImage(getCloudAssetUrl(record.record_id, token, 'photo'))}
-            />
-          ))}
-        </div>
-        {/* 图片全屏预览 */}
-        {previewImage && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-            onClick={() => setPreviewImage(null)}
-          >
-            <img src={previewImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
+    if (imageTokens.length > 0) {
+      return (
+        <div>
+          <div className="flex gap-2 mt-2 overflow-x-auto">
+            {imageTokens.map(t => (
+              <img
+                key={t.id}
+                src={getCloudAssetUrl(record.record_id, t.id, 'photo')}
+                alt=""
+                className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0 cursor-pointer"
+                onClick={() => setPreviewImage(getCloudAssetUrl(record.record_id, t.id, 'photo'))}
+              />
+            ))}
           </div>
-        )}
-      </div>
-    );
+          {/* 图片全屏预览 */}
+          {previewImage && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+              onClick={() => setPreviewImage(null)}
+            >
+              <img src={previewImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
+            </div>
+          )}
+        </div>
+      );
+    }
   }
 
   // 本地 fallback
@@ -292,18 +305,22 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
   const updateRecord = useAppStore((s) => s.updateRecord);
   const [saving, setSaving] = useState(false);
 
-  // 初始化为记录时间的本地时间字符串，精确到秒
+  // 初始化为记录时间的本地时间，精确到秒
   const dt = new Date(record.记录时间);
   const pad = (n: number) => String(n).padStart(2, '0');
-  const localDateTimeStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
-  const [dateTime, setDateTime] = useState(localDateTimeStr);
+  const initialDateStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  const [datePart, setDatePart] = useState(initialDateStr);
+  const [hour, setHour] = useState(dt.getHours());
+  const [minute, setMinute] = useState(dt.getMinutes());
+  const [second, setSecond] = useState(dt.getSeconds());
   const [category, setCategory] = useState(record.分类);
 
   async function handleSave() {
     setSaving(true);
     try {
+      const isoStr = new Date(`${datePart}T${pad(hour)}:${pad(minute)}:${pad(second)}`).toISOString();
       await updateRecord(record.record_id, {
-        记录时间: new Date(dateTime).toISOString(),
+        记录时间: isoStr,
         分类: category,
       });
       onSave();
@@ -313,6 +330,9 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
     }
     setSaving(false);
   }
+
+  // 生成选项的辅助函数
+  const rangeOptions = (max: number) => Array.from({ length: max }, (_, i) => i);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
@@ -334,12 +354,42 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
         <div className="mb-4">
           <label className="text-xs text-muted font-medium mb-1.5 block">记录时间</label>
           <input
-            type="datetime-local"
-            value={dateTime}
-            onChange={(e) => setDateTime(e.target.value)}
-            step="1"
-            className="w-full bg-white border border-rule rounded-xl px-4 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all"
+            type="date"
+            value={datePart}
+            onChange={(e) => setDatePart(e.target.value)}
+            className="w-full bg-white border border-rule rounded-xl px-4 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all mb-2"
           />
+          <div className="flex items-center gap-2">
+            <select
+              value={hour}
+              onChange={(e) => setHour(Number(e.target.value))}
+              className="flex-1 bg-white border border-rule rounded-xl px-3 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all appearance-none text-center cursor-pointer"
+            >
+              {rangeOptions(24).map(h => (
+                <option key={h} value={h}>{pad(h)}时</option>
+              ))}
+            </select>
+            <span className="text-muted font-medium text-sm">:</span>
+            <select
+              value={minute}
+              onChange={(e) => setMinute(Number(e.target.value))}
+              className="flex-1 bg-white border border-rule rounded-xl px-3 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all appearance-none text-center cursor-pointer"
+            >
+              {rangeOptions(60).map(m => (
+                <option key={m} value={m}>{pad(m)}分</option>
+              ))}
+            </select>
+            <span className="text-muted font-medium text-sm">:</span>
+            <select
+              value={second}
+              onChange={(e) => setSecond(Number(e.target.value))}
+              className="flex-1 bg-white border border-rule rounded-xl px-3 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all appearance-none text-center cursor-pointer"
+            >
+              {rangeOptions(60).map(s => (
+                <option key={s} value={s}>{pad(s)}秒</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* 分类选择 */}
@@ -470,19 +520,10 @@ export default function TimelinePage() {
                     <div className="absolute left-[17px] top-4 w-2 h-2 rounded-full bg-coral shadow-sm" />
                     <div className="card-shadow p-3.5">
                       {/* 时间 + 标签 + 编辑 */}
-                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      <div className="flex items-center gap-2 mb-1.5">
                         <span className="text-xs text-muted/80 font-mono">
                           {formatTimelineTime(record.记录时间)}
                         </span>
-                        {editMode && (
-                          <button
-                            onClick={() => setEditingRecord(record)}
-                            className="text-muted/60 hover:text-coral transition-colors"
-                            aria-label="编辑"
-                          >
-                            <Pencil size={12} />
-                          </button>
-                        )}
                         {style && (
                           <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${style.bg} ${style.text}`}>
                             {style.icon}{primaryMedia === 'text' ? '文字' : primaryMedia === 'voice' ? '语音' : primaryMedia === 'video' ? '视频' : '照片'}
@@ -492,6 +533,15 @@ export default function TimelinePage() {
                           {emoji} {record.分类}
                         </span>
                         {record.是否为里程碑 && <span className="text-xs">⭐</span>}
+                        {editMode && (
+                          <button
+                            onClick={() => setEditingRecord(record)}
+                            className="ml-auto text-muted/60 hover:text-coral transition-colors"
+                            aria-label="编辑"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        )}
                       </div>
 
                       {/* 内容 */}

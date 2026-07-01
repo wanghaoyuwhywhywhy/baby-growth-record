@@ -33,6 +33,29 @@ async function sha256(str) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// 解析 UA 为详细系统版本
+function parseOS(ua) {
+  // iOS
+  let m = ua.match(/iPhone OS (\d+[._]\d+)/);
+  if (m) return 'iOS ' + m[1].replace('_', '.');
+  // iPadOS
+  m = ua.match(/iPad.*OS (\d+[._]\d+)/);
+  if (m) return 'iPadOS ' + m[1].replace('_', '.');
+  // Android
+  m = ua.match(/Android (\d+(\.\d+)?)/);
+  if (m) return 'Android ' + m[1];
+  // macOS
+  m = ua.match(/Mac OS X (\d+[._]\d+)/);
+  if (m) return 'macOS ' + m[1].replace('_', '.');
+  // Windows
+  m = ua.match(/Windows NT (\d+\.\d+)/);
+  if (m) {
+    const winMap = { '10.0': '10/11', '6.3': '8.1', '6.2': '8', '6.1': '7' };
+    return 'Windows ' + (winMap[m[1]] || m[1]);
+  }
+  return '未知';
+}
+
 // 从密码哈希派生确定性 token，带角色前缀
 async function deriveToken(passwordHash, role) {
   const hash = await sha256(passwordHash + ':baby-growth-auth-v2:' + role);
@@ -143,7 +166,7 @@ export default {
         const token = await getTenantToken(env);
         // 从请求中获取真实 IP
         const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '';
-        const result = await handleLog(request, env, token, ip);
+        const result = await handleLog(request, env, token, ip, auth.role);
         return new Response(JSON.stringify(result), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -448,13 +471,15 @@ async function ensureLogTable(token, env) {
     throw new Error('创建登录日志表成功但未获取到 table_id');
   }
 
-  // 创建字段：时间（日期）、操作（文本）、IP（文本）、设备型号（文本）
+  // 创建字段：时间（日期）、操作（文本）、IP（文本）、设备型号（文本）、系统版本（文本）、登录账号（文本）
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
   const logFields = [
     { field_name: '时间', type: 5 },
     { field_name: '操作', type: 1 },
     { field_name: 'IP', type: 1 },
     { field_name: '设备型号', type: 1 },
+    { field_name: '系统版本', type: 1 },
+    { field_name: '登录账号', type: 1 },
   ];
   for (const field of logFields) {
     await fetch(fieldsUrl, {
@@ -469,7 +494,7 @@ async function ensureLogTable(token, env) {
 }
 
 // 处理登录日志请求
-async function handleLog(request, env, token, ip) {
+async function handleLog(request, env, token, ip, authRole) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
   try {
@@ -492,6 +517,12 @@ async function handleLog(request, env, token, ip) {
     else if (/Windows/i.test(ua)) deviceShort = 'Windows';
     else if (/Linux/i.test(ua)) deviceShort = 'Linux';
 
+    // 解析详细系统版本
+    const osVersion = parseOS(ua);
+
+    // 登录账号：从 auth role 获取
+    const loginAccount = authRole || '未知';
+
     const resp = await fetch(recordUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -501,6 +532,8 @@ async function handleLog(request, env, token, ip) {
           '操作': body.action || 'login',
           'IP': logIp,
           '设备型号': deviceShort,
+          '系统版本': osVersion,
+          '登录账号': loginAccount,
         },
       }),
     });
@@ -517,9 +550,10 @@ async function handleLog(request, env, token, ip) {
   }
 }
 
-// 数据迁移：创建字段 + 回填上传时间 + 创建日志表
+// 数据迁移：创建字段 + 回填上传时间 + 创建日志表 + 修改日期格式 + 补充日志表字段
 async function handleMigrate(env, token) {
   const results = {};
+  const appToken = env.FEISHU_BASE_TOKEN;
 
   // 1. 确保"上传时间"字段存在
   try {
@@ -533,7 +567,6 @@ async function handleMigrate(env, token) {
   // 2. 回填历史记录的上传时间 = 记录时间
   try {
     const tableId = env.FEISHU_TABLE_RECORD;
-    const appToken = env.FEISHU_BASE_TOKEN;
     const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`;
     const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
     const listData = await listResp.json();
@@ -567,6 +600,76 @@ async function handleMigrate(env, token) {
   } catch (e) {
     results.logTableCreated = false;
     results.logTableError = e.message;
+  }
+
+  // 4. 修改所有日期类型字段（type=5）的 date_format 为 "yyyy-MM-dd HH:mm:ss"
+  try {
+    const tablesToMigrate = [
+      { name: '记录表', tableId: env.FEISHU_TABLE_RECORD },
+      { name: '成长表', tableId: env.FEISHU_TABLE_GROWTH },
+    ];
+    // 登录日志表
+    if (results.logTableId) {
+      tablesToMigrate.push({ name: '登录日志表', tableId: results.logTableId });
+    }
+
+    let dateFieldsUpdated = 0;
+    for (const table of tablesToMigrate) {
+      if (!table.tableId) continue;
+      const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${table.tableId}/fields`;
+      const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const fieldsData = await fieldsResp.json();
+      const fields = fieldsData.data?.items || [];
+
+      for (const field of fields) {
+        if (field.type === 5) {
+          const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${table.tableId}/fields/${field.field_id}`;
+          await fetch(updateUrl, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              field_name: field.field_name,
+              type: 5,
+              property: { date_format: 'yyyy-MM-dd HH:mm:ss' },
+            }),
+          });
+          dateFieldsUpdated++;
+        }
+      }
+    }
+    results.dateFieldsUpdated = dateFieldsUpdated;
+  } catch (e) {
+    results.dateFormatError = e.message;
+  }
+
+  // 5. 为已有的登录日志表补充新字段（系统版本、登录账号），如果字段不存在则创建
+  try {
+    const logTableId = results.logTableId || logTableIdCache;
+    if (logTableId) {
+      const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${logTableId}/fields`;
+      const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const fieldsData = await fieldsResp.json();
+      const existingFields = (fieldsData.data?.items || []).map(f => f.field_name);
+
+      const newFields = [
+        { field_name: '系统版本', type: 1 },
+        { field_name: '登录账号', type: 1 },
+      ];
+      let logFieldsAdded = 0;
+      for (const field of newFields) {
+        if (!existingFields.includes(field.field_name)) {
+          await fetch(fieldsUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(field),
+          });
+          logFieldsAdded++;
+        }
+      }
+      results.logFieldsAdded = logFieldsAdded;
+    }
+  } catch (e) {
+    results.logFieldSupplementError = e.message;
   }
 
   return { ok: true, ...results };
