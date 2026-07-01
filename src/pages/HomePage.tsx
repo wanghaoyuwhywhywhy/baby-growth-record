@@ -6,7 +6,7 @@ import RecordItem from '@/components/RecordItem';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Sparkles, Loader2, X } from 'lucide-react';
+import { Activity, Sparkles, Loader2, X, MessageCircle } from 'lucide-react';
 import { analyzeBaby } from '@/lib/ai';
 
 export default function HomePage() {
@@ -68,8 +68,8 @@ export default function HomePage() {
       <div className="mt-4">
         <BabyCard baby={baby} />
 
-        {/* 三个快捷入口并排 */}
-        <div className="grid grid-cols-3 gap-2.5 mb-3">
+        {/* 四个快捷入口并排 */}
+        <div className="grid grid-cols-4 gap-2.5 mb-3">
           {/* 身高体重入口 */}
           <button
             onClick={() => navigate('/growth')}
@@ -106,6 +106,17 @@ export default function HomePage() {
               )}
             </div>
             <p className="text-xs font-outfit font-bold text-ink">AI 分析</p>
+          </button>
+
+          {/* AI 咨询入口 */}
+          <button
+            onClick={() => navigate('/chat')}
+            className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97]"
+          >
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky to-mint flex items-center justify-center text-white shadow-soft">
+              <MessageCircle size={18} strokeWidth={2.5} />
+            </div>
+            <p className="text-xs font-outfit font-bold text-ink">AI 咨询</p>
           </button>
         </div>
 

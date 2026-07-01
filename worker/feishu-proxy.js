@@ -217,9 +217,13 @@ export default {
           result = await handleGrowth(request, env, token);
           break;
         }
-        case '/api/ai':
-          result = await handleAI(request, env);
+        case '/api/ai': {
+          const aiResult = await handleAI(request, env);
+          // 如果是流式Response（chat action），直接返回
+          if (aiResult instanceof Response) return aiResult;
+          result = aiResult;
           break;
+        }
         case '/api/upload': {
           const token = await getTenantToken(env);
           result = await handleUpload(request, env, token);
@@ -824,6 +828,43 @@ async function handleMigrate(env, token) {
   return { ok: true, ...results };
 }
 
+async function streamDeepSeek(apiKey, systemPrompt, messages, temperature, maxTokens) {
+  try {
+    const resp = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ],
+        temperature,
+        max_tokens: maxTokens,
+        stream: true,
+      }),
+    });
+
+    if (!resp.ok) {
+      return { error: `DeepSeek API 错误: ${resp.status}` };
+    }
+
+    // 返回流式 Response（SSE）
+    return new Response(resp.body, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
 async function handleAI(request, env) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
@@ -891,6 +932,50 @@ ${records.length > 0
       temperature = 0.8;
       maxTokens = 150;
       break;
+    }
+    case 'chat': {
+      const messages = data.messages || [];
+      const baby = data.baby || {};
+      const growthRecords = data.growthRecords || [];
+      const records = data.records || [];
+      const vaccines = data.vaccines || [];
+      systemPrompt = `你是一位专业的儿童成长顾问，名叫"小桐"。你可以回答关于育儿、健康、营养、教育等方面的问题。
+
+【宝宝档案】
+姓名：${baby.宝宝姓名 || '未知'}
+性别：${baby.性别 || '未知'}
+出生日期：${baby.出生日期 || '未知'}
+备注：${baby.备注 || '无'}
+
+【身高体重记录】
+${growthRecords.length > 0
+        ? growthRecords.slice(0, 10).map(g => `${g.测量日期}：身高${g.身高 || '-'}cm，体重${g.体重 || '-'}kg`).join('\n')
+        : '暂无记录'}
+
+【最近成长记录】
+${records.length > 0
+        ? records.slice(0, 15).map(r => `${r.记录时间?.split('T')?.[0] || ''} [${r.分类}] ${r.记录内容}`).join('\n')
+        : '暂无记录'}
+
+【疫苗接种情况】
+${vaccines.length > 0
+        ? vaccines.map(v => `${v.疫苗名称} 第${v.剂次}/${v.总剂次}针 ${v.接种状态 === '已接种' ? '✓已接种(' + (v.接种时间?.split('T')?.[0] || '') + ')' : '未接种'}`).join('\n')
+        : '暂无记录'}
+
+请基于以上宝宝的真实数据，结合专业知识，给出个性化、温暖的回答。用中文回答。`;
+      const streamResult = await streamDeepSeek(apiKey, systemPrompt, messages, 0.7, 1000);
+      // 如果是错误对象，返回JSON
+      if (streamResult.error) return streamResult;
+      // 流式Response，添加CORS头
+      const corsHeaders = getCORSHeaders(request);
+      return new Response(streamResult.body, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          ...corsHeaders,
+        },
+      });
     }
     default:
       return { error: 'Unknown action' };
