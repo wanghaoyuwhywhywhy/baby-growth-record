@@ -80,10 +80,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         babies: updatedBabies,
         currentBabyId: exists ? cid : updatedBabies[0]?.record_id ?? null,
       });
-      // 刷新记录
-      await get().fetchRecords();
-      await get().fetchGrowthRecords();
-      get().fetchVaccines(); // 后台加载，不阻塞
+      // 并行刷新所有数据
+      await Promise.all([
+        get().fetchRecords(),
+        get().fetchGrowthRecords(),
+        get().fetchVaccines(),
+      ]);
     }).catch(() => {
       // 云端同步失败，不影响本地使用
     });
