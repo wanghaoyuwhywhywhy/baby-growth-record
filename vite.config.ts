@@ -53,18 +53,9 @@ export default defineConfig({
         clientsClaim: true,
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
-        // 运行时缓存策略：API 和媒体文件缓存最长1小时后过期
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/api\.tongxi\.xyz\/api\/asset/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'media-cache',
-              expiration: { maxAgeSeconds: 60 * 60 }, // 1小时
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
+        // 不缓存 /api/asset：视频 302 重定向和语音代理响应经 service worker 缓存后
+        // 会变成 opaque 响应，导致 <video>/<audio> 无法做 Range 请求而加载失败
+        // 浏览器原生 HTTP 缓存已足够处理媒体文件
       },
     }),
   ],
