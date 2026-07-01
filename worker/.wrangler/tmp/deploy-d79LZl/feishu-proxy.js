@@ -142,6 +142,13 @@ var feishu_proxy_default = {
           headers: { "Content-Type": "application/json", ...corsHeaders }
         });
       }
+      if (path === "/api/ai") {
+        const aiResult = await handleAI(request, env);
+        if (aiResult instanceof Response) return aiResult;
+        return new Response(JSON.stringify(aiResult), {
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
       const isWriteOp = request.method !== "GET";
       if (hasAnyPassword && isWriteOp && auth.role !== "edit") {
         return new Response(JSON.stringify({ error: "\u53EA\u6709\u7F16\u8F91\u6743\u9650\u624D\u80FD\u6267\u884C\u6B64\u64CD\u4F5C", code: 403 }), {
@@ -165,12 +172,6 @@ var feishu_proxy_default = {
         case "/api/growth": {
           const token = await getTenantToken(env);
           result = await handleGrowth(request, env, token);
-          break;
-        }
-        case "/api/ai": {
-          const aiResult = await handleAI(request, env);
-          if (aiResult instanceof Response) return aiResult;
-          result = aiResult;
           break;
         }
         case "/api/upload": {
@@ -803,7 +804,7 @@ ${recentRecords.join("\n")}`;
       systemPrompt = `\u4F60\u662F\u4E00\u4F4D\u4E13\u4E1A\u7684\u513F\u7AE5\u6210\u957F\u987E\u95EE\uFF0C\u540D\u53EB"\u5C0F\u563B"\u3002\u4F60\u53EF\u4EE5\u56DE\u7B54\u5173\u4E8E\u80B2\u513F\u3001\u5065\u5EB7\u3001\u8425\u517B\u3001\u6559\u80B2\u7B49\u65B9\u9762\u7684\u95EE\u9898\u3002
 
 \u3010\u5B9D\u5B9D\u6863\u6848\u3011
-\u59D3\u540D\uFF1A${baby.\u5B9D\u5B9D\u59D3\u540D || "\u672A\u77E5"}
+\u59D3\u540D\uFF1A${baby.\u5B9D\u5B9D\u59D3\u540D || "\u5B9D\u5B9D"}
 \u6027\u522B\uFF1A${baby.\u6027\u522B || "\u672A\u77E5"}
 \u51FA\u751F\u65E5\u671F\uFF1A${baby.\u51FA\u751F\u65E5\u671F || "\u672A\u77E5"}
 \u5907\u6CE8\uFF1A${baby.\u5907\u6CE8 || "\u65E0"}
@@ -817,7 +818,11 @@ ${records.length > 0 ? records.slice(0, 15).map((r) => `${r.\u8BB0\u5F55\u65F6\u
 \u3010\u75AB\u82D7\u63A5\u79CD\u60C5\u51B5\u3011
 ${vaccines.length > 0 ? vaccines.map((v) => `${v.\u75AB\u82D7\u540D\u79F0} \u7B2C${v.\u5242\u6B21}/${v.\u603B\u5242\u6B21}\u9488 ${v.\u63A5\u79CD\u72B6\u6001 === "\u5DF2\u63A5\u79CD" ? "\u2713\u5DF2\u63A5\u79CD(" + (v.\u63A5\u79CD\u65F6\u95F4?.split("T")?.[0] || "") + ")" : "\u672A\u63A5\u79CD"}`).join("\n") : "\u6682\u65E0\u8BB0\u5F55"}
 
-\u8BF7\u57FA\u4E8E\u4EE5\u4E0A\u5B9D\u5B9D\u7684\u771F\u5B9E\u6570\u636E\uFF0C\u7ED3\u5408\u4E13\u4E1A\u77E5\u8BC6\uFF0C\u7ED9\u51FA\u4E2A\u6027\u5316\u3001\u6E29\u6696\u7684\u56DE\u7B54\u3002\u7528\u4E2D\u6587\u56DE\u7B54\u3002`;
+\u8BF7\u6CE8\u610F\uFF1A
+1. \u8BF7\u7528"${baby.\u5B9D\u5B9D\u59D3\u540D || "\u5B9D\u5B9D"}"\u6765\u79F0\u547C\u5B9D\u5B9D\uFF0C\u800C\u4E0D\u662F"\u5B9D\u5B9D"\u8FD9\u4E2A\u6CDB\u79F0
+2. \u79F0\u547C\u63D0\u95EE\u8005\u65F6\u7528"\u5BB6\u957F"\u800C\u4E0D\u662F"\u7238\u7238/\u5988\u5988"\uFF0C\u56E0\u4E3A\u4F60\u65E0\u6CD5\u786E\u5B9A\u63D0\u95EE\u8005\u7684\u8EAB\u4EFD
+3. \u57FA\u4E8E\u4EE5\u4E0A\u771F\u5B9E\u6570\u636E\uFF0C\u7ED3\u5408\u4E13\u4E1A\u77E5\u8BC6\uFF0C\u7ED9\u51FA\u4E2A\u6027\u5316\u3001\u6E29\u6696\u7684\u56DE\u7B54
+4. \u7528\u4E2D\u6587\u56DE\u7B54`;
       const streamResult = await streamDeepSeek(apiKey, systemPrompt, messages, 0.7, 1e3);
       if (streamResult.error) return streamResult;
       const corsHeaders = getCORSHeaders(request);

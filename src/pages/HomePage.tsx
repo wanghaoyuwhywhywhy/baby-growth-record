@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { type DailyRecord } from '@/api/feishu';
 import BabyCard from '@/components/BabyCard';
@@ -22,6 +22,7 @@ export default function HomePage() {
 
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
+  const aiAbortRef = useRef<AbortController | null>(null);
 
   // 首次加载和 records 变化时刷新最近记录
   useEffect(() => {
@@ -36,16 +37,33 @@ export default function HomePage() {
   }, [baby?.record_id, fetchGrowthRecords]);
 
   async function handleAIAnalysis() {
-    if (!baby || aiAnalyzing) return;
+    // 如果正在分析，再次点击取消
+    if (aiAnalyzing) {
+      aiAbortRef.current?.abort();
+      setAiAnalyzing(false);
+      setAiResult(null);
+      return;
+    }
+    // 如果已有结果，再次点击关闭弹窗
+    if (aiResult) {
+      setAiResult(null);
+      return;
+    }
+    if (!baby) return;
     setAiAnalyzing(true);
     setAiResult(null);
+    const abort = new AbortController();
+    aiAbortRef.current = abort;
     try {
-      const result = await analyzeBaby(baby, growthRecords, records);
+      const result = await analyzeBaby(baby, growthRecords, records, abort.signal);
       setAiResult(result);
-    } catch (e) {
+    } catch (e: any) {
+      if (e.name === 'AbortError') return;
       setAiResult(`分析失败：${e instanceof Error ? e.message : '未知错误'}`);
+    } finally {
+      setAiAnalyzing(false);
+      aiAbortRef.current = null;
     }
-    setAiAnalyzing(false);
   }
 
   if (!baby) {
@@ -95,8 +113,7 @@ export default function HomePage() {
           {/* AI 成长分析入口 */}
           <button
             onClick={handleAIAnalysis}
-            disabled={aiAnalyzing}
-            className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97] disabled:opacity-60"
+            className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97]"
           >
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-warm-orange to-coral flex items-center justify-center text-white shadow-soft">
               {aiAnalyzing ? (
@@ -105,7 +122,7 @@ export default function HomePage() {
                 <Sparkles size={18} strokeWidth={2.5} />
               )}
             </div>
-            <p className="text-xs font-outfit font-bold text-ink">AI 分析</p>
+            <p className="text-xs font-outfit font-bold text-ink">{aiAnalyzing ? '取消' : 'AI 分析'}</p>
           </button>
 
           {/* AI 咨询入口 */}
