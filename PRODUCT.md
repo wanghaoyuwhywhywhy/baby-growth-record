@@ -1,6 +1,6 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-02 20:15
+> 最后更新：2026-07-02 22:20
 
 ---
 
@@ -185,7 +185,7 @@
 ### 3.3 首页
 
 - **宝宝卡片**：显示姓名、年龄、性别、身高体重、出生日期、备注
-- **快捷入口**：3列小卡片并排（身高体重/疫苗接种/AI分析）
+- **快捷入口**：4列小卡片并排（身高体重/疫苗接种/AI分析/AI咨询）
 - **最近记录**：最近 10 条记录（支持语音播放、图片预览、语音转文字）
 - **浮动添加按钮**：快速添加记录
 
@@ -248,6 +248,20 @@
 | 内容润色 | 用户点击"AI 润色" | 使文字更温暖有画面感 |
 | 成长分析 | 用户点击"AI 成长分析" | 综合分析发育趋势 |
 | 记录建议 | 预留 | 根据最近记录建议新内容 |
+| AI 咨询 | 用户进入AI咨询页面 | 流式对话，结合宝宝数据回答育儿问题 |
+
+### 3.10 AI 咨询
+
+- **入口**：首页 AI 咨询卡片 → /chat 页面
+- **聊天界面**：消息列表 + 底部输入区域
+- **AI 名字**：小嘻（专业儿童成长顾问）
+- **上下文**：自动携带宝宝档案+身高体重+成长记录+疫苗接种全部数据
+- **流式响应**：DeepSeek SSE 流式输出，逐字显示
+- **语音输入**：Web Speech API（zh-CN），点击麦克风按钮开始/停止
+- **文字输入**：textarea，Enter发送，Shift+Enter换行，自动调整高度
+- **快捷问题**：空消息时显示3个推荐问题（发育评估/疫苗提醒/早教建议）
+- **多轮对话**：支持上下文连续问答
+- **中止请求**：AbortController，页面卸载时自动中止
 
 ---
 
@@ -396,6 +410,7 @@
 | /growth | GrowthPage | 身高体重记录 |
 | /settings | SettingsPage | 设置（身份+退出登录+同步） |
 | /vaccine | VaccinePage | 疫苗接种记录 |
+| /chat | AIChatPage | AI 咨询对话 |
 
 ---
 
@@ -420,7 +435,7 @@ baby-growth-record/
 │   ├── hooks/
 │   │   └── useSpeechRecognition.ts  # Web Speech API Hook
 │   ├── lib/
-│   │   ├── ai.ts                # AI 能力（分类/润色/分析）
+│   │   ├── ai.ts                # AI 能力（分类/润色/分析/流式咨询）
 │   │   ├── auth.ts              # 认证模块（登录/token管理）
 │   │   ├── cloud.ts             # 云端 API 客户端
 │   │   └── db.ts                # IndexedDB 数据库
@@ -433,7 +448,8 @@ baby-growth-record/
 │   │   ├── GrowthPage.tsx       # 身高体重
 │   │   ├── LoginPage.tsx        # 登录页
 │   │   ├── SettingsPage.tsx     # 设置页
-│   │   └── VaccinePage.tsx     # 疫苗接种
+│   │   ├── VaccinePage.tsx     # 疫苗接种
+│   │   └── AIChatPage.tsx      # AI 咨询对话
 │   ├── store/
 │   │   └── useAppStore.ts       # Zustand 全局状态
 │   ├── utils/
@@ -550,6 +566,21 @@ baby-growth-record/
 - **视频/语音 onError 自动重试**：RecordItem 和 TimelinePage 中 <video>/<audio> 加 retry 逻辑（最多2次，间隔递增1s/2s）
 - **退出登录秒回**：不再 await 日志请求，先 clearAuthInfo + 立即刷新，日志后台发送
 
+### v1.9 AI 咨询模块（2026-07）
+- **AI 咨询页面**（/chat → AIChatPage）
+  - 聊天界面：消息列表 + 底部输入区域（语音按钮+文本框+发送按钮）
+  - AI 名字"小嘻"，定位为专业儿童成长顾问
+  - 自动携带宝宝档案+身高体重+成长记录+疫苗接种作为上下文
+  - DeepSeek SSE 流式响应，逐字显示回答内容
+  - 多轮对话：支持上下文连续问答
+  - 语音输入：Web Speech API（zh-CN），点击麦克风按钮开始/停止
+  - 文字输入：textarea，Enter发送，Shift+Enter换行，自动调整高度
+  - 快捷问题：空消息时显示3个推荐问题（发育评估/疫苗提醒/早教建议）
+  - AbortController 支持中止请求，页面卸载时自动中止
+- **首页快捷入口**：3列改为4列（身高体重/疫苗接种/AI分析/AI咨询）
+- **Worker chat action**：/api/ai 新增 chat action，返回 SSE 流式 Response（带 CORS 头）
+- **chatStream 函数**：前端 ai.ts 新增 SSE 流解析函数，逐 chunk 回调显示
+
 ---
 
 ## 十二、产品规划
@@ -571,7 +602,6 @@ baby-growth-record/
 
 ### 长期（v3.0）
 
-- [ ] AI 育儿建议：基于记录的个性化育儿建议
 - [ ] 社区功能：匿名化成长对比
 - [ ] 打印服务：实体成长册打印
 - [ ] 智能硬件接入：体重秤/身高仪自动记录
