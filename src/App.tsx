@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { HashRouter as Router, Routes, Route } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
 import { isAuthenticated, clearAuthInfo, type AuthRole, isEditMode } from '@/lib/auth';
 import LoginPage from '@/pages/LoginPage';
@@ -61,6 +61,13 @@ function checkStaleCache() {
   }
 }
 
+// 路由切换时滚动到顶部
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
+
 export default function App() {
   const [authed, setAuthed] = useState(isAuthenticated());
   const initApp = useAppStore((s) => s.initApp);
@@ -88,6 +95,7 @@ export default function App() {
   const handleLoginSuccess = useCallback((role: AuthRole) => {
     // 清除 hash 确保登录后跳转首页（而非停留在之前的页面如 /settings）
     window.location.hash = '#/';
+    window.scrollTo(0, 0);
     setAuthed(true);
   }, []);
 
@@ -108,6 +116,7 @@ export default function App() {
 
   return (
     <Router>
+      <ScrollToTop />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/record" element={<RecordPage />} />
