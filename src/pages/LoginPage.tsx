@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { login, type AuthRole, getAuthToken } from '@/lib/auth';
-import { Lock, Eye, Pencil, Loader2 } from 'lucide-react';
+import { User, Lock, Loader2 } from 'lucide-react';
 import { cloudLogAccess } from '@/lib/cloud';
 
 const WORKER_URL = 'https://api.tongxi.xyz';
@@ -10,21 +10,22 @@ interface LoginPageProps {
 }
 
 export default function LoginPage({ onSuccess }: LoginPageProps) {
+  const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!password.trim()) return;
+    if (!account.trim()) return;
     setLoading(true);
     setError('');
-    const result = await login(password);
+    const result = await login(account.trim(), password || undefined);
     setLoading(false);
     if (result.ok) {
       // 异步记录登录日志
       cloudLogAccess('login');
-      // 异步触发数据迁移（创建字段、回填上传时间、创建日志表）
+      // 异步触发数据迁移（创建字段、回填上传时间、创建日志表、创建账号表）
       const token = getAuthToken();
       if (token) {
         fetch(`${WORKER_URL}/api/migrate`, {
@@ -42,24 +43,38 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="w-20 h-20 rounded-full bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center mx-auto mb-4 shadow-float">
-            <Lock size={32} className="text-white" />
+            <User size={32} className="text-white" />
           </div>
           <h1 className="text-2xl font-outfit font-bold text-ink">宝宝成长记录</h1>
-          <p className="text-sm text-muted mt-1">请输入密码进入</p>
+          <p className="text-sm text-muted mt-1">请输入账号进入</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <input
+              type="text"
+              value={account}
+              onChange={(e) => { setAccount(e.target.value); setError(''); }}
+              placeholder="账号名"
+              className="w-full bg-white border border-rule rounded-2xl px-4 py-3.5 text-ink
+                         placeholder:text-muted/40 outline-none
+                         focus:border-coral/50 focus:ring-4 focus:ring-coral/5
+                         transition-all duration-200 text-center text-lg"
+              autoFocus
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <input
               type="password"
               value={password}
               onChange={(e) => { setPassword(e.target.value); setError(''); }}
-              placeholder="请输入访问密码"
+              placeholder="密码（可选）"
               className="w-full bg-white border border-rule rounded-2xl px-4 py-3.5 text-ink
                          placeholder:text-muted/40 outline-none
                          focus:border-coral/50 focus:ring-4 focus:ring-coral/5
                          transition-all duration-200 text-center text-lg tracking-widest"
-              autoFocus
               disabled={loading}
             />
           </div>
@@ -70,7 +85,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
 
           <button
             type="submit"
-            disabled={!password.trim() || loading}
+            disabled={!account.trim() || loading}
             className="btn-primary w-full text-base flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {loading ? (
@@ -83,12 +98,8 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
 
         <div className="mt-6 space-y-2">
           <div className="flex items-center gap-2 text-xs text-muted/50">
-            <Eye size={12} />
-            <span>查看密码：可浏览所有记录</span>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-muted/50">
-            <Pencil size={12} />
-            <span>编辑密码：可添加、编辑、删除记录</span>
+            <Lock size={12} />
+            <span>无密码账号可直接输入账号名登录</span>
           </div>
         </div>
 

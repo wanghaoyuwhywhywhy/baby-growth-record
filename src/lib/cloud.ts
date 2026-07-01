@@ -488,3 +488,77 @@ export async function cloudLogAccess(action: 'login' | 'logout'): Promise<void> 
     console.warn('登录日志记录失败:', e);
   }
 }
+
+// 账号管理
+
+export interface AccountRecord {
+  record_id: string;
+  账号名: string;
+  权限: 'view' | 'edit' | 'admin';
+  hasPassword: boolean;
+  最后修改时间: number | null;
+}
+
+export async function cloudGetAccounts(): Promise<AccountRecord[]> {
+  try {
+    const data = await apiGet('/api/accounts');
+    if (data.code !== 0 || !data.data?.items) return [];
+    return data.data.items.map((item: any) => ({
+      record_id: item.record_id,
+      账号名: item.账号名 || '',
+      权限: item.权限 || 'view',
+      hasPassword: !!item.hasPassword,
+      最后修改时间: item.最后修改时间 || null,
+    }));
+  } catch (e) {
+    console.warn('云端拉取账号列表失败:', e);
+    return [];
+  }
+}
+
+export async function cloudCreateAccount(accountName: string, password: string, role: string): Promise<AccountRecord | null> {
+  try {
+    const fields: Record<string, any> = { accountName, password, role };
+    const resp = await fetch(`${WORKER_URL}/api/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(fields),
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return null;
+    return data.data?.record || null;
+  } catch (e) {
+    console.warn('云端创建账号失败:', e);
+    return null;
+  }
+}
+
+export async function cloudUpdateAccount(record_id: string, updates: { accountName?: string; password?: string; role?: string }): Promise<boolean> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/accounts`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ record_id, ...updates }),
+    });
+    const data = await resp.json();
+    return data.code === 0;
+  } catch (e) {
+    console.warn('云端更新账号失败:', e);
+    return false;
+  }
+}
+
+export async function cloudDeleteAccount(record_id: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/accounts`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ record_id }),
+    });
+    const data = await resp.json();
+    return data.code === 0;
+  } catch (e) {
+    console.warn('云端删除账号失败:', e);
+    return false;
+  }
+}

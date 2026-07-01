@@ -43,55 +43,272 @@ function parseOS(ua) {
   return "\u672A\u77E5";
 }
 __name(parseOS, "parseOS");
-async function deriveToken(passwordHash, role) {
-  const hash = await sha256(passwordHash + ":baby-growth-auth-v2:" + role);
-  return `${role}:${hash}`;
+async function deriveToken(passwordHash, role, accountName) {
+  const hash = await sha256(passwordHash + ":baby-growth-auth-v3:" + role + ":" + accountName);
+  return `${role}:${accountName}:${hash}`;
 }
 __name(deriveToken, "deriveToken");
 async function parseAuth(request, env) {
   const token = request.headers.get("X-Auth-Token") || new URL(request.url).searchParams.get("token");
-  if (!token) return { role: null, valid: false };
-  const colonIdx = token.indexOf(":");
-  if (colonIdx === -1) return { role: null, valid: false };
-  const role = token.substring(0, colonIdx);
-  if (role !== "edit" && role !== "view") return { role: null, valid: false };
-  const editHash = env.EDIT_PASSWORD_HASH;
-  const viewHash = env.VIEW_PASSWORD_HASH;
-  if (role === "edit" && editHash) {
-    const expected = await deriveToken(editHash, "edit");
-    if (token === expected) return { role: "edit", valid: true };
+  if (!token) return { role: null, accountName: null, valid: false };
+  const parts = token.split(":");
+  if (parts.length >= 3) {
+    const role = parts[0];
+    const accountName = parts[1];
+    if (role !== "edit" && role !== "view" && role !== "admin") {
+      return { role: null, accountName: null, valid: false };
+    }
+    return { role, accountName, valid: true };
   }
-  if (role === "view" && viewHash) {
-    const expected = await deriveToken(viewHash, "view");
-    if (token === expected) return { role: "view", valid: true };
+  if (parts.length === 2) {
+    const role = parts[0];
+    if (role !== "edit" && role !== "view") return { role: null, accountName: null, valid: false };
+    const editHash = env.EDIT_PASSWORD_HASH;
+    const viewHash = env.VIEW_PASSWORD_HASH;
+    if (role === "edit" && editHash) {
+      const expectedHash = await sha256(editHash + ":baby-growth-auth-v2:edit");
+      if (parts[1] === expectedHash) return { role: "edit", accountName: "legacy-edit", valid: true };
+    }
+    if (role === "view" && viewHash) {
+      const expectedHash = await sha256(viewHash + ":baby-growth-auth-v2:view");
+      if (parts[1] === expectedHash) return { role: "view", accountName: "legacy-view", valid: true };
+    }
+    return { role: null, accountName: null, valid: false };
   }
-  return { role: null, valid: false };
+  return { role: null, accountName: null, valid: false };
 }
 __name(parseAuth, "parseAuth");
+var accountTableIdCache = null;
+async function ensureAccountTable(token, env) {
+  if (accountTableIdCache) return accountTableIdCache;
+  if (env.FEISHU_TABLE_ACCOUNT) {
+    accountTableIdCache = env.FEISHU_TABLE_ACCOUNT;
+    return accountTableIdCache;
+  }
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+  const listResp = await fetch(listUrl, { headers: { "Authorization": `Bearer ${token}` } });
+  const listData = await listResp.json();
+  const tables = listData.data?.items || [];
+  const existing = tables.find((t) => t.name === "\u8D26\u53F7\u8868");
+  if (existing) {
+    accountTableIdCache = existing.table_id;
+    return accountTableIdCache;
+  }
+  const createResp = await fetch(listUrl, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ table: { name: "\u8D26\u53F7\u8868" } })
+  });
+  const createData = await createResp.json();
+  if (createData.code !== 0) {
+    throw new Error(`\u521B\u5EFA\u8D26\u53F7\u8868\u5931\u8D25: ${createData.msg}`);
+  }
+  const tableId = createData.data?.table_id;
+  if (!tableId) {
+    throw new Error("\u521B\u5EFA\u8D26\u53F7\u8868\u6210\u529F\u4F46\u672A\u83B7\u53D6\u5230 table_id");
+  }
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  const accountFields = [
+    { field_name: "\u8D26\u53F7\u540D", type: 1 },
+    { field_name: "\u5BC6\u7801\u54C8\u5E0C", type: 1 },
+    { field_name: "\u6743\u9650", type: 3, property: { options: [{ name: "view" }, { name: "edit" }, { name: "admin" }] } },
+    { field_name: "\u6700\u540E\u4FEE\u6539\u65F6\u95F4", type: 5 }
+  ];
+  for (const field of accountFields) {
+    await fetch(fieldsUrl, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(field)
+    });
+  }
+  accountTableIdCache = tableId;
+  return tableId;
+}
+__name(ensureAccountTable, "ensureAccountTable");
+async function ensureDefaultAdmin(token, env, tableId) {
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=1`;
+  const listResp = await fetch(listUrl, { headers: { "Authorization": `Bearer ${token}` } });
+  const listData = await listResp.json();
+  if (listData.code === 0 && listData.data?.items?.length > 0) {
+    return;
+  }
+  const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+  await fetch(recordUrl, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fields: {
+        "\u8D26\u53F7\u540D": "admin",
+        "\u5BC6\u7801\u54C8\u5E0C": "",
+        "\u6743\u9650": "admin",
+        "\u6700\u540E\u4FEE\u6539\u65F6\u95F4": Date.now()
+      }
+    })
+  });
+}
+__name(ensureDefaultAdmin, "ensureDefaultAdmin");
 async function handleAuth(request, env) {
   if (request.method !== "POST") return { error: "Method not allowed" };
   const body = await request.json();
+  const account = body.account;
   const password = body.password;
-  if (!password) return { error: "\u8BF7\u8F93\u5165\u5BC6\u7801" };
-  const passwordHash = await sha256(password);
-  const editHash = env.EDIT_PASSWORD_HASH;
-  const viewHash = env.VIEW_PASSWORD_HASH;
-  if (editHash && passwordHash === editHash) {
-    const token = await deriveToken(passwordHash, "edit");
-    return { ok: true, token, role: "edit" };
+  if (account) {
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountTable(feishuToken, env);
+    await ensureDefaultAdmin(feishuToken, env, tableId);
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const filterStr = `CurrentValue.[\u8D26\u53F7\u540D]="${account}"`;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const listResp = await fetch(listUrl, { headers: { "Authorization": `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
+    if (listData.code !== 0 || !listData.data?.items || listData.data.items.length === 0) {
+      return { error: "\u8D26\u53F7\u4E0D\u5B58\u5728" };
+    }
+    const accountRecord = listData.data.items[0];
+    const fields = accountRecord.fields || {};
+    const storedPasswordHash = fields["\u5BC6\u7801\u54C8\u5E0C"] || "";
+    const role = fields["\u6743\u9650"] || "view";
+    const accountName = fields["\u8D26\u53F7\u540D"] || account;
+    if (storedPasswordHash) {
+      if (!password) return { error: "\u8BF7\u8F93\u5165\u5BC6\u7801" };
+      const inputHash = await sha256(password);
+      if (inputHash !== storedPasswordHash) return { error: "\u5BC6\u7801\u9519\u8BEF" };
+    }
+    const token = await deriveToken(storedPasswordHash || "", role, accountName);
+    return { ok: true, token, role, accountName };
   }
-  if (viewHash && passwordHash === viewHash) {
-    const token = await deriveToken(passwordHash, "view");
-    return { ok: true, token, role: "view" };
+  if (password) {
+    const passwordHash = await sha256(password);
+    const editHash = env.EDIT_PASSWORD_HASH;
+    const viewHash = env.VIEW_PASSWORD_HASH;
+    if (editHash && passwordHash === editHash) {
+      const token = await deriveToken(passwordHash, "edit", "legacy-edit");
+      return { ok: true, token, role: "edit", accountName: "legacy-edit" };
+    }
+    if (viewHash && passwordHash === viewHash) {
+      const token = await deriveToken(passwordHash, "view", "legacy-view");
+      return { ok: true, token, role: "view", accountName: "legacy-view" };
+    }
+    const legacyHash = env.ACCESS_PASSWORD_HASH;
+    if (legacyHash && passwordHash === legacyHash) {
+      const token = await deriveToken(passwordHash, "edit", "legacy-edit");
+      return { ok: true, token, role: "edit", accountName: "legacy-edit" };
+    }
+    return { error: "\u5BC6\u7801\u9519\u8BEF" };
   }
-  const legacyHash = env.ACCESS_PASSWORD_HASH;
-  if (legacyHash && passwordHash === legacyHash) {
-    const token = await deriveToken(passwordHash, "edit");
-    return { ok: true, token, role: "edit" };
-  }
-  return { error: "\u5BC6\u7801\u9519\u8BEF" };
+  return { error: "\u8BF7\u8F93\u5165\u8D26\u53F7\u540D" };
 }
 __name(handleAuth, "handleAuth");
+async function handleAccounts(request, env, token, auth) {
+  if (auth.role !== "admin") {
+    return { error: "\u53EA\u6709\u7BA1\u7406\u5458\u624D\u80FD\u7BA1\u7406\u8D26\u53F7", code: 403 };
+  }
+  const feishuToken = await getTenantToken(env);
+  const tableId = await ensureAccountTable(feishuToken, env);
+  await ensureDefaultAdmin(feishuToken, env, tableId);
+  const appToken = env.FEISHU_BASE_TOKEN;
+  if (request.method === "GET") {
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { "Authorization": `Bearer ${feishuToken}` } });
+    const data = await listResp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    const items = (data.data?.items || []).map((item) => {
+      const fields = item.fields || {};
+      return {
+        record_id: item.record_id,
+        \u8D26\u53F7\u540D: fields["\u8D26\u53F7\u540D"] || "",
+        \u5BC6\u7801\u54C8\u5E0C: fields["\u5BC6\u7801\u54C8\u5E0C"] || "",
+        \u6743\u9650: fields["\u6743\u9650"] || "view",
+        \u6700\u540E\u4FEE\u6539\u65F6\u95F4: fields["\u6700\u540E\u4FEE\u6539\u65F6\u95F4"] || null,
+        hasPassword: !!fields["\u5BC6\u7801\u54C8\u5E0C"]
+      };
+    });
+    return { code: 0, data: { items } };
+  }
+  if (request.method === "POST") {
+    const body = await request.json();
+    const accountName = body.accountName;
+    const password = body.password;
+    const role = body.role || "view";
+    if (!accountName) return { code: -1, msg: "\u8D26\u53F7\u540D\u4E0D\u80FD\u4E3A\u7A7A" };
+    if (!["view", "edit", "admin"].includes(role)) return { code: -1, msg: "\u6743\u9650\u503C\u65E0\u6548" };
+    const filterStr = `CurrentValue.[\u8D26\u53F7\u540D]="${accountName}"`;
+    const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const checkResp = await fetch(checkUrl, { headers: { "Authorization": `Bearer ${feishuToken}` } });
+    const checkData = await checkResp.json();
+    if (checkData.code === 0 && checkData.data?.items?.length > 0) {
+      return { code: -1, msg: "\u8D26\u53F7\u540D\u5DF2\u5B58\u5728" };
+    }
+    const passwordHash = password ? await sha256(password) : "";
+    const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+    const resp = await fetch(recordUrl, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${feishuToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fields: {
+          "\u8D26\u53F7\u540D": accountName,
+          "\u5BC6\u7801\u54C8\u5E0C": passwordHash,
+          "\u6743\u9650": role,
+          "\u6700\u540E\u4FEE\u6539\u65F6\u95F4": Date.now()
+        }
+      })
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0, data: { record: data.data?.record } };
+  }
+  if (request.method === "PUT") {
+    const body = await request.json();
+    const recordId = body.record_id;
+    if (!recordId) return { code: -1, msg: "record_id is required" };
+    const updateFields = {};
+    if (body.accountName !== void 0) {
+      const filterStr = `CurrentValue.[\u8D26\u53F7\u540D]="${body.accountName}"`;
+      const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=10`;
+      const checkResp = await fetch(checkUrl, { headers: { "Authorization": `Bearer ${feishuToken}` } });
+      const checkData = await checkResp.json();
+      if (checkData.code === 0 && checkData.data?.items?.length > 0) {
+        const otherRecord = checkData.data.items.find((i) => i.record_id !== recordId);
+        if (otherRecord) return { code: -1, msg: "\u8D26\u53F7\u540D\u5DF2\u5B58\u5728" };
+      }
+      updateFields["\u8D26\u53F7\u540D"] = body.accountName;
+    }
+    if (body.password !== void 0) {
+      updateFields["\u5BC6\u7801\u54C8\u5E0C"] = body.password ? await sha256(body.password) : "";
+    }
+    if (body.role !== void 0) {
+      if (!["view", "edit", "admin"].includes(body.role)) return { code: -1, msg: "\u6743\u9650\u503C\u65E0\u6548" };
+      updateFields["\u6743\u9650"] = body.role;
+    }
+    updateFields["\u6700\u540E\u4FEE\u6539\u65F6\u95F4"] = Date.now();
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const resp = await fetch(url, {
+      method: "PUT",
+      headers: { "Authorization": `Bearer ${feishuToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: updateFields })
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0, data: { record: data.data?.record } };
+  }
+  if (request.method === "DELETE") {
+    const body = await request.json();
+    const recordId = body.record_id;
+    if (!recordId) return { code: -1, msg: "record_id is required" };
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const resp = await fetch(url, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${feishuToken}` }
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0 };
+  }
+  return { code: -1, msg: "Method not allowed" };
+}
+__name(handleAccounts, "handleAccounts");
 var feishu_proxy_default = {
   async fetch(request, env) {
     const corsHeaders = getCORSHeaders(request);
@@ -120,6 +337,15 @@ var feishu_proxy_default = {
           headers: { "Content-Type": "application/json", ...corsHeaders }
         });
       }
+      if (path === "/api/accounts") {
+        const token = await getTenantToken(env);
+        const result2 = await handleAccounts(request, env, token, auth);
+        const status = result2.code === 403 ? 403 : 200;
+        return new Response(JSON.stringify(result2), {
+          status,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
       if (path === "/api/vaccines") {
         const token = await getTenantToken(env);
         const result2 = await handleVaccines(request, env, token);
@@ -130,7 +356,7 @@ var feishu_proxy_default = {
       if (path === "/api/log") {
         const token = await getTenantToken(env);
         const ip = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "";
-        const result2 = await handleLog(request, env, token, ip, auth.role);
+        const result2 = await handleLog(request, env, token, ip, auth);
         return new Response(JSON.stringify(result2), {
           headers: { "Content-Type": "application/json", ...corsHeaders }
         });
@@ -150,7 +376,7 @@ var feishu_proxy_default = {
         });
       }
       const isWriteOp = request.method !== "GET";
-      if (hasAnyPassword && isWriteOp && auth.role !== "edit") {
+      if (hasAnyPassword && isWriteOp && auth.role !== "edit" && auth.role !== "admin") {
         return new Response(JSON.stringify({ error: "\u53EA\u6709\u7F16\u8F91\u6743\u9650\u624D\u80FD\u6267\u884C\u6B64\u64CD\u4F5C", code: 403 }), {
           status: 403,
           headers: { "Content-Type": "application/json", ...corsHeaders }
@@ -558,7 +784,7 @@ async function handleLog(request, env, token, ip, authRole) {
     else if (/Windows/i.test(ua)) deviceShort = "Windows";
     else if (/Linux/i.test(ua)) deviceShort = "Linux";
     const osVersion = parseOS(ua);
-    const loginAccount = authRole || "\u672A\u77E5";
+    const loginAccount = typeof authRole === "object" && authRole.accountName ? authRole.accountName : typeof authRole === "string" ? authRole : "\u672A\u77E5";
     const resp = await fetch(recordUrl, {
       method: "POST",
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
@@ -696,6 +922,15 @@ async function handleMigrate(env, token) {
   } catch (e) {
     results.vaccineTableCreated = false;
     results.vaccineTableError = e.message;
+  }
+  try {
+    const accountTableId = await ensureAccountTable(token, env);
+    await ensureDefaultAdmin(token, env, accountTableId);
+    results.accountTableCreated = true;
+    results.accountTableId = accountTableId;
+  } catch (e) {
+    results.accountTableCreated = false;
+    results.accountTableError = e.message;
   }
   return { ok: true, ...results };
 }
