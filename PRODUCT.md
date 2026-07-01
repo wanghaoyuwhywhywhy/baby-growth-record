@@ -474,12 +474,14 @@ baby-growth-record/
 - 飞书日期字段格式统一为 yyyy-MM-dd HH:mm:ss
 - PRODUCT.md 文档持续维护
 
-### v1.6 时间线优化（2026-07）
+### v1.6 时间线优化 & 媒体下载重构（2026-07）
+- 分类新增：学习 📖、玩耍 🎮
 - 时间线懒加载：初始显示 10 条，滚动到底部自动加载更多（IntersectionObserver）
-- 避免一次性加载所有记录导致语音/视频加载失败
 - 时间选择器改为日历+滚轮样式（年月日历面板 + 时分秒滚轮列）
 - 支持"现在"快捷按钮一键设置当前时间
-- 语音 token 分配逻辑统一（assignTokenTypes 优先级：voice→video→photo）
+- 媒体下载重构：使用飞书 `batch_get_tmp_download_url` API
+  - 语音：Worker 代理下载 + Content-Type 修正（video/webm→audio/webm，video/mp4→audio/mp4）
+  - 照片/视频：302 重定向到飞书 CDN，避免大文件代理导致超时
 - 编辑图标移至行末（ml-auto）
 
 ---
@@ -522,4 +524,6 @@ baby-growth-record/
 | 全局 fetch 拦截导致卡死 | img/audio 标签 401 触发登出 | 改为 API 层面 401 处理 + 自定义事件 |
 | syncFromCloud 清空本地数据 | 先清空再逐条写入，断网丢数据 | Promise.allSettled + 全部失败保留本地 |
 | 语音 token 分配错误 | 多媒体记录中 cloudTokens[0] 可能不是 voice | assignTokenTypes 按 voice→video→photo 优先级分配 |
+| 语音/视频 Content-Type 错误 | 飞书返回 video/webm，Safari 无法在 audio 标签播放 | Worker 代理语音 + 魔数检测修正 Content-Type |
+| 大文件代理超时 | Worker 代理下载 10MB+ 视频容易超时 | 照片/视频 302 重定向到飞书 CDN，仅语音走代理 |
 | 时间线一次性加载太多 | 所有记录同时渲染导致语音/视频并发加载失败 | IntersectionObserver 懒加载，初始 10 条，滚动加载更多 |
