@@ -486,7 +486,7 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
             {/* 年月导航 */}
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center">
-                <button onClick={prevYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink text-sm active:scale-95">≪</button>
+                <button onClick={prevYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink text-xs font-bold active:scale-95">«</button>
                 <button onClick={prevMonth} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 </button>
@@ -496,7 +496,7 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
                 <button onClick={nextMonth} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 </button>
-                <button onClick={nextYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink text-sm active:scale-95">≫</button>
+                <button onClick={nextYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink text-xs font-bold active:scale-95">»</button>
               </div>
             </div>
             {/* 星期头 */}
