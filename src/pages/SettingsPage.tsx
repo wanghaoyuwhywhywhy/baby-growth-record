@@ -1,15 +1,42 @@
 import NavHeader from '@/components/NavHeader';
 import { useAppStore } from '@/store/useAppStore';
-import { Cloud, RefreshCw, Check } from 'lucide-react';
+import { Cloud, RefreshCw, Check, LogOut, User } from 'lucide-react';
+import { clearAuthInfo, getAuthRole } from '@/lib/auth';
 
 export default function SettingsPage() {
   const { syncStatus, lastSyncResult, cloudConnected, syncFromCloud, checkCloudConnection } = useAppStore();
+  const role = getAuthRole();
+
+  function handleLogout() {
+    clearAuthInfo();
+    window.location.reload();
+  }
 
   return (
     <div className="page-container">
       <NavHeader title="设置" showBack />
 
       <div className="mt-6 space-y-5">
+        {/* 当前用户 */}
+        <div className="card-shadow p-5">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center text-white shadow-soft">
+              <User size={22} strokeWidth={2.5} />
+            </div>
+            <div>
+              <h3 className="text-sm font-outfit font-bold text-ink">当前身份</h3>
+              <p className="text-xs text-muted">{role === 'edit' ? '编辑权限（可增删改）' : '查看权限（仅浏览）'}</p>
+            </div>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="w-full mt-4 py-2.5 rounded-xl border border-coral/30 text-coral text-sm font-medium flex items-center justify-center gap-2 hover:bg-coral/5 active:scale-[0.98] transition-all"
+          >
+            <LogOut size={16} />
+            退出登录
+          </button>
+        </div>
+
         {/* 云端同步 */}
         <div className="card-shadow p-5">
           <div className="flex items-center gap-3 mb-3">

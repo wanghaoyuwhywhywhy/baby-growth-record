@@ -604,17 +604,31 @@ async function handleAsset(request, env, token) {
   const feishuContentType = fileResp.headers.get('Content-Type') || 'application/octet-stream';
   const body = await fileResp.arrayBuffer();
 
+  // 根据 URL 参数 type 和文件魔数修正 Content-Type
+  const mediaType = url.searchParams.get('type'); // voice / photo / video
   let contentType = feishuContentType;
   if (body.byteLength >= 12) {
     const header = new Uint8Array(body.slice(0, 12));
-    if (header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) {
-      if (feishuContentType.startsWith('video/') || feishuContentType.startsWith('audio/')) {
+    const isMP4 = header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70;
+    const isWebM = header[0] === 0x1A && header[1] === 0x45 && header[2] === 0xDF && header[3] === 0xA3;
+
+    if (isMP4) {
+      // 有 type 参数时精确判断：voice→audio/mp4, video→video/mp4, photo→image/xxx
+      if (mediaType === 'voice') {
         contentType = 'audio/mp4';
+      } else if (mediaType === 'video') {
+        contentType = 'video/mp4';
+      } else if (mediaType === 'photo') {
+        contentType = feishuContentType.startsWith('video/') ? 'image/jpeg' : feishuContentType;
+      } else {
+        // 无 type 参数，回退：飞书 video/mp4 保持，video/webm 改为 audio
+        if (feishuContentType === 'video/webm') {
+          contentType = 'audio/mp4';
+        }
+        // 其他保持飞书原始 Content-Type
       }
-    } else if (header[0] === 0x1A && header[1] === 0x45 && header[2] === 0xDF && header[3] === 0xA3) {
-      if (feishuContentType === 'video/webm') {
-        contentType = 'audio/webm';
-      }
+    } else if (isWebM) {
+      contentType = mediaType === 'voice' ? 'audio/webm' : feishuContentType;
     }
   }
 

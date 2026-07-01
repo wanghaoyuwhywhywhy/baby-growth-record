@@ -389,8 +389,9 @@ export async function cloudUploadMedia(recordId: string, file: Blob, fileName: s
 }
 
 // 获取云端媒体文件的代理 URL
-export function getCloudAssetUrl(recordId: string, fileToken: string): string {
+export function getCloudAssetUrl(recordId: string, fileToken: string, type?: 'voice' | 'photo' | 'video'): string {
   const token = getAuthToken();
   const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-  return `${WORKER_URL}/api/asset?record_id=${encodeURIComponent(recordId)}&file_token=${encodeURIComponent(fileToken)}${tokenParam}`;
+  const typeParam = type ? `&type=${type}` : '';
+  return `${WORKER_URL}/api/asset?record_id=${encodeURIComponent(recordId)}&file_token=${encodeURIComponent(fileToken)}${tokenParam}${typeParam}`;
 }
