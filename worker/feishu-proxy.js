@@ -578,6 +578,17 @@ async function handleVaccines(request, env, token) {
 
   if (request.method === 'POST') {
     const body = await request.json();
+    // 去重：同名同剂次不重复创建
+    const name = body.fields?.['疫苗名称'];
+    const dose = body.fields?.['剂次'];
+    if (name && dose !== undefined) {
+      const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(`CurrentValue.[疫苗名称]="${name}"&&CurrentValue.[剂次]=${dose}`)}&page_size=1`;
+      const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const listData = await listResp.json();
+      if (listData.code === 0 && listData.data?.items?.length > 0) {
+        return { code: 0, data: { record: listData.data.items[0], duplicate: true } };
+      }
+    }
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
     const resp = await fetch(url, {
       method: 'POST',
