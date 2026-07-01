@@ -1,6 +1,6 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-02
+> 最后更新：2026-07-02 20:15
 
 ---
 
@@ -179,7 +179,7 @@
 
 - 所有页面右上角设置为齿轮图标，点击进入设置页
 - 显示当前登录身份（编辑权限/查看权限）
-- 退出登录按钮（记录登出日志后清除认证）
+- 退出登录按钮（立即跳转，日志后台发送）
 - 飞书云端同步操作
 
 ### 3.3 首页
@@ -411,11 +411,12 @@ baby-growth-record/
 │   │   └── feishu.ts            # 飞书 API 封装（CRUD+同步）
 │   ├── components/
 │   │   ├── BabyCard.tsx         # 宝宝信息卡片
+│   │   ├── CalendarPicker.tsx   # 通用日历选择器（月导航+年翻页+maxDate）
 │   │   ├── CategoryPicker.tsx   # 分类选择器（横向胶囊）
 │   │   ├── FloatingButton.tsx   # 浮动添加按钮
 │   │   ├── MediaInput.tsx       # 媒体输入（录音+相机+相册）
-│   │   ├── NavHeader.tsx        # 导航栏
-│   │   └── RecordItem.tsx       # 记录条目（含语音播放+图片预览）
+│   │   ├── NavHeader.tsx        # 导航栏（支持titleAction）
+│   │   └── RecordItem.tsx       # 记录条目（含语音播放+视频重试+图片预览）
 │   ├── hooks/
 │   │   └── useSpeechRecognition.ts  # Web Speech API Hook
 │   ├── lib/
@@ -517,18 +518,37 @@ baby-growth-record/
 - 2025版国家免疫规划免费疫苗24种（乙肝、卡介苗、脊灰、百白破5剂次、麻腮风、乙脑、A群流脑、甲肝、白破、A+C群流脑等）
 - 29种非免疫规划自费疫苗（13价肺炎、五联、轮状病毒、Hib、EV71手足口、水痘、流感、23价肺炎、四联、AC结合、甲肝灭活等）
 - 首页快捷入口改为3列小卡片并排排列（身高体重/疫苗接种/AI分析）
-- "+添加"按钮在标题栏右侧：点击弹出底部选择弹窗，支持搜索和免费/自费筛选
+- "+添加疫苗"按钮在标题文字右侧（虚线框），点击弹出底部选择弹窗，支持搜索和免费/自费筛选
 - 可按疫苗名称批量添加，或逐剂次单独添加
 - 已添加疫苗自动从选择列表中过滤
-- 按月龄分组时间线展示（出生~6周岁）
+- 按月龄分组时间线展示，2周岁前以月龄展示（如18月龄），2周岁后以周岁展示
+- 月龄动态计算：修改预计/实际接种时间后根据宝宝出生日期重新分组
 - 预计接种时间：根据宝宝出生日期+月龄自动计算，支持点击编辑修改
-- 日历选择器（CalendarPicker）：月导航+星期头+日期网格+今天按钮+确认，替代原生date input
+- 接种时间也支持修改
+- CalendarPicker 通用日历选择器组件：替代原生 date input
+  - 月导航 `<< < 年月 > >>`，双箭头为年份翻页，单箭头为月份翻页，颜色统一
+  - 星期头+日期网格+今天快捷按钮+确认
+  - 固定6行显示，避免5/6行切换时高度跳动
+  - 支持 maxDate 限制（如出生日期不超过今天）
+- 宝宝档案出生日期改用 CalendarPicker 日历弹窗选择
+- 成长时间线编辑记录时间选择器也增加年份翻页 `<< >>`
+- NavHeader 新增 titleAction prop，标题后渲染额外元素（添加疫苗按钮），最右侧保留 rightAction（设置按钮）
+- 疫苗编辑权限控制：浏览账号不能添加/编辑/接种疫苗（isEditMode() 判断）
 - 点击"未接种"按钮弹出日历选择接种日期，确认后变更为"已接种"
 - 已接种左侧显示实际接种日期，未接种显示"预计接种时间"（可编辑）
 - 关联字段类型修复：type 7(复选框)→type 18(单向关联)
-- 费用类型从"付费"改为"自费"
+- ensureVaccineTable 策略：表已存在直接返回 ID，不再补全字段（避免重复创建）
+- 费用类型从"付款"改为"自费"
 - /vaccine 路由 → VaccinePage
 - /api/vaccines 路由：GET/POST/PUT/DELETE 疫苗 CRUD
+
+### v1.8 媒体加载修复 & 体验优化（2026-07）
+- **PWA 媒体缓存移除**：/api/asset 不再经 service worker CacheFirst 缓存
+  - 根因：跨域 302 重定向被 SW 缓存为 opaque 响应（status 0），<video>/<audio> 无法做 Range 请求导致加载失败
+  - 浏览器原生 HTTP 缓存已足够处理媒体文件
+- **Worker 302 重定向加 CORS 头**：`new Response(null, {status:302, headers:{Location,...CORS}})` 替代 `Response.redirect()`
+- **视频/语音 onError 自动重试**：RecordItem 和 TimelinePage 中 <video>/<audio> 加 retry 逻辑（最多2次，间隔递增1s/2s）
+- **退出登录秒回**：不再 await 日志请求，先 clearAuthInfo + 立即刷新，日志后台发送
 
 ---
 
@@ -573,3 +593,7 @@ baby-growth-record/
 | 语音/视频 Content-Type 错误 | 飞书返回 video/webm，Safari 无法在 audio 标签播放 | Worker 代理语音 + 魔数检测修正 Content-Type |
 | 大文件代理超时 | Worker 代理下载 10MB+ 视频容易超时 | 照片/视频 302 重定向到飞书 CDN，仅语音走代理 |
 | 时间线一次性加载太多 | 所有记录同时渲染导致语音/视频并发加载失败 | IntersectionObserver 懒加载，初始 10 条，滚动加载更多 |
+| 视频/语音加载失败（控制台可访问） | PWA SW CacheFirst 缓存 302 为 opaque 响应，无法 Range 请求 | 移除 /api/asset 的 runtimeCaching + Worker 302 加 CORS 头 + 前端 retry |
+| 退出登录卡几秒 | await cloudLogAccess('logout') 阻塞跳转 | 先 clearAuthInfo + 立即刷新，日志后台发送 |
+| 疫苗表字段重复创建 | ensureVaccineTable 每次补全缺失字段 | 表已存在直接返回 ID，不再补全 |
+| 日历5/6行切换高度跳动 | 部分月份占5行，部分6行 | 固定6行，多余行填充下月日期 |
