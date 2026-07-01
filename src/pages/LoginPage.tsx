@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { login, type AuthRole } from '@/lib/auth';
+import { login, type AuthRole, getAuthToken } from '@/lib/auth';
 import { Lock, Eye, Pencil, Loader2 } from 'lucide-react';
 import { cloudLogAccess } from '@/lib/cloud';
+
+const WORKER_URL = 'https://api.tongxi.xyz';
 
 interface LoginPageProps {
   onSuccess: (role: AuthRole) => void;
@@ -20,7 +22,15 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     const result = await login(password);
     setLoading(false);
     if (result.ok) {
-      cloudLogAccess('login'); // 异步记录登录日志
+      // 异步记录登录日志
+      cloudLogAccess('login');
+      // 异步触发数据迁移（创建字段、回填上传时间、创建日志表）
+      const token = getAuthToken();
+      if (token) {
+        fetch(`${WORKER_URL}/api/migrate`, {
+          headers: { 'X-Auth-Token': token },
+        }).catch(() => {});
+      }
       onSuccess(result.role || 'view');
     } else {
       setError(result.error || '登录失败');

@@ -85,6 +85,8 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = useCallback((role: AuthRole) => {
+    // 清除 hash 确保登录后跳转首页（而非停留在之前的页面如 /settings）
+    window.location.hash = '#/';
     setAuthed(true);
   }, []);
 
