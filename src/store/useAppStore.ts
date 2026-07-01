@@ -133,7 +133,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   fetchRecentRecords: async () => {
     const { currentBabyId } = get();
-    return feishuAPI.getRecentRecords(5, currentBabyId ?? undefined);
+    return feishuAPI.getRecentRecords(10, currentBabyId ?? undefined);
   },
 
   createRecord: async (data) => {
