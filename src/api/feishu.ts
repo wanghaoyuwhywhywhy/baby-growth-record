@@ -196,31 +196,19 @@ export const feishuAPI = {
     const cloudGrowth = growthResult.status === 'fulfilled' ? growthResult.value : [];
 
     if (cloudBabies.length === 0 && cloudRecords.length === 0 && cloudGrowth.length === 0) {
-      // 全部失败时不清空本地数据
       console.warn('[syncFromCloud] 所有云端请求失败，保留本地数据');
       return { babies: 0, records: 0, growth: 0 };
     }
 
-    // 先清空本地数据，再写入云端数据
+    // 清空本地数据，批量写入云端数据
     await dbClearAll();
 
-    let babiesSynced = 0;
-    for (const baby of cloudBabies) {
-      await dbAddBaby(baby);
-      babiesSynced++;
-    }
-
-    let recordsSynced = 0;
-    for (const record of cloudRecords) {
-      await dbAddRecord(record);
-      recordsSynced++;
-    }
-
-    let growthSynced = 0;
-    for (const g of cloudGrowth) {
-      await dbAddGrowthRecord(g);
-      growthSynced++;
-    }
+    // 并行写入三类数据
+    const [babiesSynced, recordsSynced, growthSynced] = await Promise.all([
+      Promise.all(cloudBabies.map(b => dbAddBaby(b))).then(() => cloudBabies.length),
+      Promise.all(cloudRecords.map(r => dbAddRecord(r))).then(() => cloudRecords.length),
+      Promise.all(cloudGrowth.map(g => dbAddGrowthRecord(g))).then(() => cloudGrowth.length),
+    ]);
 
     return { babies: babiesSynced, records: recordsSynced, growth: growthSynced };
   },

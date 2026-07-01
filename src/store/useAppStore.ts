@@ -54,12 +54,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   initApp: async () => {
     if (get().initialized) return;
-    // 先从云端同步数据到本地，再加载本地数据（确保新设备能看到云端数据）
-    try {
-      await feishuAPI.syncFromCloud();
-    } catch {
-      // 云端同步失败不阻塞，继续用本地数据
-    }
+    // 先加载本地数据，立即显示页面
     const babies = await feishuAPI.getBabies();
     const { currentBabyId } = get();
     const stillExists = currentBabyId && babies.find((b) => b.record_id === currentBabyId);
@@ -67,6 +62,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       babies,
       currentBabyId: stillExists ? currentBabyId : babies[0]?.record_id ?? null,
       initialized: true,
+    });
+    // 后台同步云端数据（不阻塞页面渲染）
+    feishuAPI.syncFromCloud().then(async () => {
+      const updatedBabies = await feishuAPI.getBabies();
+      const { currentBabyId: cid } = get();
+      const exists = cid && updatedBabies.find((b) => b.record_id === cid);
+      set({
+        babies: updatedBabies,
+        currentBabyId: exists ? cid : updatedBabies[0]?.record_id ?? null,
+      });
+      // 刷新记录
+      await get().fetchRecords();
+      await get().fetchGrowthRecords();
+    }).catch(() => {
+      // 云端同步失败，不影响本地使用
     });
   },
 
