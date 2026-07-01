@@ -3,7 +3,7 @@ import { getAuthToken } from '@/lib/auth';
 
 const WORKER_URL = 'https://api.tongxi.xyz';
 
-async function callWorkerAI(action: string, data: Record<string, any>): Promise<string> {
+async function callWorkerAI(action: string, data: Record<string, any>, signal?: AbortSignal): Promise<string> {
   const token = getAuthToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['X-Auth-Token'] = token;
@@ -12,6 +12,7 @@ async function callWorkerAI(action: string, data: Record<string, any>): Promise<
     method: 'POST',
     headers,
     body: JSON.stringify({ action, data }),
+    signal,
   });
 
   if (!response.ok) {
@@ -53,8 +54,8 @@ export async function suggestContent(recentRecords: string[]): Promise<string[]>
 /**
  * AI 综合分析宝宝成长数据
  */
-export async function analyzeBaby(baby: Record<string, any>, growthRecords: Record<string, any>[], records: Record<string, any>[]): Promise<string> {
-  return callWorkerAI('analyze', { baby, growthRecords, records });
+export async function analyzeBaby(baby: Record<string, any>, growthRecords: Record<string, any>[], records: Record<string, any>[], signal?: AbortSignal): Promise<string> {
+  return callWorkerAI('analyze', { baby, growthRecords, records }, signal);
 }
 
 /**

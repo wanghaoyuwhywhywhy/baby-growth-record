@@ -1,12 +1,34 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import NavHeader from '@/components/NavHeader';
 import { chatStream } from '@/lib/ai';
-import { Send, Mic, MicOff, Loader2, Sparkles } from 'lucide-react';
+import { Send, Mic, MicOff, Loader2, Sparkles, Trash2 } from 'lucide-react';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+}
+
+const CHAT_HISTORY_KEY = 'ai_chat_history';
+const MAX_HISTORY = 50; // 最多保存50条消息
+
+function loadHistory(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(CHAT_HISTORY_KEY);
+    if (!raw) return [];
+    const msgs = JSON.parse(raw);
+    return Array.isArray(msgs) ? msgs.slice(-MAX_HISTORY) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(messages: ChatMessage[]) {
+  try {
+    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messages.slice(-MAX_HISTORY)));
+  } catch {
+    // localStorage满了就不存
+  }
 }
 
 export default function AIChatPage() {
@@ -15,10 +37,11 @@ export default function AIChatPage() {
   const records = useAppStore((s) => s.records);
   const vaccines = useAppStore((s) => s.vaccines);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => loadHistory());
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [listening, setListening] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -29,6 +52,13 @@ export default function AIChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // 持久化消息到localStorage
+  const persistMessages = useCallback((msgs: ChatMessage[]) => {
+    // 只持久化内容完整（非空）的消息
+    const complete = msgs.filter(m => m.content.trim());
+    saveHistory(complete);
+  }, []);
 
   // 清理语音识别
   useEffect(() => {
@@ -96,7 +126,8 @@ export default function AIChatPage() {
     }
 
     const assistantMsg: ChatMessage = { role: 'assistant', content: '' };
-    setMessages([...newMessages, assistantMsg]);
+    const allMessages = [...newMessages, assistantMsg];
+    setMessages(allMessages);
 
     const abort = new AbortController();
     abortRef.current = abort;
@@ -105,6 +136,7 @@ export default function AIChatPage() {
       // 构建发送给DeepSeek的messages（不含最新assistant空消息）
       const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
 
+      let finalContent = '';
       await chatStream(
         {
           baby: getBabyContext(),
@@ -114,28 +146,33 @@ export default function AIChatPage() {
           messages: apiMessages,
         },
         (chunk) => {
+          finalContent += chunk;
           // 流式追加内容
           setMessages(prev => {
             const updated = [...prev];
             const last = updated[updated.length - 1];
             if (last && last.role === 'assistant') {
-              updated[updated.length - 1] = { ...last, content: last.content + chunk };
+              updated[updated.length - 1] = { ...last, content: finalContent };
             }
             return updated;
           });
         },
         abort.signal,
       );
+      // 流式完成后持久化
+      persistMessages([...newMessages, { role: 'assistant', content: finalContent }]);
     } catch (e: any) {
       if (e.name === 'AbortError') return;
+      const errContent = `❌ 请求失败：${e.message || '未知错误'}`;
       setMessages(prev => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
         if (last && last.role === 'assistant' && !last.content) {
-          updated[updated.length - 1] = { ...last, content: `❌ 请求失败：${e.message || '未知错误'}` };
+          updated[updated.length - 1] = { ...last, content: errContent };
         }
         return updated;
       });
+      persistMessages([...newMessages, { role: 'assistant', content: errContent }]);
     } finally {
       setStreaming(false);
       abortRef.current = null;
@@ -198,9 +235,53 @@ export default function AIChatPage() {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }
 
+  function handleClearHistory() {
+    setMessages([]);
+    localStorage.removeItem(CHAT_HISTORY_KEY);
+    setShowClearConfirm(false);
+  }
+
   return (
     <div className="page-container flex flex-col">
-      <NavHeader title="AI 咨询" showBack />
+      <NavHeader
+        title="AI 咨询"
+        showBack
+        rightAction={
+          <button
+            onClick={() => messages.length > 0 && setShowClearConfirm(true)}
+            className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${
+              messages.length > 0 ? 'text-muted hover:bg-cream-dark' : 'text-muted/30'
+            }`}
+            aria-label="清空历史"
+          >
+            <Trash2 size={18} />
+          </button>
+        }
+      />
+
+      {/* 清空确认弹窗 */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowClearConfirm(false)}>
+          <div className="bg-cream-light rounded-2xl p-5 mx-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-outfit font-bold text-ink mb-2">清空咨询记录？</h3>
+            <p className="text-sm text-muted mb-4">清空后无法恢复，历史对话将全部删除。</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="flex-1 py-2 rounded-xl text-sm font-medium text-ink bg-cream-dark hover:bg-cream-dark/80 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleClearHistory}
+                className="flex-1 py-2 rounded-xl text-sm font-medium text-white bg-coral hover:bg-coral-dark transition-colors"
+              >
+                清空
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 消息列表 */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
