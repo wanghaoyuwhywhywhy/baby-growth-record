@@ -1,8 +1,11 @@
 import { Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { isEditMode } from '@/lib/auth';
 
 export default function FloatingButton() {
   const navigate = useNavigate();
+
+  if (!isEditMode()) return null;
 
   return (
     <button

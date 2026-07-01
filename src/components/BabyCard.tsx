@@ -3,6 +3,7 @@ import { calcAge } from '@/utils/date';
 import { useAppStore } from '@/store/useAppStore';
 import { useNavigate } from 'react-router-dom';
 import { Edit3 } from 'lucide-react';
+import { isEditMode } from '@/lib/auth';
 
 interface BabyCardProps {
   baby: Baby;
@@ -56,13 +57,15 @@ export default function BabyCard({ baby }: BabyCardProps) {
           )}
         </div>
 
-        <button
-          onClick={() => navigate('/baby/detail')}
-          className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors flex-shrink-0"
-          aria-label="编辑宝宝信息"
-        >
-          <Edit3 size={18} className="text-muted" />
-        </button>
+        {isEditMode() && (
+          <button
+            onClick={() => navigate('/baby/detail')}
+            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors flex-shrink-0"
+            aria-label="编辑宝宝信息"
+          >
+            <Edit3 size={18} className="text-muted" />
+          </button>
+        )}
       </div>
     </div>
   );

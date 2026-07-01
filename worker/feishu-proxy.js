@@ -20,13 +20,10 @@ function getCORSHeaders(request) {
   };
 }
 
-// ============ 密码认证（无状态） ============
-// 认证流程：
-// 1. 前端 POST /api/auth { password: "xxx" }
-// 2. Worker 用 SHA-256 比较 password 与环境变量 ACCESS_PASSWORD_HASH
-// 3. 通过后用密码哈希派生确定性 token（SHA256(passwordHash + salt)），返回给前端
-// 4. 前端后续请求带 X-Auth-Token 头
-// 5. Worker 重新计算期望 token 并比较（无需内存存储，Worker 重启不影响）
+// ============ 双密码认证（无状态） ============
+// 两个密码：查看密码（只读）+ 编辑密码（增删改）
+// token 格式：role:hash  例如 "edit:abc123..." 或 "view:def456..."
+// Worker 解析 token 前缀判断角色，校验哈希部分
 
 // SHA-256 哈希
 async function sha256(str) {
@@ -36,18 +33,38 @@ async function sha256(str) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// 从密码哈希派生确定性 token（同一密码永远生成同一 token）
-async function deriveToken(passwordHash) {
-  return await sha256(passwordHash + ':baby-growth-auth-v1');
+// 从密码哈希派生确定性 token，带角色前缀
+async function deriveToken(passwordHash, role) {
+  const hash = await sha256(passwordHash + ':baby-growth-auth-v2:' + role);
+  return `${role}:${hash}`;
 }
 
-// 校验请求的认证 token（无状态：重新计算期望值比较）
-async function isAuthenticated(request, env) {
+// 解析 token，返回 { role: 'edit'|'view', valid: boolean }
+async function parseAuth(request, env) {
   const token = request.headers.get('X-Auth-Token')
     || new URL(request.url).searchParams.get('token');
-  if (!token) return false;
-  const expectedToken = await deriveToken(env.ACCESS_PASSWORD_HASH);
-  return token === expectedToken;
+  if (!token) return { role: null, valid: false };
+
+  const colonIdx = token.indexOf(':');
+  if (colonIdx === -1) return { role: null, valid: false };
+
+  const role = token.substring(0, colonIdx);
+  if (role !== 'edit' && role !== 'view') return { role: null, valid: false };
+
+  // 校验：分别尝试编辑密码和查看密码
+  const editHash = env.EDIT_PASSWORD_HASH;
+  const viewHash = env.VIEW_PASSWORD_HASH;
+
+  if (role === 'edit' && editHash) {
+    const expected = await deriveToken(editHash, 'edit');
+    if (token === expected) return { role: 'edit', valid: true };
+  }
+  if (role === 'view' && viewHash) {
+    const expected = await deriveToken(viewHash, 'view');
+    if (token === expected) return { role: 'view', valid: true };
+  }
+
+  return { role: null, valid: false };
 }
 
 // 处理认证请求
@@ -58,22 +75,30 @@ async function handleAuth(request, env) {
   const password = body.password;
   if (!password) return { error: '请输入密码' };
 
-  const expectedHash = env.ACCESS_PASSWORD_HASH;
-
-  if (!expectedHash) {
-    // 未配置密码，直接派生 token 放行
-    const fakeHash = await sha256('no-password');
-    const token = await deriveToken(fakeHash);
-    return { ok: true, token };
-  }
-
   const passwordHash = await sha256(password);
-  if (passwordHash !== expectedHash) {
-    return { error: '密码错误' };
+  const editHash = env.EDIT_PASSWORD_HASH;
+  const viewHash = env.VIEW_PASSWORD_HASH;
+
+  // 优先匹配编辑密码
+  if (editHash && passwordHash === editHash) {
+    const token = await deriveToken(passwordHash, 'edit');
+    return { ok: true, token, role: 'edit' };
   }
 
-  const token = await deriveToken(passwordHash);
-  return { ok: true, token };
+  // 再匹配查看密码
+  if (viewHash && passwordHash === viewHash) {
+    const token = await deriveToken(passwordHash, 'view');
+    return { ok: true, token, role: 'view' };
+  }
+
+  // 兼容：如果只有旧的单密码 ACCESS_PASSWORD_HASH
+  const legacyHash = env.ACCESS_PASSWORD_HASH;
+  if (legacyHash && passwordHash === legacyHash) {
+    const token = await deriveToken(passwordHash, 'edit');
+    return { ok: true, token, role: 'edit' };
+  }
+
+  return { error: '密码错误' };
 }
 
 export default {
@@ -104,10 +129,20 @@ export default {
       }
 
       // 所有其他接口需要认证
-      // 如果未配置密码哈希，则不校验（兼容未设置密码的情况）
-      if (env.ACCESS_PASSWORD_HASH && !(await isAuthenticated(request, env))) {
+      const auth = await parseAuth(request, env);
+      const hasAnyPassword = env.EDIT_PASSWORD_HASH || env.VIEW_PASSWORD_HASH || env.ACCESS_PASSWORD_HASH;
+      if (hasAnyPassword && !auth.valid) {
         return new Response(JSON.stringify({ error: '未认证，请先登录', code: 401 }), {
           status: 401,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
+      // 写操作需要编辑权限
+      const isWriteOp = request.method !== 'GET';
+      if (hasAnyPassword && isWriteOp && auth.role !== 'edit') {
+        return new Response(JSON.stringify({ error: '只有编辑权限才能执行此操作', code: 403 }), {
+          status: 403,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       }
