@@ -65,7 +65,7 @@ export interface VaccineRecord {
   疫苗名称: string;
   剂次: number;
   总剂次: number;
-  费用类型: '免费' | '付费';
+  费用类型: '免费' | '自费';
   月龄: string;
   预计接种时间: string;
   接种状态: '未接种' | '已接种';
