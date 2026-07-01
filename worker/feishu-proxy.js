@@ -939,7 +939,7 @@ ${records.length > 0
       const growthRecords = data.growthRecords || [];
       const records = data.records || [];
       const vaccines = data.vaccines || [];
-      systemPrompt = `你是一位专业的儿童成长顾问，名叫"小桐"。你可以回答关于育儿、健康、营养、教育等方面的问题。
+      systemPrompt = `你是一位专业的儿童成长顾问，名叫"小嘻"。你可以回答关于育儿、健康、营养、教育等方面的问题。
 
 【宝宝档案】
 姓名：${baby.宝宝姓名 || '未知'}
