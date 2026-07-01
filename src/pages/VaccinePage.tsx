@@ -1,7 +1,8 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import NavHeader from '@/components/NavHeader';
 import { feishuAPI, type VaccineRecord } from '@/api/feishu';
+import { isEditMode } from '@/lib/auth';
 import { Plus, X, Search, Calendar } from 'lucide-react';
 
 // 免费疫苗（免疫规划）— 2025版国家免疫规划
@@ -66,7 +67,34 @@ const PAID_VACCINES = [
 
 const ALL_VACCINES = [...FREE_VACCINES, ...PAID_VACCINES];
 const DEFAULT_VACCINES = FREE_VACCINES;
-const AGE_ORDER = ['刚出生', '1月龄', '2月龄', '3月龄', '4月龄', '5月龄', '6月龄', '7月龄', '8月龄', '9月龄', '12月龄', '18月龄', '2周岁', '3周岁', '4周岁', '6周岁'];
+
+// 根据日期差计算月龄标签
+function calcAgeLabel(birthDate: string, targetDate: string): string {
+  const birth = new Date(birthDate);
+  const target = new Date(targetDate);
+  let years = target.getFullYear() - birth.getFullYear();
+  let months = target.getMonth() - birth.getMonth();
+  let days = target.getDate() - birth.getDate();
+  if (days < 0) months--;
+  if (months < 0) { years--; months += 12; }
+  const totalMonths = years * 12 + months;
+
+  if (totalMonths <= 0 && days <= 0) return '刚出生';
+  if (totalMonths === 0) return '刚出生';
+  if (years >= 1) return `${years}周岁`;
+  if (totalMonths >= 12) return '1周岁';
+  return `${totalMonths}月龄`;
+}
+
+// 标准月龄的排序值
+function ageSortKey(label: string): number {
+  if (label === '刚出生') return 0;
+  const mMatch = label.match(/^(\d+)月龄$/);
+  if (mMatch) return parseInt(mMatch[1]);
+  const yMatch = label.match(/^(\d+)周岁$/);
+  if (yMatch) return parseInt(yMatch[1]) * 12;
+  return 999;
+}
 
 function calcExpectedDate(birthDate: string, 月龄: string): string {
   const birth = new Date(birthDate);
@@ -128,10 +156,8 @@ function CalendarPicker({
   const isToday = (d: number) => viewYear === today.getFullYear() && viewMonth === today.getMonth() && d === today.getDate();
 
   function handleConfirm() {
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    onConfirm(dateStr);
+    onConfirm(`${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
   }
-
   function handleToday() {
     const now = new Date();
     setYear(now.getFullYear()); setMonth(now.getMonth()); setDay(now.getDate());
@@ -147,8 +173,6 @@ function CalendarPicker({
             <X size={18} className="text-muted" />
           </button>
         </div>
-
-        {/* 日历 */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
             <button onClick={prevMonth} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
@@ -181,20 +205,14 @@ function CalendarPicker({
             })}
           </div>
         </div>
-
-        {/* 已选日期 + 今天按钮 + 确认 */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted">已选：</span>
             <span className="text-sm font-outfit font-bold text-ink">{year}-{String(month + 1).padStart(2, '0')}-{String(day).padStart(2, '0')}</span>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">
-              今天
-            </button>
-            <button onClick={handleConfirm} className="btn-primary py-1.5 px-4 text-xs rounded-btn">
-              确认
-            </button>
+            <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">今天</button>
+            <button onClick={handleConfirm} className="btn-primary py-1.5 px-4 text-xs rounded-btn">确认</button>
           </div>
         </div>
       </div>
@@ -208,19 +226,23 @@ export default function VaccinePage() {
   const fetchVaccines = useAppStore((s) => s.fetchVaccines);
   const updateVaccineStatus = useAppStore((s) => s.updateVaccineStatus);
   const updateVaccineExpectedDate = useAppStore((s) => s.updateVaccineExpectedDate);
+  const updateVaccineVaccinateDate = useAppStore((s) => s.updateVaccineVaccinateDate);
 
   const baby = currentBaby();
+  const canEdit = isEditMode();
   const [loading, setLoading] = useState(true);
   const [vaccinating, setVaccinating] = useState<string | null>(null);
 
   // 日历弹窗状态
-  const [calendarTarget, setCalendarTarget] = useState<{ id: string; type: 'vaccinate' | 'expected'; currentDate: string } | null>(null);
+  const [calendarTarget, setCalendarTarget] = useState<{ id: string; type: 'vaccinate' | 'vaccinateDate' | 'expected'; currentDate: string } | null>(null);
 
   // 添加疫苗弹窗
   const [showAddModal, setShowAddModal] = useState(false);
   const [addSearch, setAddSearch] = useState('');
   const [addFilter, setAddFilter] = useState<'全部' | '免费' | '自费'>('全部');
   const [adding, setAdding] = useState(false);
+
+  const birthDate = baby?.出生日期 || '';
 
   useEffect(() => {
     async function load() { setLoading(true); await fetchVaccines(); setLoading(false); }
@@ -230,26 +252,46 @@ export default function VaccinePage() {
   // 首次加载：自动创建默认疫苗记录
   useEffect(() => {
     async function initDefault() {
-      if (!baby?.record_id || !baby.出生日期) return;
+      if (!baby?.record_id || !birthDate) return;
       if (vaccines.length > 0 || loading) return;
       const promises = DEFAULT_VACCINES.map((v) =>
-        feishuAPI.createVaccine({ 疫苗名称: v.疫苗名称, 剂次: v.剂次, 总剂次: v.总剂次, 费用类型: v.费用类型, 月龄: v.月龄, 预计接种时间: calcExpectedDate(baby.出生日期, v.月龄), 接种状态: '未接种', 关联宝宝: [baby.record_id] })
+        feishuAPI.createVaccine({ 疫苗名称: v.疫苗名称, 剂次: v.剂次, 总剂次: v.总剂次, 费用类型: v.费用类型, 月龄: v.月龄, 预计接种时间: calcExpectedDate(birthDate, v.月龄), 接种状态: '未接种', 关联宝宝: [baby.record_id] })
       );
       await Promise.allSettled(promises);
       await fetchVaccines();
     }
     initDefault();
-  }, [vaccines.length, loading, baby?.record_id, baby?.出生日期, fetchVaccines]);
+  }, [vaccines.length, loading, baby?.record_id, birthDate, fetchVaccines]);
 
+  // 动态计算每条记录的月龄标签 + 分组
   const grouped = useMemo(() => {
-    const sorted = [...vaccines].sort((a, b) => {
-      const idxA = AGE_ORDER.indexOf(a.月龄); const idxB = AGE_ORDER.indexOf(b.月龄);
-      return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+    if (!birthDate) return [];
+
+    // 每条记录计算动态月龄
+    const withAge = vaccines.map((v) => {
+      let ageLabel: string;
+      if (v.接种状态 === '已接种' && v.接种时间) {
+        ageLabel = calcAgeLabel(birthDate, v.接种时间);
+      } else if (v.预计接种时间) {
+        ageLabel = calcAgeLabel(birthDate, v.预计接种时间);
+      } else {
+        ageLabel = v.月龄 || '未知';
+      }
+      return { ...v, _ageLabel: ageLabel, _ageSort: ageSortKey(ageLabel) };
     });
+
+    // 按月龄排序
+    withAge.sort((a, b) => a._ageSort - b._ageSort);
+
+    // 分组
     const groups: Record<string, VaccineRecord[]> = {};
-    for (const v of sorted) { if (!groups[v.月龄]) groups[v.月龄] = []; groups[v.月龄].push(v); }
-    return AGE_ORDER.filter((age) => groups[age]).map((age) => ({ 月龄: age, records: groups[age] }));
-  }, [vaccines]);
+    const ageOrder: string[] = [];
+    for (const v of withAge) {
+      if (!groups[v._ageLabel]) { groups[v._ageLabel] = []; ageOrder.push(v._ageLabel); }
+      groups[v._ageLabel].push(v);
+    }
+    return ageOrder.map((age) => ({ 月龄: age, records: groups[age] }));
+  }, [vaccines, birthDate]);
 
   const existingKeys = useMemo(() => new Set(vaccines.map((v) => `${v.疫苗名称}_${v.剂次}`)), [vaccines]);
 
@@ -263,16 +305,20 @@ export default function VaccinePage() {
   const groupedAvailable = useMemo(() => {
     const groups: Record<string, VaccineTemplate[]> = {};
     for (const v of availableVaccines) { if (!groups[v.疫苗名称]) groups[v.疫苗名称] = []; groups[v.疫苗名称].push(v); }
-    return Object.entries(groups).sort((a, b) => {
-      const ageA = AGE_ORDER.indexOf(a[1][0].月龄); const ageB = AGE_ORDER.indexOf(b[1][0].月龄);
-      return (ageA === -1 ? 999 : ageA) - (ageB === -1 ? 999 : ageB);
-    });
+    return Object.entries(groups).sort((a, b) => ageSortKey(a[1][0].月龄) - ageSortKey(b[1][0].月龄));
   }, [availableVaccines]);
 
   async function handleVaccinate(recordId: string, date: string) {
     setVaccinating(recordId);
     setCalendarTarget(null);
     await updateVaccineStatus(recordId, new Date(date).toISOString());
+    setVaccinating(null);
+  }
+
+  async function handleUpdateVaccinateDate(recordId: string, date: string) {
+    setVaccinating(recordId);
+    setCalendarTarget(null);
+    await updateVaccineVaccinateDate(recordId, new Date(date).toISOString());
     setVaccinating(null);
   }
 
@@ -284,20 +330,20 @@ export default function VaccinePage() {
   }
 
   async function handleAddVaccine(template: VaccineTemplate) {
-    if (!baby?.record_id || !baby.出生日期 || adding) return;
+    if (!baby?.record_id || !birthDate || adding) return;
     setAdding(true);
     try {
-      await feishuAPI.createVaccine({ 疫苗名称: template.疫苗名称, 剂次: template.剂次, 总剂次: template.总剂次, 费用类型: template.费用类型, 月龄: template.月龄, 预计接种时间: calcExpectedDate(baby.出生日期, template.月龄), 接种状态: '未接种', 关联宝宝: [baby.record_id] });
+      await feishuAPI.createVaccine({ 疫苗名称: template.疫苗名称, 剂次: template.剂次, 总剂次: template.总剂次, 费用类型: template.费用类型, 月龄: template.月龄, 预计接种时间: calcExpectedDate(birthDate, template.月龄), 接种状态: '未接种', 关联宝宝: [baby.record_id] });
       await fetchVaccines();
     } catch (e) { console.error('添加疫苗失败', e); }
     setAdding(false);
   }
 
   async function handleAddAllByGroup(group: VaccineTemplate[]) {
-    if (!baby?.record_id || !baby.出生日期 || adding) return;
+    if (!baby?.record_id || !birthDate || adding) return;
     setAdding(true);
     try {
-      const promises = group.map((v) => feishuAPI.createVaccine({ 疫苗名称: v.疫苗名称, 剂次: v.剂次, 总剂次: v.总剂次, 费用类型: v.费用类型, 月龄: v.月龄, 预计接种时间: calcExpectedDate(baby.出生日期, v.月龄), 接种状态: '未接种', 关联宝宝: [baby.record_id] }));
+      const promises = group.map((v) => feishuAPI.createVaccine({ 疫苗名称: v.疫苗名称, 剂次: v.剂次, 总剂次: v.总剂次, 费用类型: v.费用类型, 月龄: v.月龄, 预计接种时间: calcExpectedDate(birthDate, v.月龄), 接种状态: '未接种', 关联宝宝: [baby.record_id] }));
       await Promise.allSettled(promises);
       await fetchVaccines();
     } catch (e) { console.error('批量添加疫苗失败', e); }
@@ -310,12 +356,18 @@ export default function VaccinePage() {
 
   return (
     <div className="page-container">
-      <NavHeader title="疫苗接种" showBack rightAction={
-        <button onClick={() => { setShowAddModal(true); setAddSearch(''); setAddFilter('全部'); }}
-          className="flex items-center gap-1 text-coral text-sm font-outfit font-bold hover:text-coral-dark transition-colors active:scale-95">
-          <Plus size={16} /> 添加
-        </button>
-      } />
+      <NavHeader
+        title="疫苗接种"
+        showBack
+        titleAction={
+          canEdit ? (
+            <button onClick={() => { setShowAddModal(true); setAddSearch(''); setAddFilter('全部'); }}
+              className="ml-2 flex items-center gap-0.5 text-coral text-xs font-outfit font-bold hover:text-coral-dark transition-colors active:scale-95">
+              <Plus size={13} /> 添加
+            </button>
+          ) : null
+        }
+      />
 
       <div className="mt-4">
         {loading ? (
@@ -341,8 +393,10 @@ export default function VaccinePage() {
                     key={v.record_id}
                     vaccine={v}
                     vaccinating={vaccinating === v.record_id}
+                    canEdit={canEdit}
                     onVaccinate={() => setCalendarTarget({ id: v.record_id, type: 'vaccinate', currentDate: new Date().toISOString().split('T')[0] })}
                     onEditExpected={() => setCalendarTarget({ id: v.record_id, type: 'expected', currentDate: v.预计接种时间 })}
+                    onEditVaccinateDate={() => setCalendarTarget({ id: v.record_id, type: 'vaccinateDate', currentDate: v.接种时间 })}
                   />
                 ))}
               </div>
@@ -356,9 +410,10 @@ export default function VaccinePage() {
       {calendarTarget && (
         <CalendarPicker
           initialDate={calendarTarget.currentDate}
-          title={calendarTarget.type === 'vaccinate' ? '选择接种日期' : '修改预计接种时间'}
+          title={calendarTarget.type === 'vaccinate' ? '选择接种日期' : calendarTarget.type === 'vaccinateDate' ? '修改接种时间' : '修改预计接种时间'}
           onConfirm={(date) => {
             if (calendarTarget.type === 'vaccinate') handleVaccinate(calendarTarget.id, date);
+            else if (calendarTarget.type === 'vaccinateDate') handleUpdateVaccinateDate(calendarTarget.id, date);
             else handleUpdateExpected(calendarTarget.id, date);
           }}
           onClose={() => setCalendarTarget(null)}
@@ -429,13 +484,17 @@ export default function VaccinePage() {
 function VaccineCard({
   vaccine,
   vaccinating,
+  canEdit,
   onVaccinate,
   onEditExpected,
+  onEditVaccinateDate,
 }: {
   vaccine: VaccineRecord;
   vaccinating: boolean;
+  canEdit: boolean;
   onVaccinate: () => void;
   onEditExpected: () => void;
+  onEditVaccinateDate: () => void;
 }) {
   const isVaccinated = vaccine.接种状态 === '已接种';
   const isPaid = vaccine.费用类型 === '自费';
@@ -452,23 +511,40 @@ function VaccineCard({
       {/* 第二行：时间 + 状态 */}
       <div className="flex items-center justify-between">
         {isVaccinated ? (
-          <span className="text-xs text-muted">
-            接种时间: {formatDateShort(vaccine.接种时间 || vaccine.预计接种时间)}
-          </span>
+          canEdit ? (
+            <button onClick={onEditVaccinateDate} className="text-xs text-muted hover:text-coral transition-colors flex items-center gap-1">
+              <Calendar size={12} className="text-coral/60" />
+              接种时间: {formatDateShort(vaccine.接种时间 || vaccine.预计接种时间)}
+            </button>
+          ) : (
+            <span className="text-xs text-muted">
+              接种时间: {formatDateShort(vaccine.接种时间 || vaccine.预计接种时间)}
+            </span>
+          )
         ) : (
-          <button onClick={onEditExpected} className="text-xs text-muted hover:text-coral transition-colors flex items-center gap-1">
-            <Calendar size={12} className="text-coral/60" />
-            预计接种时间: {formatDateShort(vaccine.预计接种时间)}
-          </button>
+          canEdit ? (
+            <button onClick={onEditExpected} className="text-xs text-muted hover:text-coral transition-colors flex items-center gap-1">
+              <Calendar size={12} className="text-coral/60" />
+              预计接种时间: {formatDateShort(vaccine.预计接种时间)}
+            </button>
+          ) : (
+            <span className="text-xs text-muted">
+              预计接种时间: {formatDateShort(vaccine.预计接种时间)}
+            </span>
+          )
         )}
 
         {isVaccinated ? (
           <span className="text-xs text-muted">已接种</span>
         ) : (
-          <button onClick={onVaccinate} disabled={vaccinating}
-            className="text-xs border border-coral text-coral rounded-full px-3 py-1 hover:bg-coral/5 transition-colors disabled:opacity-50">
-            {vaccinating ? '提交中...' : '未接种'}
-          </button>
+          canEdit ? (
+            <button onClick={onVaccinate} disabled={vaccinating}
+              className="text-xs border border-coral text-coral rounded-full px-3 py-1 hover:bg-coral/5 transition-colors disabled:opacity-50">
+              {vaccinating ? '提交中...' : '未接种'}
+            </button>
+          ) : (
+            <span className="text-xs text-muted">未接种</span>
+          )
         )}
       </div>
     </div>
