@@ -68,57 +68,46 @@ export default function HomePage() {
       <div className="mt-4">
         <BabyCard baby={baby} />
 
-        {/* 身高体重入口 */}
-        <button
-          onClick={() => navigate('/growth')}
-          className="card-shadow w-full p-4 mb-3 flex items-center gap-3 hover:shadow-float transition-all duration-200 active:scale-[0.98]"
-        >
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-mint to-sky flex items-center justify-center text-white shadow-soft">
-            <Activity size={22} strokeWidth={2.5} />
-          </div>
-          <div className="flex-1 text-left">
-            <p className="text-sm font-outfit font-bold text-ink">身高体重</p>
-            <p className="text-xs text-muted">记录成长曲线，见证每一厘米</p>
-          </div>
-          <span className="text-muted text-lg">›</span>
-        </button>
+        {/* 三个快捷入口并排 */}
+        <div className="grid grid-cols-3 gap-2.5 mb-3">
+          {/* 身高体重入口 */}
+          <button
+            onClick={() => navigate('/growth')}
+            className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97]"
+          >
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-mint to-sky flex items-center justify-center text-white shadow-soft">
+              <Activity size={18} strokeWidth={2.5} />
+            </div>
+            <p className="text-xs font-outfit font-bold text-ink">身高体重</p>
+          </button>
 
-        {/* 疫苗接种入口 */}
-        <button
-          onClick={() => navigate('/vaccine')}
-          className="card-shadow w-full p-4 mb-3 flex items-center gap-3 hover:shadow-float transition-all duration-200 active:scale-[0.98]"
-        >
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center text-white shadow-soft">
-            <span className="text-lg">💉</span>
-          </div>
-          <div className="flex-1 text-left">
-            <p className="text-sm font-outfit font-bold text-ink">疫苗接种</p>
-            <p className="text-xs text-muted">查看接种计划</p>
-          </div>
-          <span className="text-muted text-lg">›</span>
-        </button>
+          {/* 疫苗接种入口 */}
+          <button
+            onClick={() => navigate('/vaccine')}
+            className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97]"
+          >
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center text-white shadow-soft">
+              <span className="text-base">💉</span>
+            </div>
+            <p className="text-xs font-outfit font-bold text-ink">疫苗接种</p>
+          </button>
 
-        {/* AI 成长分析入口 */}
-        <button
-          onClick={handleAIAnalysis}
-          disabled={aiAnalyzing}
-          className="card-shadow w-full p-4 mb-3 flex items-center gap-3 hover:shadow-float transition-all duration-200 active:scale-[0.98]"
-        >
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-warm-orange to-coral flex items-center justify-center text-white shadow-soft">
-            {aiAnalyzing ? (
-              <Loader2 size={22} strokeWidth={2.5} className="animate-spin" />
-            ) : (
-              <Sparkles size={22} strokeWidth={2.5} />
-            )}
-          </div>
-          <div className="flex-1 text-left">
-            <p className="text-sm font-outfit font-bold text-ink">AI 成长分析</p>
-            <p className="text-xs text-muted">
-              {aiAnalyzing ? '正在分析中...' : '智能分析发育趋势与建议'}
-            </p>
-          </div>
-          <span className="text-muted text-lg">›</span>
-        </button>
+          {/* AI 成长分析入口 */}
+          <button
+            onClick={handleAIAnalysis}
+            disabled={aiAnalyzing}
+            className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97] disabled:opacity-60"
+          >
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-warm-orange to-coral flex items-center justify-center text-white shadow-soft">
+              {aiAnalyzing ? (
+                <Loader2 size={18} strokeWidth={2.5} className="animate-spin" />
+              ) : (
+                <Sparkles size={18} strokeWidth={2.5} />
+              )}
+            </div>
+            <p className="text-xs font-outfit font-bold text-ink">AI 分析</p>
+          </button>
+        </div>
 
         {/* AI 分析结果弹窗 */}
         {aiResult && (

@@ -542,7 +542,7 @@ async function ensureVaccineTable(token, env) {
     { field_name: '疫苗名称', type: 1 },
     { field_name: '剂次', type: 2 },
     { field_name: '总剂次', type: 2 },
-    { field_name: '费用类型', type: 3, property: { options: [{ name: '免费' }, { name: '付费' }] } },
+    { field_name: '费用类型', type: 3, property: { options: [{ name: '免费' }, { name: '自费' }] } },
     { field_name: '月龄', type: 1 },
     { field_name: '预计接种时间', type: 5 },
     { field_name: '接种状态', type: 3, property: { options: [{ name: '未接种' }, { name: '已接种' }] } },
