@@ -142,11 +142,18 @@ export default function VaccinePage() {
   const birthDate = baby?.出生日期 || '';
 
   useEffect(() => {
-    async function load() { setLoading(true); await fetchVaccines(); setLoading(false); }
-    if (baby?.record_id) load();
+    if (!baby?.record_id) return;
+    // 如果 store 已有数据，直接显示；否则显示 loading 并加载
+    if (vaccines.length === 0) {
+      setLoading(true);
+      fetchVaccines().finally(() => setLoading(false));
+    } else {
+      // 后台刷新，不阻塞显示
+      fetchVaccines();
+    }
   }, [baby?.record_id, fetchVaccines]);
 
-  // 首次加载：自动创建默认疫苗记录
+  // 首次加载：自动创建默认疫苗记录（后台不阻塞）
   useEffect(() => {
     async function initDefault() {
       if (!baby?.record_id || !birthDate) return;
