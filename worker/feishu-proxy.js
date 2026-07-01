@@ -33,6 +33,42 @@ async function sha256(str) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// AES-256-GCM 加密/解密辅助函数
+function hexToBuffer(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  return bytes;
+}
+
+function bufferToHex(buffer) {
+  return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function aesEncrypt(plaintext, keyHex) {
+  const key = await crypto.subtle.importKey('raw', hexToBuffer(keyHex), { name: 'AES-GCM' }, false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+  return bufferToHex(iv) + ':' + bufferToHex(encrypted);
+}
+
+async function aesDecrypt(ciphertext, keyHex) {
+  const key = await crypto.subtle.importKey('raw', hexToBuffer(keyHex), { name: 'AES-GCM' }, false, ['decrypt']);
+  const parts = ciphertext.split(':');
+  const iv = hexToBuffer(parts[0]);
+  const data = hexToBuffer(parts[1]);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+  return new TextDecoder().decode(decrypted);
+}
+
+// 加密密码：优先AES-256-GCM，fallback到SHA-256
+async function encryptPassword(plaintext, env) {
+  const aesKey = env.AES_ENCRYPT_KEY;
+  if (aesKey) {
+    return await aesEncrypt(plaintext, aesKey);
+  }
+  return await sha256(plaintext);
+}
+
 // 解析 UA 为详细系统版本
 function parseOS(ua) {
   // iOS
@@ -95,11 +131,11 @@ async function parseAuth(request, env) {
 
     if (role === 'edit' && editHash) {
       const expectedHash = await sha256(editHash + ':baby-growth-auth-v2:edit');
-      if (parts[1] === expectedHash) return { role: 'edit', accountName: 'legacy-edit', valid: true };
+      if (parts[1] === expectedHash) return { role: 'edit', accountName: 'legacy', valid: true };
     }
     if (role === 'view' && viewHash) {
       const expectedHash = await sha256(viewHash + ':baby-growth-auth-v2:view');
-      if (parts[1] === expectedHash) return { role: 'view', accountName: 'legacy-view', valid: true };
+      if (parts[1] === expectedHash) return { role: 'view', accountName: 'legacy', valid: true };
     }
 
     return { role: null, accountName: null, valid: false };
@@ -148,11 +184,11 @@ async function ensureAccountTable(token, env) {
     throw new Error('创建账号表成功但未获取到 table_id');
   }
 
-  // 创建字段：账号名（文本）、密码哈希（文本）、权限（单选:view/edit/admin）、最后修改时间（日期）
+  // 创建字段：账号名（文本）、加密密码（文本）、权限（单选:view/edit/admin）、最后修改时间（日期）
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
   const accountFields = [
     { field_name: '账号名', type: 1 },
-    { field_name: '密码哈希', type: 1 },
+    { field_name: '加密密码', type: 1 },
     { field_name: '权限', type: 3, property: { options: [{ name: 'view' }, { name: 'edit' }, { name: 'admin' }] } },
     { field_name: '最后修改时间', type: 5 },
   ];
@@ -180,7 +216,7 @@ async function ensureDefaultAdmin(token, env, tableId) {
     return;
   }
 
-  // 创建默认 admin 账号（无密码）
+  // 创建默认 admin 账号（密码为空，首次登录时需设置密码）
   const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
   await fetch(recordUrl, {
     method: 'POST',
@@ -188,7 +224,7 @@ async function ensureDefaultAdmin(token, env, tableId) {
     body: JSON.stringify({
       fields: {
         '账号名': 'admin',
-        '密码哈希': '',
+        '加密密码': '',
         '权限': 'admin',
         '最后修改时间': Date.now(),
       },
@@ -202,7 +238,7 @@ async function handleAuth(request, env) {
 
   const body = await request.json();
   const account = body.account;
-  const password = body.password; // 可选
+  const password = body.password;
 
   // 如果提供了 account，走账号登录
   if (account) {
@@ -218,24 +254,66 @@ async function handleAuth(request, env) {
     const listData = await listResp.json();
 
     if (listData.code !== 0 || !listData.data?.items || listData.data.items.length === 0) {
-      return { error: '账号不存在' };
+      return { error: '账号不存在', code: 'account_not_found' };
     }
 
     const accountRecord = listData.data.items[0];
     const fields = accountRecord.fields || {};
-    const storedPasswordHash = fields['密码哈希'] || '';
+    const storedEncryptedPassword = fields['加密密码'] || fields['密码哈希'] || '';
     const role = fields['权限'] || 'view';
     const accountName = fields['账号名'] || account;
+    const recordId = accountRecord.record_id;
 
-    // 如果账号有密码，校验密码
-    if (storedPasswordHash) {
-      if (!password) return { error: '请输入密码' };
-      const inputHash = await sha256(password);
-      if (inputHash !== storedPasswordHash) return { error: '密码错误' };
+    // admin首次登录，密码字段为空
+    if (!storedEncryptedPassword && role === 'admin') {
+      if (!password) {
+        return { error: '请设置管理员密码', needsSetup: true };
+      }
+      // 自动设置admin密码（加密存储）
+      const encryptedPassword = await encryptPassword(password, env);
+      const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+      await fetch(updateUrl, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { '加密密码': encryptedPassword, '最后修改时间': Date.now() } }),
+      });
+      const token = await deriveToken(await sha256(password), role, accountName);
+      return { ok: true, token, role, accountName };
     }
-    // 如果账号无密码，直接登录成功（如果有传入密码也忽略）
 
-    const token = await deriveToken(storedPasswordHash || '', role, accountName);
+    // 普通账号密码为空（防御性处理）
+    if (!storedEncryptedPassword) {
+      return { error: '账号未设置密码，请联系管理员' };
+    }
+
+    // 密码校验
+    if (!password) return { error: '请输入密码' };
+
+    // 先尝试AES解密比对
+    const aesKey = env.AES_ENCRYPT_KEY;
+    let passwordMatch = false;
+    if (aesKey) {
+      try {
+        const decryptedPassword = await aesDecrypt(storedEncryptedPassword, aesKey);
+        if (decryptedPassword === password) {
+          passwordMatch = true;
+        }
+      } catch (e) {
+        // 解密失败，可能是旧SHA-256哈希格式，fallback
+      }
+    }
+
+    // AES解密失败或没有AES密钥，fallback到SHA-256比对
+    if (!passwordMatch) {
+      const inputHash = await sha256(password);
+      if (inputHash === storedEncryptedPassword) {
+        passwordMatch = true;
+      }
+    }
+
+    if (!passwordMatch) return { error: '密码错误' };
+
+    const token = await deriveToken(await sha256(password), role, accountName);
     return { ok: true, token, role, accountName };
   }
 
@@ -247,21 +325,21 @@ async function handleAuth(request, env) {
 
     // 优先匹配编辑密码
     if (editHash && passwordHash === editHash) {
-      const token = await deriveToken(passwordHash, 'edit', 'legacy-edit');
-      return { ok: true, token, role: 'edit', accountName: 'legacy-edit' };
+      const token = await deriveToken(passwordHash, 'edit', 'legacy');
+      return { ok: true, token, role: 'edit', accountName: 'legacy' };
     }
 
     // 再匹配查看密码
     if (viewHash && passwordHash === viewHash) {
-      const token = await deriveToken(passwordHash, 'view', 'legacy-view');
-      return { ok: true, token, role: 'view', accountName: 'legacy-view' };
+      const token = await deriveToken(passwordHash, 'view', 'legacy');
+      return { ok: true, token, role: 'view', accountName: 'legacy' };
     }
 
     // 兼容：如果只有旧的单密码 ACCESS_PASSWORD_HASH
     const legacyHash = env.ACCESS_PASSWORD_HASH;
     if (legacyHash && passwordHash === legacyHash) {
-      const token = await deriveToken(passwordHash, 'edit', 'legacy-edit');
-      return { ok: true, token, role: 'edit', accountName: 'legacy-edit' };
+      const token = await deriveToken(passwordHash, 'edit', 'legacy');
+      return { ok: true, token, role: 'edit', accountName: 'legacy' };
     }
 
     return { error: '密码错误' };
@@ -290,13 +368,13 @@ async function handleAccounts(request, env, token, auth) {
     if (data.code !== 0) return { code: -1, msg: data.msg };
     const items = (data.data?.items || []).map(item => {
       const fields = item.fields || {};
+      const hasPassword = !!(fields['加密密码'] || fields['密码哈希']);
       return {
         record_id: item.record_id,
         账号名: fields['账号名'] || '',
-        密码哈希: fields['密码哈希'] || '',
         权限: fields['权限'] || 'view',
         最后修改时间: fields['最后修改时间'] || null,
-        hasPassword: !!(fields['密码哈希']),
+        hasPassword,
       };
     });
     return { code: 0, data: { items } };
@@ -306,10 +384,11 @@ async function handleAccounts(request, env, token, auth) {
     // 新增账号
     const body = await request.json();
     const accountName = body.accountName;
-    const password = body.password; // 可选
+    const password = body.password;
     const role = body.role || 'view';
 
     if (!accountName) return { code: -1, msg: '账号名不能为空' };
+    if (!password) return { code: -1, msg: '密码不能为空' };
     if (!['view', 'edit', 'admin'].includes(role)) return { code: -1, msg: '权限值无效' };
 
     // 检查账号名唯一性
@@ -321,7 +400,7 @@ async function handleAccounts(request, env, token, auth) {
       return { code: -1, msg: '账号名已存在' };
     }
 
-    const passwordHash = password ? await sha256(password) : '';
+    const encryptedPassword = await encryptPassword(password, env);
     const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
     const resp = await fetch(recordUrl, {
       method: 'POST',
@@ -329,7 +408,7 @@ async function handleAccounts(request, env, token, auth) {
       body: JSON.stringify({
         fields: {
           '账号名': accountName,
-          '密码哈希': passwordHash,
+          '加密密码': encryptedPassword,
           '权限': role,
           '最后修改时间': Date.now(),
         },
@@ -360,7 +439,8 @@ async function handleAccounts(request, env, token, auth) {
       updateFields['账号名'] = body.accountName;
     }
     if (body.password !== undefined) {
-      updateFields['密码哈希'] = body.password ? await sha256(body.password) : '';
+      if (!body.password) return { code: -1, msg: '密码不能为空' };
+      updateFields['加密密码'] = await encryptPassword(body.password, env);
     }
     if (body.role !== undefined) {
       if (!['view', 'edit', 'admin'].includes(body.role)) return { code: -1, msg: '权限值无效' };
@@ -1116,6 +1196,20 @@ async function handleMigrate(env, token) {
   try {
     const accountTableId = await ensureAccountTable(token, env);
     await ensureDefaultAdmin(token, env, accountTableId);
+
+    // 补充"加密密码"字段（如果账号表已存在但没有此字段）
+    const accFieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/fields`;
+    const accFieldsResp = await fetch(accFieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const accFieldsData = await accFieldsResp.json();
+    const accExistingFields = (accFieldsData.data?.items || []).map(f => f.field_name);
+    if (!accExistingFields.includes('加密密码')) {
+      await fetch(accFieldsUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_name: '加密密码', type: 1 }),
+      });
+    }
+
     results.accountTableCreated = true;
     results.accountTableId = accountTableId;
   } catch (e) {
