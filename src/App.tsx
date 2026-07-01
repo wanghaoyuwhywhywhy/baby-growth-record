@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { isAuthenticated, clearAuthToken } from '@/lib/auth';
+import { isAuthenticated, clearAuthInfo, type AuthRole, isEditMode } from '@/lib/auth';
 import LoginPage from '@/pages/LoginPage';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
@@ -77,14 +77,14 @@ export default function App() {
   // API 401 时通过自定义事件通知 App 登出
   useEffect(() => {
     const handler = () => {
-      clearAuthToken();
+      clearAuthInfo();
       setAuthed(false);
     };
     window.addEventListener('auth-expired', handler);
     return () => window.removeEventListener('auth-expired', handler);
   }, []);
 
-  const handleLoginSuccess = useCallback(() => {
+  const handleLoginSuccess = useCallback((role: AuthRole) => {
     setAuthed(true);
   }, []);
 

@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { login } from '@/lib/auth';
-import { Lock, Loader2 } from 'lucide-react';
+import { login, type AuthRole } from '@/lib/auth';
+import { Lock, Eye, Pencil, Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
-  onSuccess: () => void;
+  onSuccess: (role: AuthRole) => void;
 }
 
 export default function LoginPage({ onSuccess }: LoginPageProps) {
@@ -19,7 +19,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     const result = await login(password);
     setLoading(false);
     if (result.ok) {
-      onSuccess();
+      onSuccess(result.role || 'view');
     } else {
       setError(result.error || '登录失败');
     }
@@ -68,6 +68,17 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
             )}
           </button>
         </form>
+
+        <div className="mt-6 space-y-2">
+          <div className="flex items-center gap-2 text-xs text-muted/50">
+            <Eye size={12} />
+            <span>查看密码：可浏览所有记录</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-muted/50">
+            <Pencil size={12} />
+            <span>编辑密码：可添加、编辑、删除记录</span>
+          </div>
+        </div>
 
         <p className="text-xs text-muted/40 text-center mt-8">
           数据安全存储于飞书云端
