@@ -190,6 +190,15 @@ export default {
         });
       }
 
+      // /api/ai 仅需认证（AI分析/咨询对所有登录用户开放）
+      if (path === '/api/ai') {
+        const aiResult = await handleAI(request, env);
+        if (aiResult instanceof Response) return aiResult;
+        return new Response(JSON.stringify(aiResult), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
       // 写操作需要编辑权限
       const isWriteOp = request.method !== 'GET';
       if (hasAnyPassword && isWriteOp && auth.role !== 'edit') {
@@ -215,13 +224,6 @@ export default {
         case '/api/growth': {
           const token = await getTenantToken(env);
           result = await handleGrowth(request, env, token);
-          break;
-        }
-        case '/api/ai': {
-          const aiResult = await handleAI(request, env);
-          // 如果是流式Response（chat action），直接返回
-          if (aiResult instanceof Response) return aiResult;
-          result = aiResult;
           break;
         }
         case '/api/upload': {
