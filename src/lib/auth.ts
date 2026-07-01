@@ -54,8 +54,8 @@ export function isAuthenticated(): boolean {
   return !!getAuthToken();
 }
 
-// 账号登录（account 必填，password 选填）
-export async function login(account: string, password?: string): Promise<{ ok: boolean; token?: string; role?: AuthRole; accountName?: string; error?: string }> {
+// 账号登录（account 必填，password 必填）
+export async function login(account: string, password?: string): Promise<{ ok: boolean; token?: string; role?: AuthRole; accountName?: string; error?: string; needsSetup?: boolean; accountNotFound?: boolean }> {
   try {
     const resp = await fetch(`${WORKER_URL}/api/auth`, {
       method: 'POST',
@@ -68,6 +68,15 @@ export async function login(account: string, password?: string): Promise<{ ok: b
       const accountName = data.accountName || account;
       setAuthInfo(data.token, role, accountName);
       return { ok: true, token: data.token, role, accountName };
+    }
+    // 账号不存在时自动登出
+    if (data.code === 'account_not_found' || (data.error && data.error.includes('账号不存在'))) {
+      clearAuthInfo();
+      return { ok: false, error: data.error || '账号不存在', accountNotFound: true };
+    }
+    // admin首次登录需要设置密码
+    if (data.needsSetup) {
+      return { ok: false, error: data.error || '请设置管理员密码', needsSetup: true };
     }
     return { ok: false, error: data.error || '登录失败' };
   } catch (e) {

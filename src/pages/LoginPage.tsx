@@ -14,6 +14,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showSetupModal, setShowSetupModal] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,6 +34,8 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
         }).catch(() => {});
       }
       onSuccess(result.role || 'view');
+    } else if (result.needsSetup) {
+      setShowSetupModal(true);
     } else {
       setError(result.error || '登录失败');
     }
@@ -70,7 +73,8 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
               type="password"
               value={password}
               onChange={(e) => { setPassword(e.target.value); setError(''); }}
-              placeholder="密码（可选）"
+              placeholder="密码"
+              required
               className="w-full bg-white border border-rule rounded-2xl px-4 py-3.5 text-ink
                          placeholder:text-muted/40 outline-none
                          focus:border-coral/50 focus:ring-4 focus:ring-coral/5
@@ -85,7 +89,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
 
           <button
             type="submit"
-            disabled={!account.trim() || loading}
+            disabled={!account.trim() || !password || loading}
             className="btn-primary w-full text-base flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {loading ? (
@@ -99,7 +103,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
         <div className="mt-6 space-y-2">
           <div className="flex items-center gap-2 text-xs text-muted/50">
             <Lock size={12} />
-            <span>无密码账号可直接输入账号名登录</span>
+            <span>所有账号均需输入密码</span>
           </div>
         </div>
 
@@ -107,6 +111,21 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
           数据安全存储于飞书云端
         </p>
       </div>
+
+      {showSetupModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-5">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <h2 className="text-lg font-outfit font-bold text-ink mb-2">设置管理员密码</h2>
+            <p className="text-sm text-muted mb-4">首次使用admin账号，请在密码栏输入您想设置的密码后重新登录。</p>
+            <button
+              onClick={() => { setShowSetupModal(false); setPassword(''); setError(''); }}
+              className="btn-primary w-full py-2.5 text-sm"
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
