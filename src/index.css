@@ -29,7 +29,9 @@
 
 @layer components {
   .page-container {
-    @apply max-w-lg mx-auto min-h-screen px-5 pb-24;
+    @apply max-w-lg mx-auto px-5 pb-24;
+    /* 用 dvh 避免 iOS 地址栏导致 100vh 偏移 */
+    min-height: 100dvh;
   }
 
   .btn-primary {
