@@ -54,14 +54,8 @@ export default function HomePage() {
         <NavHeader title="宝宝成长记录" />
         <div className="mt-20 flex flex-col items-center text-center">
           <span className="text-6xl mb-4">👶</span>
-          <h2 className="text-lg font-outfit font-bold text-ink mb-2">还没有宝宝档案</h2>
-          <p className="text-sm text-muted mb-6">快来添加第一个小宝贝吧</p>
-          <button
-            onClick={() => navigate('/baby/edit')}
-            className="btn-primary"
-          >
-            添加宝宝
-          </button>
+          <h2 className="text-lg font-outfit font-bold text-ink mb-2">加载中...</h2>
+          <p className="text-sm text-muted">正在获取宝宝档案</p>
         </div>
       </div>
     );
