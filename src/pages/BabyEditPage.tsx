@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
 import NavHeader from '@/components/NavHeader';
-import { Check } from 'lucide-react';
+import CalendarPicker from '@/components/CalendarPicker';
+import { Check, Calendar } from 'lucide-react';
 
 export default function BabyEditPage() {
   const navigate = useNavigate();
@@ -21,6 +22,7 @@ export default function BabyEditPage() {
   const [remark, setRemark] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [showBirthPicker, setShowBirthPicker] = useState(false);
 
   useEffect(() => {
     if (editingBaby) {
@@ -99,13 +101,16 @@ export default function BabyEditPage() {
         </Field>
 
         <Field label="出生日期" required>
-          <input
-            type="date"
-            value={birthDate}
-            onChange={(e) => setBirthDate(e.target.value)}
-            max={new Date().toISOString().split('T')[0]}
-            className="input-field"
-          />
+          <button
+            type="button"
+            onClick={() => setShowBirthPicker(true)}
+            className="input-field text-left flex items-center gap-2"
+          >
+            <Calendar size={16} className="text-coral/60" />
+            <span className={birthDate ? 'text-ink' : 'text-muted'}>
+              {birthDate || '请选择出生日期'}
+            </span>
+          </button>
         </Field>
 
         <Field label="性别">
@@ -184,6 +189,17 @@ export default function BabyEditPage() {
           )}
         </button>
       </div>
+
+      {/* 出生日期日历选择器 */}
+      {showBirthPicker && (
+        <CalendarPicker
+          initialDate={birthDate || new Date().toISOString().split('T')[0]}
+          title="选择出生日期"
+          maxDate={new Date().toISOString().split('T')[0]}
+          onConfirm={(date) => { setBirthDate(date); setShowBirthPicker(false); }}
+          onClose={() => setShowBirthPicker(false)}
+        />
+      )}
     </div>
   );
 }
