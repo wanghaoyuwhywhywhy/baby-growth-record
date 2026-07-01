@@ -64,7 +64,10 @@ function checkStaleCache() {
 // 路由切换时滚动到顶部
 function ScrollToTop() {
   const { pathname } = useLocation();
-  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+  }, [pathname]);
   return null;
 }
 
@@ -81,6 +84,14 @@ export default function App() {
   useEffect(() => {
     if (authed) initApp();
   }, [authed, initApp]);
+
+  // initialized 变为 true 时（数据加载完成），滚动到顶部
+  useEffect(() => {
+    if (initialized) {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+    }
+  }, [initialized]);
 
   // API 401 时通过自定义事件通知 App 登出
   useEffect(() => {
