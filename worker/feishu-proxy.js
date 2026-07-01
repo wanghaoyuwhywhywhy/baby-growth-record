@@ -141,7 +141,18 @@ export default {
       // /api/log 仅需认证，不需要编辑权限（view 也可以记录登录）
       if (path === '/api/log') {
         const token = await getTenantToken(env);
-        const result = await handleLog(request, env, token);
+        // 从请求中获取真实 IP
+        const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '';
+        const result = await handleLog(request, env, token, ip);
+        return new Response(JSON.stringify(result), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
+      // /api/migrate 仅需认证（迁移：创建字段 + 回填数据 + 创建日志表）
+      if (path === '/api/migrate') {
+        const token = await getTenantToken(env);
+        const result = await handleMigrate(env, token);
         return new Response(JSON.stringify(result), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -458,33 +469,107 @@ async function ensureLogTable(token, env) {
 }
 
 // 处理登录日志请求
-async function handleLog(request, env, token) {
+async function handleLog(request, env, token, ip) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
-  const body = await request.json();
-  const tableId = await ensureLogTable(token, env);
+  try {
+    const body = await request.json();
+    const tableId = await ensureLogTable(token, env);
 
-  const appToken = env.FEISHU_BASE_TOKEN;
-  const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
 
-  const resp = await fetch(recordUrl, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fields: {
-        '时间': body.timestamp || Date.now(),
-        '操作': body.action || 'login',
-        'IP': body.ip || '',
-        '设备型号': body.device || '',
-      },
-    }),
-  });
+    // 从请求中获取 IP（优先用 Worker 传入的）
+    const logIp = ip || body.ip || '';
 
-  const result = await resp.json();
-  if (result.code !== 0) {
-    return { error: `写入登录日志失败: ${result.msg}` };
+    // 解析 UA 为简短设备型号
+    const ua = body.device || '';
+    let deviceShort = '未知';
+    if (/iPhone/i.test(ua)) deviceShort = 'iPhone';
+    else if (/iPad/i.test(ua)) deviceShort = 'iPad';
+    else if (/Android/i.test(ua)) deviceShort = 'Android';
+    else if (/Mac/i.test(ua)) deviceShort = 'Mac';
+    else if (/Windows/i.test(ua)) deviceShort = 'Windows';
+    else if (/Linux/i.test(ua)) deviceShort = 'Linux';
+
+    const resp = await fetch(recordUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          '时间': body.timestamp || Date.now(),
+          '操作': body.action || 'login',
+          'IP': logIp,
+          '设备型号': deviceShort,
+        },
+      }),
+    });
+
+    const result = await resp.json();
+    if (result.code !== 0) {
+      console.error('[handleLog] 写入失败:', result.code, result.msg);
+      return { error: `写入登录日志失败: ${result.msg}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error('[handleLog] 异常:', e.message);
+    return { error: e.message };
   }
-  return { ok: true };
+}
+
+// 数据迁移：创建字段 + 回填上传时间 + 创建日志表
+async function handleMigrate(env, token) {
+  const results = {};
+
+  // 1. 确保"上传时间"字段存在
+  try {
+    await ensureRecordFields(token, env);
+    results.fieldCreated = true;
+  } catch (e) {
+    results.fieldCreated = false;
+    results.fieldError = e.message;
+  }
+
+  // 2. 回填历史记录的上传时间 = 记录时间
+  try {
+    const tableId = env.FEISHU_TABLE_RECORD;
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const listData = await listResp.json();
+
+    if (listData.code === 0 && listData.data?.items) {
+      let backfilled = 0;
+      for (const item of listData.data.items) {
+        const fields = item.fields || {};
+        // 如果没有上传时间，用记录时间回填
+        if (!fields['上传时间'] && fields['记录时间']) {
+          const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${item.record_id}`;
+          await fetch(updateUrl, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { '上传时间': fields['记录时间'] } }),
+          });
+          backfilled++;
+        }
+      }
+      results.backfilled = backfilled;
+    }
+  } catch (e) {
+    results.backfillError = e.message;
+  }
+
+  // 3. 确保"登录日志"表存在
+  try {
+    const logTableId = await ensureLogTable(token, env);
+    results.logTableCreated = true;
+    results.logTableId = logTableId;
+  } catch (e) {
+    results.logTableCreated = false;
+    results.logTableError = e.message;
+  }
+
+  return { ok: true, ...results };
 }
 
 async function handleAI(request, env) {
