@@ -515,29 +515,28 @@ async function ensureVaccineTable(token, env) {
   const listData = await listResp.json();
   const tables = listData.data?.items || [];
   const existing = tables.find(t => t.name === '疫苗接种');
+
+  let tableId;
   if (existing) {
-    vaccineTableIdCache = existing.table_id;
-    return vaccineTableIdCache;
+    tableId = existing.table_id;
+  } else {
+    // 创建"疫苗接种"表
+    const createResp = await fetch(listUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table: { name: '疫苗接种' } }),
+    });
+    const createData = await createResp.json();
+    if (createData.code !== 0) {
+      throw new Error(`创建疫苗接种表失败: ${createData.msg}`);
+    }
+    tableId = createData.data?.table_id;
+    if (!tableId) {
+      throw new Error('创建疫苗接种表成功但未获取到 table_id');
+    }
   }
 
-  // 创建"疫苗接种"表
-  const createResp = await fetch(listUrl, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: { name: '疫苗接种' } }),
-  });
-  const createData = await createResp.json();
-  if (createData.code !== 0) {
-    throw new Error(`创建疫苗接种表失败: ${createData.msg}`);
-  }
-
-  const tableId = createData.data?.table_id;
-  if (!tableId) {
-    throw new Error('创建疫苗接种表成功但未获取到 table_id');
-  }
-
-  // 创建字段
-  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  // 确保9个字段都存在（表已存在时补全缺失字段）
   const vaccineFields = [
     { field_name: '疫苗名称', type: 1 },
     { field_name: '剂次', type: 2 },
@@ -549,12 +548,22 @@ async function ensureVaccineTable(token, env) {
     { field_name: '接种时间', type: 5 },
     { field_name: '关联宝宝', type: 7, property: { table_id: env.FEISHU_TABLE_BABY } },
   ];
+
+  // 获取已有字段列表
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const fieldsData = await fieldsResp.json();
+  const existingFields = new Set((fieldsData.data?.items || []).map(f => f.field_name));
+
+  // 创建缺失字段
   for (const field of vaccineFields) {
-    await fetch(fieldsUrl, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(field),
-    });
+    if (!existingFields.has(field.field_name)) {
+      await fetch(fieldsUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(field),
+      });
+    }
   }
 
   vaccineTableIdCache = tableId;
@@ -570,8 +579,8 @@ async function handleVaccines(request, env, token) {
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=500`;
     const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
     const data = await resp.json();
-    if (data.code !== 0) return { error: data.msg };
-    return { ok: true, data: data.data };
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0, data: { items: data.data?.items || [] } };
   }
 
   if (request.method === 'POST') {
@@ -583,14 +592,14 @@ async function handleVaccines(request, env, token) {
       body: JSON.stringify({ fields: body.fields }),
     });
     const data = await resp.json();
-    if (data.code !== 0) return { error: data.msg };
-    return { ok: true, data: data.data };
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0, data: { record: data.data?.record } };
   }
 
   if (request.method === 'PUT') {
     const body = await request.json();
     const recordId = body.record_id;
-    if (!recordId) return { error: 'record_id is required' };
+    if (!recordId) return { code: -1, msg: 'record_id is required' };
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
     const resp = await fetch(url, {
       method: 'PUT',
@@ -598,25 +607,25 @@ async function handleVaccines(request, env, token) {
       body: JSON.stringify({ fields: body.fields }),
     });
     const data = await resp.json();
-    if (data.code !== 0) return { error: data.msg };
-    return { ok: true, data: data.data };
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0, data: { record: data.data?.record } };
   }
 
   if (request.method === 'DELETE') {
     const body = await request.json();
     const recordId = body.record_id;
-    if (!recordId) return { error: 'record_id is required' };
+    if (!recordId) return { code: -1, msg: 'record_id is required' };
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
     const resp = await fetch(url, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` },
     });
     const data = await resp.json();
-    if (data.code !== 0) return { error: data.msg };
-    return { ok: true };
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0 };
   }
 
-  return { error: 'Method not allowed' };
+  return { code: -1, msg: 'Method not allowed' };
 }
 
 // 处理登录日志请求
