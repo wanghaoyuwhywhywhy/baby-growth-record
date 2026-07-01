@@ -25,7 +25,7 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
   const calendarCells: { day: number; current: boolean }[] = [];
   for (let i = firstDayOfWeek - 1; i >= 0; i--) calendarCells.push({ day: daysInPrevMonth - i, current: false });
   for (let d = 1; d <= daysInMonth; d++) calendarCells.push({ day: d, current: true });
-  const rows = Math.ceil((firstDayOfWeek + daysInMonth) / 7);
+  const rows = 6; // 固定6行，避免5/6行切换时高度跳动
   const remaining = rows * 7 - calendarCells.length;
   for (let d = 1; d <= remaining; d++) calendarCells.push({ day: d, current: false });
 
@@ -68,7 +68,9 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
           {/* 《 < 年月 > 》 */}
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
-              <button onClick={prevYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink text-xs font-bold active:scale-95">«</button>
+              <button onClick={prevYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M9 12L5 8L9 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M13 12L9 8L13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
               <button onClick={prevMonth} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
@@ -78,7 +80,9 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
               <button onClick={nextMonth} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
-              <button onClick={nextYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink text-xs font-bold active:scale-95">»</button>
+              <button onClick={nextYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4L7 8L3 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M7 4L11 8L7 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
             </div>
           </div>
           <div className="grid grid-cols-7 mb-1">
