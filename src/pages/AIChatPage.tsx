@@ -242,7 +242,7 @@ export default function AIChatPage() {
   }
 
   return (
-    <div className="page-container flex flex-col" style={{ height: '100dvh' }}>
+    <div className="max-w-lg mx-auto flex flex-col" style={{ height: '100dvh' }}>
       <NavHeader
         title="AI 咨询"
         showBack

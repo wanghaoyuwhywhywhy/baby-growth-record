@@ -1,6 +1,6 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-02 22:20
+> 最后更新：2026-07-02 23:30
 
 ---
 
@@ -408,7 +408,7 @@
 | /baby/detail | BabyDetailPage | 宝宝档案详情 |
 | /baby/edit | BabyEditPage | 编辑宝宝信息 |
 | /growth | GrowthPage | 身高体重记录 |
-| /settings | SettingsPage | 设置（身份+退出登录+同步） |
+| /settings | SettingsPage | 设置（含账号管理） |
 | /vaccine | VaccinePage | 疫苗接种记录 |
 | /chat | AIChatPage | AI 咨询对话 |
 
@@ -580,6 +580,24 @@ baby-growth-record/
 - **首页快捷入口**：3列改为4列（身高体重/疫苗接种/AI分析/AI咨询）
 - **Worker chat action**：/api/ai 新增 chat action，返回 SSE 流式 Response（带 CORS 头）
 - **chatStream 函数**：前端 ai.ts 新增 SSE 流解析函数，逐 chunk 回调显示
+
+### v1.10 账号体系 & 安全加固（2026-07）
+- **账号管理系统**：飞书"账号表"（账号名/加密密码/权限/最后修改时间）
+  - 三级权限：浏览(view) / 编辑(edit) / 管理员(admin)
+  - 自动初始化admin账号，首次登录引导设置密码
+  - /api/accounts CRUD API，仅admin可操作
+  - 不可删除自己的账号
+- **密码安全**：AES-256-GCM加密存储（密钥Worker环境变量AES_ENCRYPT_KEY），不可明文展示/存储
+- **账号登录**：登录页改为账号+密码登录，匹配账号表
+- **账号验证**：页面刷新时verify action检查账号是否仍存在，不存在自动登出
+- **登录日志**：日志表增加"登录账号"字段
+- **密码小眼睛**：登录页和账号管理密码输入框可切换显示/隐藏明文
+- **AI分析取消**：再次点击AI分析按钮可取消/中断分析
+- **AI咨询优化**：输入框固定底部（height:100dvh，shrink-0），用宝宝名字称呼+家长替代
+- **AI咨询历史**：localStorage持久化聊天记录（最多50条），支持清空
+- **设置页**：移除同步模块，新增账号管理区域（admin可见）
+- **首页**：快捷入口3列→4列，并行上传优化
+- **登录页**：居中图标标题，左对齐输入框，小眼睛图标preventDefault保持输入法
 
 ---
 
