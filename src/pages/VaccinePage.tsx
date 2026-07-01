@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import NavHeader from '@/components/NavHeader';
 import CalendarPicker from '@/components/CalendarPicker';
@@ -128,7 +128,6 @@ export default function VaccinePage() {
 
   const baby = currentBaby();
   const canEdit = isEditMode();
-  const initDefaultRan = useRef(false); // 防止 initDefault 重复执行
 
   // 日历弹窗状态
   const [calendarTarget, setCalendarTarget] = useState<{ id: string; type: 'vaccinate' | 'vaccinateDate' | 'expected'; currentDate: string } | null>(null);
@@ -145,22 +144,6 @@ export default function VaccinePage() {
   useEffect(() => {
     if (baby?.record_id) fetchVaccines();
   }, [baby?.record_id, fetchVaccines]);
-
-  // 首次加载且没有任何疫苗记录时：自动创建默认免费疫苗
-  useEffect(() => {
-    if (!baby?.record_id || !birthDate) return;
-    if (initDefaultRan.current) return; // 已执行过，不再重复
-    if (vaccines.length > 0) return; // 已有疫苗记录，无需创建
-    initDefaultRan.current = true;
-
-    (async () => {
-      const promises = DEFAULT_VACCINES.map((v) =>
-        feishuAPI.createVaccine({ 疫苗名称: v.疫苗名称, 剂次: v.剂次, 总剂次: v.总剂次, 费用类型: v.费用类型, 月龄: v.月龄, 预计接种时间: calcExpectedDate(birthDate, v.月龄), 接种状态: '未接种', 关联宝宝: [baby.record_id] })
-      );
-      await Promise.allSettled(promises);
-      await fetchVaccines();
-    })();
-  }, [vaccines.length, baby?.record_id, birthDate, fetchVaccines]);
 
   // 动态计算每条记录的月龄标签 + 分组
   const grouped = useMemo(() => {
