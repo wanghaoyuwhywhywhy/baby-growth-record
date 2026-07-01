@@ -11,6 +11,7 @@ import BabyEditPage from '@/pages/BabyEditPage';
 import GrowthPage from '@/pages/GrowthPage';
 import SettingsPage from '@/pages/SettingsPage';
 import VaccinePage from '@/pages/VaccinePage';
+import AIChatPage from '@/pages/AIChatPage';
 
 // PWA 自动更新：检测到新版本时自动刷新页面
 function setupAutoUpdate() {
@@ -143,6 +144,7 @@ export default function App() {
         <Route path="/baby/edit" element={<BabyEditPage />} />
         <Route path="/growth" element={<GrowthPage />} />
         <Route path="/vaccine" element={<VaccinePage />} />
+        <Route path="/chat" element={<AIChatPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </Router>
