@@ -86,8 +86,8 @@ export default function App() {
   useEffect(() => {
     if (authed) {
       initApp();
-      // 验证账号是否仍有效（防止已被删除的账号仍保持登录）
-      verifyAccount();
+      // 延迟验证账号是否仍有效（等initApp完成+migrate跑完）
+      setTimeout(() => verifyAccount(), 5000);
     }
   }, [authed, initApp]);
 
@@ -102,12 +102,13 @@ export default function App() {
         body: JSON.stringify({ action: 'verify', token }),
       });
       const data = await resp.json();
-      if (!data.ok) {
+      // 只有明确返回账号不存在才登出，其他错误不登出
+      if (data.ok === false && data.error && data.error.includes('不存在')) {
         clearAuthInfo();
         setAuthed(false);
       }
     } catch {
-      // 网络错误不登出，保持现有状态
+      // 网络错误不登出
     }
   }
 

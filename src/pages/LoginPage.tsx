@@ -43,8 +43,8 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
   return (
     <div className="bg-gradient-to-br from-cream via-cream-light to-cream-dark flex items-center justify-center px-5" style={{ minHeight: '100dvh' }}>
       <div className="w-full max-w-sm">
-        <div className="mb-8">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center mb-4 shadow-float">
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center mx-auto mb-4 shadow-float">
             <User size={32} className="text-white" />
           </div>
           <h1 className="text-2xl font-outfit font-bold text-ink">宝宝成长记录</h1>
@@ -81,7 +81,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
             />
             <button
               type="button"
-              onClick={() => setShowPassword(!showPassword)}
+              onMouseDown={(e) => { e.preventDefault(); setShowPassword(!showPassword); }}
               className="absolute right-4 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors"
             >
               {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}

@@ -235,7 +235,7 @@ export default function SettingsPage() {
                   />
                   <button
                     type="button"
-                    onClick={() => setShowFormPassword(!showFormPassword)}
+                    onMouseDown={(e) => { e.preventDefault(); setShowFormPassword(!showFormPassword); }}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors"
                   >
                     {showFormPassword ? <EyeOff size={14} /> : <Eye size={14} />}
