@@ -38,7 +38,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cream via-cream-light to-cream-dark flex items-center justify-center px-5">
+    <div className="bg-gradient-to-br from-cream via-cream-light to-cream-dark flex items-center justify-center px-5" style={{ minHeight: '100dvh' }}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="w-20 h-20 rounded-full bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center mx-auto mb-4 shadow-float">

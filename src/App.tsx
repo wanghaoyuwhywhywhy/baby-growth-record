@@ -67,6 +67,7 @@ function ScrollToTop() {
   useEffect(() => {
     window.scrollTo(0, 0);
     document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
   }, [pathname]);
   return null;
 }
@@ -88,8 +89,14 @@ export default function App() {
   // initialized 变为 true 时（数据加载完成），滚动到顶部
   useEffect(() => {
     if (initialized) {
-      window.scrollTo(0, 0);
-      document.documentElement.scrollTop = 0;
+      // 延迟确保 DOM 布局完成后再滚动（手机浏览器尤其需要）
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          document.documentElement.scrollTop = 0;
+          document.body.scrollTop = 0;
+        }, 100);
+      });
     }
   }, [initialized]);
 
