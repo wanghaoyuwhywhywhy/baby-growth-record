@@ -65,6 +65,7 @@ function VideoWithRetry({ src }: { src: string }) {
       ref={ref}
       src={src}
       controls
+      playsInline
       className="w-full max-h-48 rounded-lg"
       onError={() => {
         if (retryCount.current < 2) {
@@ -309,7 +310,7 @@ function MediaPreview({ record }: { record: DailyRecord }) {
   if (localVideoUrl) {
     return (
       <div className="mt-2">
-        <video src={localVideoUrl} controls className="w-full max-h-48 rounded-lg" />
+        <video src={localVideoUrl} controls playsInline className="w-full max-h-48 rounded-lg" />
       </div>
     );
   }

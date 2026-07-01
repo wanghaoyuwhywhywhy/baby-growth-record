@@ -124,7 +124,7 @@ export default function BabyEditPage() {
                   : 'border-rule bg-cream-light text-muted'
               }`}
             >
-              <span className="text-xl mr-1">👦</span> 男宝
+              <span className="text-xl mr-1">👦</span> 男孩
             </button>
             <button
               type="button"
@@ -135,7 +135,7 @@ export default function BabyEditPage() {
                   : 'border-rule bg-cream-light text-muted'
               }`}
             >
-              <span className="text-xl mr-1">👧</span> 女宝
+              <span className="text-xl mr-1">👧</span> 女孩
             </button>
           </div>
         </Field>

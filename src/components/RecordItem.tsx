@@ -185,6 +185,7 @@ function VideoWithRetry({ src }: { src: string }) {
       ref={ref}
       src={src}
       controls
+      playsInline
       className="w-full max-h-48 rounded-lg"
       onError={() => {
         if (retryCount.current < 2) {
