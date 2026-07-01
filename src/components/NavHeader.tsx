@@ -5,9 +5,10 @@ interface NavHeaderProps {
   title: string;
   showBack?: boolean;
   rightAction?: React.ReactNode;
+  titleAction?: React.ReactNode;
 }
 
-export default function NavHeader({ title, showBack = false, rightAction }: NavHeaderProps) {
+export default function NavHeader({ title, showBack = false, rightAction, titleAction }: NavHeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -27,6 +28,7 @@ export default function NavHeader({ title, showBack = false, rightAction }: NavH
             <span className="text-xl">👶</span>
           )}
           <h1 className="text-lg font-outfit font-bold text-ink">{title}</h1>
+          {titleAction}
         </div>
         <div className="flex items-center gap-2">
           {rightAction ?? (
