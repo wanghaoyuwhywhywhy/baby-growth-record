@@ -8,10 +8,10 @@ export default function SettingsPage() {
   const { syncStatus, lastSyncResult, cloudConnected, syncFromCloud, checkCloudConnection } = useAppStore();
   const role = getAuthRole();
 
-  async function handleLogout() {
-    await cloudLogAccess('logout'); // 记录登出日志
+  function handleLogout() {
     clearAuthInfo();
     window.location.reload();
+    cloudLogAccess('logout'); // 后台记录登出日志，不阻塞跳转
   }
 
   return (
