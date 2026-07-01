@@ -36,7 +36,7 @@ export default function BabyCard({ baby }: BabyCardProps) {
             <span className="text-sm text-muted">{age}</span>
             <span className="w-1 h-1 rounded-full bg-rule" />
             <span className="text-sm text-muted">
-              {baby.性别 === '男' ? '👦 男宝' : '👧 女宝'}
+              {baby.性别 === '男' ? '👦 男孩' : '👧 女孩'}
             </span>
           </div>
           {latestGrowth && (latestGrowth.身高 || latestGrowth.体重) && (
