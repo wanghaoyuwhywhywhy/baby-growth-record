@@ -448,6 +448,8 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
     if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); }
     else setViewMonth(viewMonth + 1);
   }
+  function prevYear() { setViewYear(viewYear - 1); }
+  function nextYear() { setViewYear(viewYear + 1); }
 
   function selectDate(d: number) {
     setYear(viewYear);
@@ -483,13 +485,23 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
           <div className="flex-1 min-w-0">
             {/* 年月导航 */}
             <div className="flex items-center justify-between mb-2">
-              <button onClick={prevMonth} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </button>
+              <div className="flex items-center">
+                <button onClick={prevYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11 13L5 8L11 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M7 13L1 8L7 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                <button onClick={prevMonth} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+              </div>
               <span className="text-sm font-semibold text-ink">{viewYear}年{viewMonth + 1}月</span>
-              <button onClick={nextMonth} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </button>
+              <div className="flex items-center">
+                <button onClick={nextMonth} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+                <button onClick={nextYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 3L11 8L5 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M9 3L15 8L9 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+              </div>
             </div>
             {/* 星期头 */}
             <div className="grid grid-cols-7 mb-1">
