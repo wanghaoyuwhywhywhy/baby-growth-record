@@ -4,9 +4,10 @@ import { type DailyRecord } from '@/api/feishu';
 import { feishuAPI } from '@/api/feishu';
 import { CATEGORIES, CATEGORY_MAP } from '@/utils/constants';
 import { getCloudAssetUrl } from '@/lib/cloud';
+import { isEditMode } from '@/lib/auth';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
-import { FileText, Mic, Video, Camera, Play, Pause } from 'lucide-react';
+import { FileText, Mic, Video, Camera, Play, Pause, Pencil, X } from 'lucide-react';
 
 const MEDIA_TYPES = [
   { key: '全部', label: '全部', icon: null },
@@ -286,11 +287,100 @@ function MediaPreview({ record }: { record: DailyRecord }) {
   return null;
 }
 
+// 编辑记录弹窗
+function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onClose: () => void; onSave: () => void }) {
+  const updateRecord = useAppStore((s) => s.updateRecord);
+  const [saving, setSaving] = useState(false);
+
+  // 初始化为记录时间的本地时间字符串，精确到秒
+  const dt = new Date(record.记录时间);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const localDateTimeStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+  const [dateTime, setDateTime] = useState(localDateTimeStr);
+  const [category, setCategory] = useState(record.分类);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await updateRecord(record.record_id, {
+        记录时间: new Date(dateTime).toISOString(),
+        分类: category,
+      });
+      onSave();
+      onClose();
+    } catch (e) {
+      console.error('更新记录失败:', e);
+    }
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="w-full max-w-lg bg-cream-light rounded-t-3xl p-6 pb-10 animate-fade-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-base font-outfit font-bold text-ink">编辑记录</h3>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors"
+          >
+            <X size={18} className="text-muted" />
+          </button>
+        </div>
+
+        {/* 记录时间 */}
+        <div className="mb-4">
+          <label className="text-xs text-muted font-medium mb-1.5 block">记录时间</label>
+          <input
+            type="datetime-local"
+            value={dateTime}
+            onChange={(e) => setDateTime(e.target.value)}
+            step="1"
+            className="w-full bg-white border border-rule rounded-xl px-4 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all"
+          />
+        </div>
+
+        {/* 分类选择 */}
+        <div className="mb-6">
+          <label className="text-xs text-muted font-medium mb-1.5 block">分类</label>
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((c) => (
+              <button
+                key={c.key}
+                onClick={() => setCategory(c.key)}
+                className={`px-3 py-1.5 rounded-full text-xs transition-all ${
+                  category === c.key
+                    ? 'bg-coral text-white shadow-soft font-medium'
+                    : 'bg-white border border-rule text-muted hover:border-coral/30'
+                }`}
+              >
+                {c.emoji} {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="btn-primary w-full text-sm flex items-center justify-center gap-2"
+        >
+          {saving ? '保存中...' : '保存'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function TimelinePage() {
   const { records, fetchRecords, fetchBabies, currentBaby } = useAppStore();
   const currentBabyId = currentBaby()?.record_id;
   const [mediaFilter, setMediaFilter] = useState('全部');
   const [categoryFilter, setCategoryFilter] = useState('全部');
+  const [editingRecord, setEditingRecord] = useState<DailyRecord | null>(null);
+  const editMode = isEditMode();
 
   useEffect(() => { fetchBabies(); }, [fetchBabies]);
   useEffect(() => { fetchRecords(); }, [fetchRecords, currentBabyId]);
@@ -379,11 +469,20 @@ export default function TimelinePage() {
                   <div key={record.record_id} className="relative pl-10 animate-fade-up" style={{ animationDelay: `${index * 50}ms` }}>
                     <div className="absolute left-[17px] top-4 w-2 h-2 rounded-full bg-coral shadow-sm" />
                     <div className="card-shadow p-3.5">
-                      {/* 时间 + 标签 */}
+                      {/* 时间 + 标签 + 编辑 */}
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                         <span className="text-xs text-muted/80 font-mono">
                           {formatTimelineTime(record.记录时间)}
                         </span>
+                        {editMode && (
+                          <button
+                            onClick={() => setEditingRecord(record)}
+                            className="text-muted/60 hover:text-coral transition-colors"
+                            aria-label="编辑"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        )}
                         {style && (
                           <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${style.bg} ${style.text}`}>
                             {style.icon}{primaryMedia === 'text' ? '文字' : primaryMedia === 'voice' ? '语音' : primaryMedia === 'video' ? '视频' : '照片'}
@@ -419,6 +518,15 @@ export default function TimelinePage() {
       </div>
 
       <FloatingButton />
+
+      {/* 编辑弹窗 */}
+      {editingRecord && (
+        <EditRecordModal
+          record={editingRecord}
+          onClose={() => setEditingRecord(null)}
+          onSave={() => { fetchRecords(); }}
+        />
+      )}
     </div>
   );
 }

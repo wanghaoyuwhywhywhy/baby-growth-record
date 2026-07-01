@@ -1,4 +1,4 @@
-import { ArrowLeft, Clock } from 'lucide-react';
+import { ArrowLeft, Settings } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 interface NavHeaderProps {
@@ -31,15 +31,15 @@ export default function NavHeader({ title, showBack = false, rightAction }: NavH
         <div className="flex items-center gap-2">
           {rightAction ?? (
             <button
-              onClick={() => navigate('/timeline')}
+              onClick={() => navigate('/settings')}
               className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors
-                ${location.pathname === '/timeline'
+                ${location.pathname === '/settings'
                   ? 'bg-coral/10 text-coral'
                   : 'text-muted hover:bg-cream-dark'
                 }`}
-              aria-label="时间线"
+              aria-label="设置"
             >
-              <Clock size={20} />
+              <Settings size={20} />
             </button>
           )}
         </div>

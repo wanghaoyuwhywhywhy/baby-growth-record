@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { login, type AuthRole } from '@/lib/auth';
 import { Lock, Eye, Pencil, Loader2 } from 'lucide-react';
+import { cloudLogAccess } from '@/lib/cloud';
 
 interface LoginPageProps {
   onSuccess: (role: AuthRole) => void;
@@ -19,6 +20,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     const result = await login(password);
     setLoading(false);
     if (result.ok) {
+      cloudLogAccess('login'); // 异步记录登录日志
       onSuccess(result.role || 'view');
     } else {
       setError(result.error || '登录失败');

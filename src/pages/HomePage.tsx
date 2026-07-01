@@ -6,7 +6,7 @@ import RecordItem from '@/components/RecordItem';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Sparkles, Loader2, X, Settings } from 'lucide-react';
+import { Activity, Sparkles, Loader2, X } from 'lucide-react';
 import { analyzeBaby } from '@/lib/ai';
 
 export default function HomePage() {
@@ -63,15 +63,7 @@ export default function HomePage() {
 
   return (
     <div className="page-container">
-      <NavHeader title="宝宝成长记录" rightAction={
-        <button
-          onClick={() => navigate('/settings')}
-          className="w-9 h-9 flex items-center justify-center rounded-full text-muted hover:bg-cream-dark transition-colors"
-          aria-label="设置"
-        >
-          <Settings size={20} />
-        </button>
-      } />
+      <NavHeader title="宝宝成长记录" />
 
       <div className="mt-4">
         <BabyCard baby={baby} />
