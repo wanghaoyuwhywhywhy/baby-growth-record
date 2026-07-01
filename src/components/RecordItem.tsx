@@ -215,14 +215,25 @@ function VoicePlayerCompact({ url, transcript }: { url: string; transcript?: str
     if (!audio) return;
     if (playing) {
       audio.pause();
+      setPlaying(false);
     } else {
-      audio.currentTime = 0;
-      audio.play().catch((e) => {
-        console.warn('语音播放失败:', e);
-        setLoadError(true);
-      });
+      if (audio.readyState < 3) {
+        audio.addEventListener('canplay', function onCanPlay() {
+          audio.removeEventListener('canplay', onCanPlay);
+          audio.play().catch((e) => {
+            console.warn('语音播放失败:', e);
+            setLoadError(true);
+          });
+        }, { once: true });
+        audio.load();
+      } else {
+        audio.play().catch((e) => {
+          console.warn('语音播放失败:', e);
+          setLoadError(true);
+        });
+      }
+      setPlaying(true);
     }
-    setPlaying(!playing);
   }
 
   const formatTime = (s: number) => {
@@ -249,7 +260,7 @@ function VoicePlayerCompact({ url, transcript }: { url: string; transcript?: str
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={handleEnded}
           onError={() => { setLoadError(true); setPlaying(false); }}
-          preload="metadata"
+          preload="auto"
           className="hidden"
         />
         <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">

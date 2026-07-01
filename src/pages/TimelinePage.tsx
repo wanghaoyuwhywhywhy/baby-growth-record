@@ -121,14 +121,26 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
     if (!audio) return;
     if (playing) {
       audio.pause();
+      setPlaying(false);
     } else {
-      audio.currentTime = 0;
-      audio.play().catch((e) => {
-        console.warn('语音播放失败:', e);
-        setLoadError(true);
-      });
+      // 如果音频还没准备好，等待 canplay 事件再播放
+      if (audio.readyState < 3) {
+        audio.addEventListener('canplay', function onCanPlay() {
+          audio.removeEventListener('canplay', onCanPlay);
+          audio.play().catch((e) => {
+            console.warn('语音播放失败:', e);
+            setLoadError(true);
+          });
+        }, { once: true });
+        audio.load(); // 触发加载
+      } else {
+        audio.play().catch((e) => {
+          console.warn('语音播放失败:', e);
+          setLoadError(true);
+        });
+      }
+      setPlaying(true);
     }
-    setPlaying(!playing);
   }
 
   const formatTime = (s: number) => {
@@ -156,7 +168,7 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={handleEnded}
           onError={() => { setLoadError(true); setPlaying(false); }}
-          preload="metadata"
+          preload="auto"
           className="hidden"
         />
         <div className="flex-1 h-1.5 bg-amber-100 rounded-full overflow-hidden">
