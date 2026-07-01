@@ -57,7 +57,7 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
     if (cloudTokens.length > 0) {
       const mediaTypes = record.媒体类型 || ['text'];
       if (mediaTypes.includes('voice')) {
-        setAudioUrl(getCloudAssetUrl(record.record_id, cloudTokens[0]));
+        setAudioUrl(getCloudAssetUrl(record.record_id, cloudTokens[0], 'voice'));
         return;
       }
     }
@@ -219,7 +219,7 @@ function MediaPreview({ record }: { record: DailyRecord }) {
     if (hasVideo && mediaTokens.length > 0) {
       return (
         <div className="mt-2">
-          <video src={getCloudAssetUrl(record.record_id, mediaTokens[0])} controls className="w-full max-h-48 rounded-lg" />
+          <video src={getCloudAssetUrl(record.record_id, mediaTokens[0], 'video')} controls className="w-full max-h-48 rounded-lg" />
         </div>
       );
     }
@@ -230,10 +230,10 @@ function MediaPreview({ record }: { record: DailyRecord }) {
           {mediaTokens.map(token => (
             <img
               key={token}
-              src={getCloudAssetUrl(record.record_id, token)}
+              src={getCloudAssetUrl(record.record_id, token, 'photo')}
               alt=""
               className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0 cursor-pointer"
-              onClick={() => setPreviewImage(getCloudAssetUrl(record.record_id, token))}
+              onClick={() => setPreviewImage(getCloudAssetUrl(record.record_id, token, 'photo'))}
             />
           ))}
         </div>

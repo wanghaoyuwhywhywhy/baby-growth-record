@@ -12,6 +12,39 @@ interface MediaInfo {
   url: string;
 }
 
+// 判断是否为云端 file_token
+function isCloudToken(token: string): boolean {
+  return !token.startsWith('media_') && !token.startsWith('img_') && !token.startsWith('vid_') && !token.startsWith('voice_');
+}
+
+// 根据记录的媒体类型，将云端 tokens 分配到对应的媒体类型
+function assignTokenTypes(tokens: string[], mediaTypes: string[]): MediaInfo[] {
+  const result: MediaInfo[] = [];
+  let idx = 0;
+
+  // 按优先级分配：先 voice，再 video，最后 photo
+  if (mediaTypes.includes('voice') && idx < tokens.length) {
+    result.push({ id: tokens[idx], type: 'voice', url: '' });
+    idx++;
+  }
+  if (mediaTypes.includes('video') && idx < tokens.length) {
+    result.push({ id: tokens[idx], type: 'video', url: '' });
+    idx++;
+  }
+  if (mediaTypes.includes('photo')) {
+    while (idx < tokens.length) {
+      result.push({ id: tokens[idx], type: 'image', url: '' });
+      idx++;
+    }
+  }
+  // 剩余未分配的 token 默认当图片
+  while (idx < tokens.length) {
+    result.push({ id: tokens[idx], type: 'image', url: '' });
+    idx++;
+  }
+  return result;
+}
+
 interface RecordItemProps {
   record: DailyRecord;
   compact?: boolean;
@@ -25,49 +58,22 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!record.媒体附件 || record.媒体附件.length === 0) {
+    const attachments = record.媒体附件;
+    if (!attachments || attachments.length === 0) {
       setMediaList([]);
       return;
     }
 
-    // 判断云端 file_tokens（非本地ID格式）
-    const cloudTokens = record.媒体附件.filter(
-      t => !t.startsWith('media_') && !t.startsWith('img_') && !t.startsWith('vid_') && !t.startsWith('voice_')
-    );
+    const cloudTokens = attachments.filter(isCloudToken);
 
     if (cloudTokens.length > 0) {
-      // 使用云端 URL，根据媒体类型分配每个 token 的类型
       const mediaTypes = record.媒体类型 || ['text'];
-      const media = cloudTokens.map((token, index) => {
-        // 根据记录的媒体类型推断每个 token 的类型
-        let type: 'image' | 'video' | 'voice' = 'image';
-        if (mediaTypes.includes('voice') && index === 0 && !mediaTypes.includes('photo') && !mediaTypes.includes('video')) {
-          type = 'voice';
-        } else if (mediaTypes.includes('video') && index === 0 && !mediaTypes.includes('photo')) {
-          type = 'video';
-        }
-        // 如果有voice类型，第一个token是voice
-        if (mediaTypes.includes('voice')) {
-          const voiceCount = cloudTokens.length - (mediaTypes.includes('photo') ? cloudTokens.length - 1 : 0);
-          if (index < 1) type = 'voice'; // 第一个是语音
-          else type = 'image'; // 其余是图片
-        }
-        if (mediaTypes.includes('video') && !mediaTypes.includes('voice') && index === 0) {
-          type = 'video';
-        }
-        if (mediaTypes.includes('photo') && !mediaTypes.includes('voice') && !mediaTypes.includes('video')) {
-          type = 'image';
-        }
-        // 更精确：有voice类型时第一个是voice，其余根据类型判断
-        if (mediaTypes.includes('voice') && index === 0) {
-          type = 'voice';
-        } else if (mediaTypes.includes('video') && !mediaTypes.includes('photo') && index === 0 && !mediaTypes.includes('voice')) {
-          type = 'video';
-        } else {
-          type = 'image';
-        }
-        return { id: token, type, url: getCloudAssetUrl(record.record_id, token) };
-      });
+      const assigned = assignTokenTypes(cloudTokens, mediaTypes);
+      // 生成带 type 参数的 URL
+      const media = assigned.map(m => ({
+        ...m,
+        url: getCloudAssetUrl(record.record_id, m.id, m.type === 'image' ? 'photo' : m.type),
+      }));
       setMediaList(media);
       return;
     }
@@ -178,7 +184,7 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
 // 语音播放器（紧凑版，用于首页和时间线）
 function VoicePlayerCompact({ url, transcript }: { url: string; transcript?: string }) {
   const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0); // 0-100
+  const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [loadError, setLoadError] = useState(false);
