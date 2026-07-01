@@ -113,10 +113,10 @@ export default function RecordPage() {
         语音转文字: voiceTranscript.trim() || undefined,
       });
 
-      // 上传媒体到飞书云端，获取 file_tokens
+      // 上传媒体到飞书云端，获取 file_tokens（并行上传提速）
       const fileTokens: string[] = [];
       const uploadErrors: string[] = [];
-      for (const media of mediaItems) {
+      const uploadPromises = mediaItems.map(async (media, index) => {
         // 存到本地 IndexedDB（用于即时预览）
         await feishuAPI.addMedia(media.id, media.type, media.blob, record.record_id);
         // 上传到飞书云端
@@ -129,13 +129,18 @@ export default function RecordPage() {
         try {
           const fileToken = await cloudUploadMedia(record.record_id, media.blob, `${media.id}.${ext}`);
           if (fileToken) {
-            fileTokens.push(fileToken);
+            return { index, fileToken };
           }
         } catch (uploadErr) {
           console.error('媒体上传失败:', uploadErr);
           uploadErrors.push(uploadErr instanceof Error ? uploadErr.message : '上传失败');
         }
-      }
+        return null;
+      });
+      const uploadResults = await Promise.all(uploadPromises);
+      uploadResults.filter(Boolean).sort((a, b) => a!.index - b!.index).forEach(r => {
+        if (r?.fileToken) fileTokens.push(r.fileToken);
+      });
 
       // 用云端 file_tokens 替换本地 media IDs，持久化到 IndexedDB
       if (fileTokens.length > 0) {

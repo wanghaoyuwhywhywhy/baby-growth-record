@@ -48,9 +48,9 @@ export default function AIChatPage() {
   const recognitionRef = useRef<any>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // 自动滚动到底部
+  // 自动滚动到底部（不用smooth避免跳动）
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages]);
 
   // 持久化消息到localStorage
@@ -283,8 +283,8 @@ export default function AIChatPage() {
         </div>
       )}
 
-      {/* 消息列表 */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      {/* 消息列表 - 独立滚动区域 */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-2">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky to-mint flex items-center justify-center text-white shadow-soft mb-4">
@@ -339,8 +339,8 @@ export default function AIChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 输入区域 */}
-      <div className="sticky bottom-0 bg-cream/90 backdrop-blur-md border-t border-rule/50 px-4 py-3">
+      {/* 输入区域 - 固定底部不随滚动 */}
+      <div className="shrink-0 bg-cream/95 backdrop-blur-md border-t border-rule/50 px-4 py-3">
         <div className="flex items-end gap-2 max-w-lg mx-auto">
           {/* 语音按钮 */}
           <button

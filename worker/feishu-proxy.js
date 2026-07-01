@@ -20,9 +20,9 @@ function getCORSHeaders(request) {
   };
 }
 
-// ============ 双密码认证（无状态） ============
-// 两个密码：查看密码（只读）+ 编辑密码（增删改）
-// token 格式：role:hash  例如 "edit:abc123..." 或 "view:def456..."
+// ============ 账号认证（兼容旧密码认证） ============
+// 新 token 格式：role:accountName:hash  例如 "admin:admin:abc123..." 或 "view:guest:def456..."
+// 旧 token 格式：role:hash  例如 "edit:abc123..." 或 "view:def456..."
 // Worker 解析 token 前缀判断角色，校验哈希部分
 
 // SHA-256 哈希
@@ -56,72 +56,346 @@ function parseOS(ua) {
   return '未知';
 }
 
-// 从密码哈希派生确定性 token，带角色前缀
-async function deriveToken(passwordHash, role) {
-  const hash = await sha256(passwordHash + ':baby-growth-auth-v2:' + role);
-  return `${role}:${hash}`;
+// 从密码哈希派生确定性 token，带角色和账号名前缀
+// 新格式：role:accountName:hash
+async function deriveToken(passwordHash, role, accountName) {
+  const hash = await sha256(passwordHash + ':baby-growth-auth-v3:' + role + ':' + accountName);
+  return `${role}:${accountName}:${hash}`;
 }
 
-// 解析 token，返回 { role: 'edit'|'view', valid: boolean }
+// 解析 token，返回 { role: 'edit'|'view'|'admin', accountName, valid: boolean }
+// 新格式：role:accountName:hash（三段，role 可能为 admin/edit/view）
+// 旧格式：role:hash（两段，role 为 edit/view）
 async function parseAuth(request, env) {
   const token = request.headers.get('X-Auth-Token')
     || new URL(request.url).searchParams.get('token');
-  if (!token) return { role: null, valid: false };
+  if (!token) return { role: null, accountName: null, valid: false };
 
-  const colonIdx = token.indexOf(':');
-  if (colonIdx === -1) return { role: null, valid: false };
-
-  const role = token.substring(0, colonIdx);
-  if (role !== 'edit' && role !== 'view') return { role: null, valid: false };
-
-  // 校验：分别尝试编辑密码和查看密码
-  const editHash = env.EDIT_PASSWORD_HASH;
-  const viewHash = env.VIEW_PASSWORD_HASH;
-
-  if (role === 'edit' && editHash) {
-    const expected = await deriveToken(editHash, 'edit');
-    if (token === expected) return { role: 'edit', valid: true };
-  }
-  if (role === 'view' && viewHash) {
-    const expected = await deriveToken(viewHash, 'view');
-    if (token === expected) return { role: 'view', valid: true };
+  const parts = token.split(':');
+  // 新格式：role:accountName:hash（至少3段，accountName本身可能不含冒号因为sha256不含冒号）
+  if (parts.length >= 3) {
+    const role = parts[0];
+    const accountName = parts[1];
+    // hash 部分是 parts.slice(2).join(':')，但 sha256 输出不含冒号，所以就是 parts[2]
+    if (role !== 'edit' && role !== 'view' && role !== 'admin') {
+      return { role: null, accountName: null, valid: false };
+    }
+    // 新格式 token：直接信任（token 在登录时由 deriveToken 生成，hash 校验已内含）
+    return { role, accountName, valid: true };
   }
 
-  return { role: null, valid: false };
+  // 旧格式兼容：role:hash（两段）
+  if (parts.length === 2) {
+    const role = parts[0];
+    if (role !== 'edit' && role !== 'view') return { role: null, accountName: null, valid: false };
+
+    // 校验旧格式 token
+    const editHash = env.EDIT_PASSWORD_HASH;
+    const viewHash = env.VIEW_PASSWORD_HASH;
+
+    if (role === 'edit' && editHash) {
+      const expectedHash = await sha256(editHash + ':baby-growth-auth-v2:edit');
+      if (parts[1] === expectedHash) return { role: 'edit', accountName: 'legacy-edit', valid: true };
+    }
+    if (role === 'view' && viewHash) {
+      const expectedHash = await sha256(viewHash + ':baby-growth-auth-v2:view');
+      if (parts[1] === expectedHash) return { role: 'view', accountName: 'legacy-view', valid: true };
+    }
+
+    return { role: null, accountName: null, valid: false };
+  }
+
+  return { role: null, accountName: null, valid: false };
 }
 
-// 处理认证请求
+// 查找或创建"账号表"，返回表 ID
+let accountTableIdCache = null;
+async function ensureAccountTable(token, env) {
+  if (accountTableIdCache) return accountTableIdCache;
+
+  // 如果环境变量中有 FEISHU_TABLE_ACCOUNT，优先使用
+  if (env.FEISHU_TABLE_ACCOUNT) {
+    accountTableIdCache = env.FEISHU_TABLE_ACCOUNT;
+    return accountTableIdCache;
+  }
+
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+
+  // 列出所有表，查找"账号表"
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const listData = await listResp.json();
+  const tables = listData.data?.items || [];
+  const existing = tables.find(t => t.name === '账号表');
+  if (existing) {
+    accountTableIdCache = existing.table_id;
+    return accountTableIdCache;
+  }
+
+  // 创建"账号表"
+  const createResp = await fetch(listUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: { name: '账号表' } }),
+  });
+  const createData = await createResp.json();
+  if (createData.code !== 0) {
+    throw new Error(`创建账号表失败: ${createData.msg}`);
+  }
+
+  const tableId = createData.data?.table_id;
+  if (!tableId) {
+    throw new Error('创建账号表成功但未获取到 table_id');
+  }
+
+  // 创建字段：账号名（文本）、密码哈希（文本）、权限（单选:view/edit/admin）、最后修改时间（日期）
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  const accountFields = [
+    { field_name: '账号名', type: 1 },
+    { field_name: '密码哈希', type: 1 },
+    { field_name: '权限', type: 3, property: { options: [{ name: 'view' }, { name: 'edit' }, { name: 'admin' }] } },
+    { field_name: '最后修改时间', type: 5 },
+  ];
+  for (const field of accountFields) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(field),
+    });
+  }
+
+  accountTableIdCache = tableId;
+  return tableId;
+}
+
+// 确保默认 admin 账号存在
+async function ensureDefaultAdmin(token, env, tableId) {
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=1`;
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const listData = await listResp.json();
+
+  // 如果账号表不为空，不需要创建默认账号
+  if (listData.code === 0 && listData.data?.items?.length > 0) {
+    return;
+  }
+
+  // 创建默认 admin 账号（无密码）
+  const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+  await fetch(recordUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        '账号名': 'admin',
+        '密码哈希': '',
+        '权限': 'admin',
+        '最后修改时间': Date.now(),
+      },
+    }),
+  });
+}
+
+// 处理认证请求（账号登录 + 旧密码登录兼容）
 async function handleAuth(request, env) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
   const body = await request.json();
-  const password = body.password;
-  if (!password) return { error: '请输入密码' };
+  const account = body.account;
+  const password = body.password; // 可选
 
-  const passwordHash = await sha256(password);
-  const editHash = env.EDIT_PASSWORD_HASH;
-  const viewHash = env.VIEW_PASSWORD_HASH;
+  // 如果提供了 account，走账号登录
+  if (account) {
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountTable(feishuToken, env);
+    await ensureDefaultAdmin(feishuToken, env, tableId);
 
-  // 优先匹配编辑密码
-  if (editHash && passwordHash === editHash) {
-    const token = await deriveToken(passwordHash, 'edit');
-    return { ok: true, token, role: 'edit' };
+    const appToken = env.FEISHU_BASE_TOKEN;
+    // 查找账号
+    const filterStr = `CurrentValue.[账号名]="${account}"`;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
+
+    if (listData.code !== 0 || !listData.data?.items || listData.data.items.length === 0) {
+      return { error: '账号不存在' };
+    }
+
+    const accountRecord = listData.data.items[0];
+    const fields = accountRecord.fields || {};
+    const storedPasswordHash = fields['密码哈希'] || '';
+    const role = fields['权限'] || 'view';
+    const accountName = fields['账号名'] || account;
+
+    // 如果账号有密码，校验密码
+    if (storedPasswordHash) {
+      if (!password) return { error: '请输入密码' };
+      const inputHash = await sha256(password);
+      if (inputHash !== storedPasswordHash) return { error: '密码错误' };
+    }
+    // 如果账号无密码，直接登录成功（如果有传入密码也忽略）
+
+    const token = await deriveToken(storedPasswordHash || '', role, accountName);
+    return { ok: true, token, role, accountName };
   }
 
-  // 再匹配查看密码
-  if (viewHash && passwordHash === viewHash) {
-    const token = await deriveToken(passwordHash, 'view');
-    return { ok: true, token, role: 'view' };
+  // 兼容旧密码登录（如果没提供 account 但提供了 password）
+  if (password) {
+    const passwordHash = await sha256(password);
+    const editHash = env.EDIT_PASSWORD_HASH;
+    const viewHash = env.VIEW_PASSWORD_HASH;
+
+    // 优先匹配编辑密码
+    if (editHash && passwordHash === editHash) {
+      const token = await deriveToken(passwordHash, 'edit', 'legacy-edit');
+      return { ok: true, token, role: 'edit', accountName: 'legacy-edit' };
+    }
+
+    // 再匹配查看密码
+    if (viewHash && passwordHash === viewHash) {
+      const token = await deriveToken(passwordHash, 'view', 'legacy-view');
+      return { ok: true, token, role: 'view', accountName: 'legacy-view' };
+    }
+
+    // 兼容：如果只有旧的单密码 ACCESS_PASSWORD_HASH
+    const legacyHash = env.ACCESS_PASSWORD_HASH;
+    if (legacyHash && passwordHash === legacyHash) {
+      const token = await deriveToken(passwordHash, 'edit', 'legacy-edit');
+      return { ok: true, token, role: 'edit', accountName: 'legacy-edit' };
+    }
+
+    return { error: '密码错误' };
   }
 
-  // 兼容：如果只有旧的单密码 ACCESS_PASSWORD_HASH
-  const legacyHash = env.ACCESS_PASSWORD_HASH;
-  if (legacyHash && passwordHash === legacyHash) {
-    const token = await deriveToken(passwordHash, 'edit');
-    return { ok: true, token, role: 'edit' };
+  return { error: '请输入账号名' };
+}
+
+// 处理账号管理请求（仅 admin 可操作）
+async function handleAccounts(request, env, token, auth) {
+  // 仅 admin 权限可操作
+  if (auth.role !== 'admin') {
+    return { error: '只有管理员才能管理账号', code: 403 };
   }
 
-  return { error: '密码错误' };
+  const feishuToken = await getTenantToken(env);
+  const tableId = await ensureAccountTable(feishuToken, env);
+  await ensureDefaultAdmin(feishuToken, env, tableId);
+  const appToken = env.FEISHU_BASE_TOKEN;
+
+  if (request.method === 'GET') {
+    // 列出所有账号
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const data = await listResp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    const items = (data.data?.items || []).map(item => {
+      const fields = item.fields || {};
+      return {
+        record_id: item.record_id,
+        账号名: fields['账号名'] || '',
+        密码哈希: fields['密码哈希'] || '',
+        权限: fields['权限'] || 'view',
+        最后修改时间: fields['最后修改时间'] || null,
+        hasPassword: !!(fields['密码哈希']),
+      };
+    });
+    return { code: 0, data: { items } };
+  }
+
+  if (request.method === 'POST') {
+    // 新增账号
+    const body = await request.json();
+    const accountName = body.accountName;
+    const password = body.password; // 可选
+    const role = body.role || 'view';
+
+    if (!accountName) return { code: -1, msg: '账号名不能为空' };
+    if (!['view', 'edit', 'admin'].includes(role)) return { code: -1, msg: '权限值无效' };
+
+    // 检查账号名唯一性
+    const filterStr = `CurrentValue.[账号名]="${accountName}"`;
+    const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const checkData = await checkResp.json();
+    if (checkData.code === 0 && checkData.data?.items?.length > 0) {
+      return { code: -1, msg: '账号名已存在' };
+    }
+
+    const passwordHash = password ? await sha256(password) : '';
+    const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+    const resp = await fetch(recordUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          '账号名': accountName,
+          '密码哈希': passwordHash,
+          '权限': role,
+          '最后修改时间': Date.now(),
+        },
+      }),
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0, data: { record: data.data?.record } };
+  }
+
+  if (request.method === 'PUT') {
+    // 编辑账号
+    const body = await request.json();
+    const recordId = body.record_id;
+    if (!recordId) return { code: -1, msg: 'record_id is required' };
+
+    const updateFields = {};
+    if (body.accountName !== undefined) {
+      // 检查新账号名唯一性（排除自身）
+      const filterStr = `CurrentValue.[账号名]="${body.accountName}"`;
+      const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=10`;
+      const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+      const checkData = await checkResp.json();
+      if (checkData.code === 0 && checkData.data?.items?.length > 0) {
+        const otherRecord = checkData.data.items.find(i => i.record_id !== recordId);
+        if (otherRecord) return { code: -1, msg: '账号名已存在' };
+      }
+      updateFields['账号名'] = body.accountName;
+    }
+    if (body.password !== undefined) {
+      updateFields['密码哈希'] = body.password ? await sha256(body.password) : '';
+    }
+    if (body.role !== undefined) {
+      if (!['view', 'edit', 'admin'].includes(body.role)) return { code: -1, msg: '权限值无效' };
+      updateFields['权限'] = body.role;
+    }
+    updateFields['最后修改时间'] = Date.now();
+
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const resp = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: updateFields }),
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0, data: { record: data.data?.record } };
+  }
+
+  if (request.method === 'DELETE') {
+    // 删除账号
+    const body = await request.json();
+    const recordId = body.record_id;
+    if (!recordId) return { code: -1, msg: 'record_id is required' };
+
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const resp = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${feishuToken}` },
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    return { code: 0 };
+  }
+
+  return { code: -1, msg: 'Method not allowed' };
 }
 
 export default {
@@ -161,6 +435,17 @@ export default {
         });
       }
 
+      // /api/accounts 账号管理（需要 admin 权限）
+      if (path === '/api/accounts') {
+        const token = await getTenantToken(env);
+        const result = await handleAccounts(request, env, token, auth);
+        const status = result.code === 403 ? 403 : 200;
+        return new Response(JSON.stringify(result), {
+          status,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
       // /api/vaccines 疫苗接种管理
       if (path === '/api/vaccines') {
         const token = await getTenantToken(env);
@@ -175,7 +460,7 @@ export default {
         const token = await getTenantToken(env);
         // 从请求中获取真实 IP
         const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '';
-        const result = await handleLog(request, env, token, ip, auth.role);
+        const result = await handleLog(request, env, token, ip, auth);
         return new Response(JSON.stringify(result), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -199,9 +484,9 @@ export default {
         });
       }
 
-      // 写操作需要编辑权限
+      // 写操作需要编辑或管理员权限
       const isWriteOp = request.method !== 'GET';
-      if (hasAnyPassword && isWriteOp && auth.role !== 'edit') {
+      if (hasAnyPassword && isWriteOp && auth.role !== 'edit' && auth.role !== 'admin') {
         return new Response(JSON.stringify({ error: '只有编辑权限才能执行此操作', code: 403 }), {
           status: 403,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -665,8 +950,8 @@ async function handleLog(request, env, token, ip, authRole) {
     // 解析详细系统版本
     const osVersion = parseOS(ua);
 
-    // 登录账号：从 auth role 获取
-    const loginAccount = authRole || '未知';
+    // 登录账号：优先使用 accountName
+    const loginAccount = (typeof authRole === 'object' && authRole.accountName) ? authRole.accountName : (typeof authRole === 'string' ? authRole : '未知');
 
     const resp = await fetch(recordUrl, {
       method: 'POST',
@@ -825,6 +1110,17 @@ async function handleMigrate(env, token) {
   } catch (e) {
     results.vaccineTableCreated = false;
     results.vaccineTableError = e.message;
+  }
+
+  // 7. 确保"账号表"存在并初始化默认 admin 账号
+  try {
+    const accountTableId = await ensureAccountTable(token, env);
+    await ensureDefaultAdmin(token, env, accountTableId);
+    results.accountTableCreated = true;
+    results.accountTableId = accountTableId;
+  } catch (e) {
+    results.accountTableCreated = false;
+    results.accountTableError = e.message;
   }
 
   return { ok: true, ...results };
