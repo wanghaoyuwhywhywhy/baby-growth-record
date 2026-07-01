@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { type DailyRecord } from '@/api/feishu';
 import { feishuAPI } from '@/api/feishu';
@@ -300,6 +300,65 @@ function MediaPreview({ record }: { record: DailyRecord }) {
   return null;
 }
 
+// 滚轮列组件
+function ScrollColumn({ items, value, onChange }: { items: number[]; value: number; onChange: (v: number) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const ITEM_H = 36;
+  const isManualScroll = useRef(false);
+
+  useEffect(() => {
+    if (isManualScroll.current) {
+      isManualScroll.current = false;
+      return;
+    }
+    const idx = items.indexOf(value);
+    if (idx >= 0 && ref.current) {
+      ref.current.scrollTop = idx * ITEM_H;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const handleScroll = () => {
+    if (!ref.current) return;
+    const idx = Math.round(ref.current.scrollTop / ITEM_H);
+    if (idx >= 0 && idx < items.length && items[idx] !== value) {
+      isManualScroll.current = true;
+      onChange(items[idx]);
+    }
+  };
+
+  return (
+    <div className="relative w-14">
+      {/* 高亮背景条 */}
+      <div className="absolute top-1/2 left-0 right-0 -translate-y-1/2 h-[36px] bg-coral/10 rounded-lg pointer-events-none" />
+      <div
+        ref={ref}
+        className="h-[180px] overflow-y-scroll snap-y snap-mandatory [&::-webkit-scrollbar]:hidden"
+        style={{ scrollbarWidth: 'none' }}
+        onScroll={handleScroll}
+      >
+        {/* 顶部占位 */}
+        <div style={{ height: ITEM_H * 2 }} />
+        {items.map((item) => (
+          <div
+            key={item}
+            className="h-[36px] snap-center flex items-center justify-center font-outfit font-medium select-none cursor-pointer"
+            style={{
+              color: item === value ? '#FF7B7B' : '#8B7D7A',
+              fontSize: item === value ? 18 : 14,
+              transition: 'color 0.15s, font-size 0.15s',
+            }}
+          >
+            {String(item).padStart(2, '0')}
+          </div>
+        ))}
+        {/* 底部占位 */}
+        <div style={{ height: ITEM_H * 2 }} />
+      </div>
+    </div>
+  );
+}
+
 // 编辑记录弹窗
 function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onClose: () => void; onSave: () => void }) {
   const updateRecord = useAppStore((s) => s.updateRecord);
@@ -307,18 +366,24 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
 
   // 初始化为记录时间的本地时间，精确到秒
   const dt = new Date(record.记录时间);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const initialDateStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-  const [datePart, setDatePart] = useState(initialDateStr);
+  const [year, setYear] = useState(dt.getFullYear());
+  const [month, setMonth] = useState(dt.getMonth()); // 0-indexed
+  const [day, setDay] = useState(dt.getDate());
   const [hour, setHour] = useState(dt.getHours());
   const [minute, setMinute] = useState(dt.getMinutes());
   const [second, setSecond] = useState(dt.getSeconds());
   const [category, setCategory] = useState(record.分类);
 
+  // 日历面板的视图月份
+  const [viewYear, setViewYear] = useState(dt.getFullYear());
+  const [viewMonth, setViewMonth] = useState(dt.getMonth());
+
+  const today = new Date();
+
   async function handleSave() {
     setSaving(true);
     try {
-      const isoStr = new Date(`${datePart}T${pad(hour)}:${pad(minute)}:${pad(second)}`).toISOString();
+      const isoStr = new Date(year, month, day, hour, minute, second).toISOString();
       await updateRecord(record.record_id, {
         记录时间: isoStr,
         分类: category,
@@ -331,17 +396,67 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
     setSaving(false);
   }
 
-  // 生成选项的辅助函数
+  function handleNow() {
+    const now = new Date();
+    setYear(now.getFullYear());
+    setMonth(now.getMonth());
+    setDay(now.getDate());
+    setHour(now.getHours());
+    setMinute(now.getMinutes());
+    setSecond(now.getSeconds());
+    setViewYear(now.getFullYear());
+    setViewMonth(now.getMonth());
+  }
+
+  // 日历相关计算
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
+
+  // 生成日期格子
+  const calendarCells: { day: number; current: boolean }[] = [];
+  for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+    calendarCells.push({ day: daysInPrevMonth - i, current: false });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    calendarCells.push({ day: d, current: true });
+  }
+  const totalNeeded = firstDayOfWeek + daysInMonth;
+  const rows = Math.ceil(totalNeeded / 7);
+  const remaining = rows * 7 - calendarCells.length;
+  for (let d = 1; d <= remaining; d++) {
+    calendarCells.push({ day: d, current: false });
+  }
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); }
+    else setViewMonth(viewMonth - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); }
+    else setViewMonth(viewMonth + 1);
+  }
+
+  function selectDate(d: number) {
+    setYear(viewYear);
+    setMonth(viewMonth);
+    setDay(d);
+  }
+
+  const isSelected = (d: number) => viewYear === year && viewMonth === month && d === day;
+  const isToday = (d: number) => viewYear === today.getFullYear() && viewMonth === today.getMonth() && d === today.getDate();
+
   const rangeOptions = (max: number) => Array.from({ length: max }, (_, i) => i);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
       <div
-        className="w-full max-w-lg bg-cream-light rounded-t-3xl p-6 pb-10 animate-fade-up"
+        className="w-full max-w-lg bg-cream-light rounded-t-3xl p-5 pb-8 animate-fade-up font-outfit"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-base font-outfit font-bold text-ink">编辑记录</h3>
+        {/* 标题栏 */}
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-bold text-ink">编辑记录</h3>
           <button
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors"
@@ -350,50 +465,76 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
           </button>
         </div>
 
-        {/* 记录时间 */}
-        <div className="mb-4">
-          <label className="text-xs text-muted font-medium mb-1.5 block">记录时间</label>
-          <input
-            type="date"
-            value={datePart}
-            onChange={(e) => setDatePart(e.target.value)}
-            className="w-full bg-white border border-rule rounded-xl px-4 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all mb-2"
-          />
-          <div className="flex items-center gap-2">
-            <select
-              value={hour}
-              onChange={(e) => setHour(Number(e.target.value))}
-              className="flex-1 bg-white border border-rule rounded-xl px-3 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all appearance-none text-center cursor-pointer"
-            >
-              {rangeOptions(24).map(h => (
-                <option key={h} value={h}>{pad(h)}时</option>
+        {/* 日历 + 滚轮：移动端垂直，桌面端水平 */}
+        <div className="flex flex-col md:flex-row gap-4 mb-4">
+          {/* 日历面板 */}
+          <div className="flex-1 min-w-0">
+            {/* 年月导航 */}
+            <div className="flex items-center justify-between mb-2">
+              <button onClick={prevMonth} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <span className="text-sm font-semibold text-ink">{viewYear}年{viewMonth + 1}月</span>
+              <button onClick={nextMonth} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </div>
+            {/* 星期头 */}
+            <div className="grid grid-cols-7 mb-1">
+              {['日', '一', '二', '三', '四', '五', '六'].map(w => (
+                <div key={w} className="text-[11px] text-muted text-center font-medium py-1">{w}</div>
               ))}
-            </select>
-            <span className="text-muted font-medium text-sm">:</span>
-            <select
-              value={minute}
-              onChange={(e) => setMinute(Number(e.target.value))}
-              className="flex-1 bg-white border border-rule rounded-xl px-3 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all appearance-none text-center cursor-pointer"
-            >
-              {rangeOptions(60).map(m => (
-                <option key={m} value={m}>{pad(m)}分</option>
-              ))}
-            </select>
-            <span className="text-muted font-medium text-sm">:</span>
-            <select
-              value={second}
-              onChange={(e) => setSecond(Number(e.target.value))}
-              className="flex-1 bg-white border border-rule rounded-xl px-3 py-3 text-sm text-ink outline-none focus:border-coral/50 focus:ring-4 focus:ring-coral/5 transition-all appearance-none text-center cursor-pointer"
-            >
-              {rangeOptions(60).map(s => (
-                <option key={s} value={s}>{pad(s)}秒</option>
-              ))}
-            </select>
+            </div>
+            {/* 日期网格 */}
+            <div className="grid grid-cols-7">
+              {calendarCells.map((cell, i) => {
+                const selected = cell.current && isSelected(cell.day);
+                const todayMark = cell.current && isToday(cell.day);
+                return (
+                  <button
+                    key={i}
+                    disabled={!cell.current}
+                    onClick={() => cell.current && selectDate(cell.day)}
+                    className={`
+                      relative w-8 h-8 mx-auto flex items-center justify-center text-xs rounded-full transition-all
+                      ${!cell.current ? 'text-muted/30 cursor-default' : 'text-ink hover:bg-coral/10 active:scale-95'}
+                      ${selected ? 'bg-coral text-white hover:bg-coral-dark font-semibold' : ''}
+                    `}
+                  >
+                    {cell.day}
+                    {todayMark && !selected && (
+                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-coral" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 分隔线（桌面端显示） */}
+          <div className="hidden md:block w-px bg-rule/60 self-stretch" />
+
+          {/* 时分秒滚轮 */}
+          <div className="flex items-center justify-center gap-1">
+            <div className="text-center">
+              <ScrollColumn items={rangeOptions(24)} value={hour} onChange={setHour} />
+              <div className="text-[10px] text-muted mt-1">时</div>
+            </div>
+            <span className="text-muted/60 font-bold text-base self-center mb-5">:</span>
+            <div className="text-center">
+              <ScrollColumn items={rangeOptions(60)} value={minute} onChange={setMinute} />
+              <div className="text-[10px] text-muted mt-1">分</div>
+            </div>
+            <span className="text-muted/60 font-bold text-base self-center mb-5">:</span>
+            <div className="text-center">
+              <ScrollColumn items={rangeOptions(60)} value={second} onChange={setSecond} />
+              <div className="text-[10px] text-muted mt-1">秒</div>
+            </div>
           </div>
         </div>
 
         {/* 分类选择 */}
-        <div className="mb-6">
+        <div className="mb-5">
           <label className="text-xs text-muted font-medium mb-1.5 block">分类</label>
           <div className="flex flex-wrap gap-2">
             {CATEGORIES.map((c) => (
@@ -412,13 +553,29 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
           </div>
         </div>
 
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="btn-primary w-full text-sm flex items-center justify-center gap-2"
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
+        {/* 底部按钮 */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleNow}
+            className="px-4 py-2.5 text-xs font-medium text-coral bg-coral/10 rounded-btn hover:bg-coral/20 active:scale-95 transition-all"
+          >
+            现在
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={onClose}
+            className="btn-secondary text-sm px-5"
+          >
+            取消
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="btn-primary text-sm px-5"
+          >
+            {saving ? '保存中...' : '确定'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -432,8 +589,16 @@ export default function TimelinePage() {
   const [editingRecord, setEditingRecord] = useState<DailyRecord | null>(null);
   const editMode = isEditMode();
 
+  // 懒加载：初始显示 10 条，每次加载 10 条
+  const PAGE_SIZE = 10;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => { fetchBabies(); }, [fetchBabies]);
   useEffect(() => { fetchRecords(); }, [fetchRecords, currentBabyId]);
+
+  // 切换筛选时重置显示数量
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [mediaFilter, categoryFilter]);
 
   const filtered = records.filter(r => {
     const mediaTypes = r.媒体类型 || ['text'];
@@ -450,6 +615,25 @@ export default function TimelinePage() {
     const matchCategory = categoryFilter === '全部' || r.分类 === categoryFilter;
     return matchMedia && matchCategory;
   });
+
+  const visibleRecords = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
+  // IntersectionObserver 监听底部哨兵元素
+  const handleObserver = useCallback((entries: IntersectionObserverEntry[]) => {
+    const [entry] = entries;
+    if (entry.isIntersecting && hasMore) {
+      setVisibleCount(prev => prev + PAGE_SIZE);
+    }
+  }, [hasMore]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(handleObserver, { rootMargin: '200px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [handleObserver]);
 
   return (
     <div className="page-container">
@@ -507,7 +691,7 @@ export default function TimelinePage() {
           <div className="relative">
             <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-rule/60" />
             <div className="space-y-1">
-              {filtered.map((record, index) => {
+              {visibleRecords.map((record, index) => {
                 const mediaTypes = record.媒体类型 || ['text'];
                 const primaryMedia = mediaTypes.find(t => t !== 'text') || 'text';
                 const style = MEDIA_TYPE_STYLE[primaryMedia] || MEDIA_TYPE_STYLE['text'];
@@ -516,7 +700,7 @@ export default function TimelinePage() {
                 const color = category?.color ?? '#8B7D7A';
 
                 return (
-                  <div key={record.record_id} className="relative pl-10 animate-fade-up" style={{ animationDelay: `${index * 50}ms` }}>
+                  <div key={record.record_id} className="relative pl-10 animate-fade-up" style={{ animationDelay: `${Math.min(index, 9) * 50}ms` }}>
                     <div className="absolute left-[17px] top-4 w-2 h-2 rounded-full bg-coral shadow-sm" />
                     <div className="card-shadow p-3.5">
                       {/* 时间 + 标签 + 编辑 */}
@@ -562,6 +746,17 @@ export default function TimelinePage() {
                   </div>
                 );
               })}
+              {/* 哨兵元素：滚动到此处时加载更多 */}
+              {hasMore && (
+                <div ref={sentinelRef} className="py-4 text-center text-xs text-muted/50">
+                  加载中...
+                </div>
+              )}
+              {!hasMore && filtered.length > 0 && (
+                <div className="py-4 text-center text-xs text-muted/40">
+                  共 {filtered.length} 条记录
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -142,6 +142,8 @@
 | 操作 | 文本 | login / logout |
 | IP | 文本 | 访问者 IP（CF-Connecting-IP） |
 | 设备型号 | 文本 | 解析后的设备类型（iPhone/Android/Mac 等） |
+| 系统版本 | 文本 | 详细系统版本（iOS 17.5/Android 14 等） |
+| 登录账号 | 文本 | 登录角色（edit/view） |
 
 ---
 
@@ -462,21 +464,29 @@ baby-growth-record/
 - 退出登录 + 切换账号功能
 - 登录后默认跳转首页
 - 时间线编辑功能（编辑权限可修改记录时间+分类）
-- 编辑弹窗：datetime-local 精确到秒 + 分类胶囊选择
 - 上传时间字段（后端字段，前端不展示，创建时自动填充）
 - 历史数据上传时间回填（/api/migrate）
-- 登录日志表（自动创建，记录时间/操作/IP/设备型号）
-- /api/migrate 数据迁移端点
+- 登录日志表（时间/操作/IP/设备型号/系统版本/登录账号）
+- /api/migrate 数据迁移端点（含日期格式修正）
 - /api/log 登录日志端点
 - Worker 部署名修正（baby-growth-api）
 - 视频语音 Content-Type 修正（type 参数区分）
+- 飞书日期字段格式统一为 yyyy-MM-dd HH:mm:ss
 - PRODUCT.md 文档持续维护
+
+### v1.6 时间线优化（2026-07）
+- 时间线懒加载：初始显示 10 条，滚动到底部自动加载更多（IntersectionObserver）
+- 避免一次性加载所有记录导致语音/视频加载失败
+- 时间选择器改为日历+滚轮样式（年月日历面板 + 时分秒滚轮列）
+- 支持"现在"快捷按钮一键设置当前时间
+- 语音 token 分配逻辑统一（assignTokenTypes 优先级：voice→video→photo）
+- 编辑图标移至行末（ml-auto）
 
 ---
 
 ## 十二、产品规划
 
-### 短期（v1.6）
+### 短期（v1.7）
 
 - [ ] 记录内容编辑：支持修改记录文字内容
 - [ ] 记录删除：支持删除已有记录
@@ -511,3 +521,5 @@ baby-growth-record/
 | Worker 重启后 token 失效 | token 存内存，重启清空 | 改为密码哈希确定性派生的无状态 token |
 | 全局 fetch 拦截导致卡死 | img/audio 标签 401 触发登出 | 改为 API 层面 401 处理 + 自定义事件 |
 | syncFromCloud 清空本地数据 | 先清空再逐条写入，断网丢数据 | Promise.allSettled + 全部失败保留本地 |
+| 语音 token 分配错误 | 多媒体记录中 cloudTokens[0] 可能不是 voice | assignTokenTypes 按 voice→video→photo 优先级分配 |
+| 时间线一次性加载太多 | 所有记录同时渲染导致语音/视频并发加载失败 | IntersectionObserver 懒加载，初始 10 条，滚动加载更多 |
