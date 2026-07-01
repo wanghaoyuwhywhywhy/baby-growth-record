@@ -2,14 +2,12 @@ import { useAppStore } from '@/store/useAppStore';
 import { useNavigate } from 'react-router-dom';
 import NavHeader from '@/components/NavHeader';
 import { calcAge } from '@/utils/date';
-import { Edit3, Trash2, User, Calendar, Heart } from 'lucide-react';
-import { useState } from 'react';
+import { Edit3, User, Calendar, Heart } from 'lucide-react';
 
 export default function BabyDetailPage() {
-  const { currentBaby, deleteBaby, babies, switchBaby } = useAppStore();
+  const { currentBaby } = useAppStore();
   const navigate = useNavigate();
   const baby = currentBaby();
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (!baby) {
     return (
@@ -21,16 +19,6 @@ export default function BabyDetailPage() {
   }
 
   const age = calcAge(baby.出生日期);
-
-  async function handleDelete() {
-    if (!baby) return;
-    await deleteBaby(baby.record_id);
-    if (babies.length <= 1) {
-      navigate('/baby/edit');
-    } else {
-      navigate('/');
-    }
-  }
 
   return (
     <div className="page-container">
@@ -92,75 +80,6 @@ export default function BabyDetailPage() {
               empty={!baby.爸爸名字}
             />
           </div>
-        </div>
-
-        {/* 多宝宝切换 */}
-        {babies.length > 1 && (
-          <div className="card-shadow mb-5 overflow-hidden">
-            <div className="px-4 py-3 border-b border-rule/40 bg-cream-dark/30">
-              <h3 className="text-sm font-outfit font-bold text-ink">切换宝宝</h3>
-            </div>
-            <div className="divide-y divide-rule/30">
-              {babies.map((b) => (
-                <button
-                  key={b.record_id}
-                  onClick={() => {
-                    switchBaby(b.record_id);
-                    navigate('/');
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-cream-dark/40 transition-colors ${
-                    b.record_id === baby.record_id ? 'bg-coral/5' : ''
-                  }`}
-                >
-                  <span className="w-9 h-9 rounded-full bg-gradient-to-br from-coral to-warm-orange text-white text-sm flex items-center justify-center font-bold">
-                    {b.宝宝姓名.charAt(0)}
-                  </span>
-                  <span className={`flex-1 text-left text-sm ${b.record_id === baby.record_id ? 'text-coral font-medium' : 'text-ink'}`}>
-                    {b.宝宝姓名}
-                  </span>
-                  {b.record_id === baby.record_id && <span className="text-xs text-coral">当前</span>}
-                </button>
-              ))}
-              <button
-                onClick={() => navigate('/baby/edit')}
-                className="w-full flex items-center gap-3 px-4 py-3 text-muted hover:bg-cream-dark/40 transition-colors"
-              >
-                <span className="w-9 h-9 rounded-full border-2 border-dashed border-rule flex items-center justify-center text-lg">+</span>
-                <span className="text-sm">添加新宝宝</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 删除按钮 */}
-        <div className="mt-8">
-          {!confirmDelete ? (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="w-full flex items-center justify-center gap-2 py-3 text-sm text-coral-dark border border-coral/30 rounded-btn hover:bg-coral/5 transition-colors"
-            >
-              <Trash2 size={16} />
-              删除宝宝档案
-            </button>
-          ) : (
-            <div className="card-shadow p-4 border-coral/30">
-              <p className="text-sm text-ink mb-3 text-center">确认删除"{baby.宝宝姓名}"的档案吗？相关记录将保留但不再关联。</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="flex-1 btn-secondary py-2.5 text-sm"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleDelete}
-                  className="flex-1 bg-coral text-white py-2.5 rounded-btn text-sm font-medium hover:bg-coral-dark transition-colors"
-                >
-                  确认删除
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
