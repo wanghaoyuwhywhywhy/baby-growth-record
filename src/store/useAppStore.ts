@@ -236,49 +236,44 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateVaccineStatus: async (record_id, 接种时间) => {
-    const ok = await feishuAPI.updateVaccine(record_id, {
+    // 乐观更新：先更新本地，后台同步云端
+    set((state) => ({
+      vaccines: state.vaccines.map((v) =>
+        v.record_id === record_id
+          ? { ...v, 接种状态: '已接种' as const, 接种时间, 预计接种时间: 接种时间 }
+          : v
+      ),
+    }));
+    feishuAPI.updateVaccine(record_id, {
       接种状态: '已接种',
       接种时间,
       预计接种时间: 接种时间,
     });
-    if (ok) {
-      set((state) => ({
-        vaccines: state.vaccines.map((v) =>
-          v.record_id === record_id
-            ? { ...v, 接种状态: '已接种' as const, 接种时间, 预计接种时间: 接种时间 }
-            : v
-        ),
-      }));
-    }
   },
 
   updateVaccineExpectedDate: async (record_id, 预计接种时间) => {
-    const ok = await feishuAPI.updateVaccine(record_id, {
+    set((state) => ({
+      vaccines: state.vaccines.map((v) =>
+        v.record_id === record_id
+          ? { ...v, 预计接种时间 }
+          : v
+      ),
+    }));
+    feishuAPI.updateVaccine(record_id, {
       预计接种时间,
     });
-    if (ok) {
-      set((state) => ({
-        vaccines: state.vaccines.map((v) =>
-          v.record_id === record_id
-            ? { ...v, 预计接种时间 }
-            : v
-        ),
-      }));
-    }
   },
 
   updateVaccineVaccinateDate: async (record_id, 接种时间) => {
-    const ok = await feishuAPI.updateVaccine(record_id, {
+    set((state) => ({
+      vaccines: state.vaccines.map((v) =>
+        v.record_id === record_id
+          ? { ...v, 接种时间 }
+          : v
+      ),
+    }));
+    feishuAPI.updateVaccine(record_id, {
       接种时间,
     });
-    if (ok) {
-      set((state) => ({
-        vaccines: state.vaccines.map((v) =>
-          v.record_id === record_id
-            ? { ...v, 接种时间 }
-            : v
-        ),
-      }));
-    }
   },
 }));

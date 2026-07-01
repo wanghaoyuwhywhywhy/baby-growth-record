@@ -129,7 +129,6 @@ export default function VaccinePage() {
   const baby = currentBaby();
   const canEdit = isEditMode();
   const [loading, setLoading] = useState(true);
-  const [vaccinating, setVaccinating] = useState<string | null>(null);
 
   // 日历弹窗状态
   const [calendarTarget, setCalendarTarget] = useState<{ id: string; type: 'vaccinate' | 'vaccinateDate' | 'expected'; currentDate: string } | null>(null);
@@ -206,25 +205,19 @@ export default function VaccinePage() {
     return Object.entries(groups).sort((a, b) => ageSortKey(a[1][0].月龄) - ageSortKey(b[1][0].月龄));
   }, [availableVaccines]);
 
-  async function handleVaccinate(recordId: string, date: string) {
-    setVaccinating(recordId);
+  function handleVaccinate(recordId: string, date: string) {
     setCalendarTarget(null);
-    await updateVaccineStatus(recordId, new Date(date).toISOString());
-    setVaccinating(null);
+    updateVaccineStatus(recordId, new Date(date).toISOString());
   }
 
-  async function handleUpdateVaccinateDate(recordId: string, date: string) {
-    setVaccinating(recordId);
+  function handleUpdateVaccinateDate(recordId: string, date: string) {
     setCalendarTarget(null);
-    await updateVaccineVaccinateDate(recordId, new Date(date).toISOString());
-    setVaccinating(null);
+    updateVaccineVaccinateDate(recordId, new Date(date).toISOString());
   }
 
-  async function handleUpdateExpected(recordId: string, date: string) {
-    setVaccinating(recordId);
+  function handleUpdateExpected(recordId: string, date: string) {
     setCalendarTarget(null);
-    await updateVaccineExpectedDate(recordId, new Date(date).toISOString());
-    setVaccinating(null);
+    updateVaccineExpectedDate(recordId, new Date(date).toISOString());
   }
 
   async function handleAddVaccine(template: VaccineTemplate) {
@@ -290,7 +283,6 @@ export default function VaccinePage() {
                   <VaccineCard
                     key={v.record_id}
                     vaccine={v}
-                    vaccinating={vaccinating === v.record_id}
                     canEdit={canEdit}
                     onVaccinate={() => setCalendarTarget({ id: v.record_id, type: 'vaccinate', currentDate: new Date().toISOString().split('T')[0] })}
                     onEditExpected={() => setCalendarTarget({ id: v.record_id, type: 'expected', currentDate: v.预计接种时间 })}
@@ -381,14 +373,12 @@ export default function VaccinePage() {
 
 function VaccineCard({
   vaccine,
-  vaccinating,
   canEdit,
   onVaccinate,
   onEditExpected,
   onEditVaccinateDate,
 }: {
   vaccine: VaccineRecord;
-  vaccinating: boolean;
   canEdit: boolean;
   onVaccinate: () => void;
   onEditExpected: () => void;
@@ -436,9 +426,9 @@ function VaccineCard({
           <span className="text-xs text-muted">已接种</span>
         ) : (
           canEdit ? (
-            <button onClick={onVaccinate} disabled={vaccinating}
-              className="text-xs border border-coral text-coral rounded-full px-3 py-1 hover:bg-coral/5 transition-colors disabled:opacity-50">
-              {vaccinating ? '提交中...' : '未接种'}
+            <button onClick={onVaccinate}
+              className="text-xs border border-coral text-coral rounded-full px-3 py-1 hover:bg-coral/5 transition-colors">
+              未接种
             </button>
           ) : (
             <span className="text-xs text-muted">未接种</span>
