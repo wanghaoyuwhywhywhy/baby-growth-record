@@ -406,8 +406,8 @@ function feishuToVaccine(item: any): VaccineRecord {
   return {
     record_id: item.record_id || item.id,
     疫苗名称: fields['疫苗名称'] || '',
-    剂次: fields['剂次'] || 1,
-    总剂次: fields['总剂次'] || 1,
+    剂次: Number(fields['剂次']) || 1,
+    总剂次: Number(fields['总剂次']) || 1,
     费用类型: fields['费用类型'] || '免费',
     月龄: fields['月龄'] || '',
     预计接种时间: typeof fields['预计接种时间'] === 'number'
@@ -444,7 +444,7 @@ export async function cloudCreateVaccine(data: Partial<VaccineRecord>): Promise<
     if (data.预计接种时间) fields['预计接种时间'] = toTimestamp(data.预计接种时间);
     if (data.接种状态) fields['接种状态'] = data.接种状态;
     if (data.接种时间) fields['接种时间'] = toTimestamp(data.接种时间);
-    if (data.关联宝宝) fields['关联宝宝'] = data.关联宝宝.map((id: string) => ({ record_ids: [id], text: id }));
+    if (data.关联宝宝) fields['关联宝宝'] = data.关联宝宝;
 
     const result = await apiPost('/api/vaccines', fields);
     if (result.code !== 0) return null;

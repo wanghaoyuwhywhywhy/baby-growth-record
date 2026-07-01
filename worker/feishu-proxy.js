@@ -516,27 +516,30 @@ async function ensureVaccineTable(token, env) {
   const tables = listData.data?.items || [];
   const existing = tables.find(t => t.name === '疫苗接种');
 
-  let tableId;
   if (existing) {
-    tableId = existing.table_id;
-  } else {
-    // 创建"疫苗接种"表
-    const createResp = await fetch(listUrl, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ table: { name: '疫苗接种' } }),
-    });
-    const createData = await createResp.json();
-    if (createData.code !== 0) {
-      throw new Error(`创建疫苗接种表失败: ${createData.msg}`);
-    }
-    tableId = createData.data?.table_id;
-    if (!tableId) {
-      throw new Error('创建疫苗接种表成功但未获取到 table_id');
-    }
+    // 表已存在，直接返回 ID（不再尝试补全字段，避免重复创建）
+    vaccineTableIdCache = existing.table_id;
+    return vaccineTableIdCache;
   }
 
-  // 确保9个字段都存在（表已存在时补全缺失字段）
+  // 表不存在，创建表并添加字段
+  const createResp = await fetch(listUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: { name: '疫苗接种' } }),
+  });
+  const createData = await createResp.json();
+  if (createData.code !== 0) {
+    throw new Error(`创建疫苗接种表失败: ${createData.msg}`);
+  }
+
+  const tableId = createData.data?.table_id;
+  if (!tableId) {
+    throw new Error('创建疫苗接种表成功但未获取到 table_id');
+  }
+
+  // 创建字段
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
   const vaccineFields = [
     { field_name: '疫苗名称', type: 1 },
     { field_name: '剂次', type: 2 },
@@ -546,24 +549,14 @@ async function ensureVaccineTable(token, env) {
     { field_name: '预计接种时间', type: 5 },
     { field_name: '接种状态', type: 3, property: { options: [{ name: '未接种' }, { name: '已接种' }] } },
     { field_name: '接种时间', type: 5 },
-    { field_name: '关联宝宝', type: 7, property: { table_id: env.FEISHU_TABLE_BABY } },
+    { field_name: '关联宝宝', type: 18, property: { table_id: env.FEISHU_TABLE_BABY } },
   ];
-
-  // 获取已有字段列表
-  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
-  const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
-  const fieldsData = await fieldsResp.json();
-  const existingFields = new Set((fieldsData.data?.items || []).map(f => f.field_name));
-
-  // 创建缺失字段
   for (const field of vaccineFields) {
-    if (!existingFields.has(field.field_name)) {
-      await fetch(fieldsUrl, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(field),
-      });
-    }
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(field),
+    });
   }
 
   vaccineTableIdCache = tableId;
