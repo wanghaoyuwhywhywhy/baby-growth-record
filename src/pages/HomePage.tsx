@@ -83,6 +83,21 @@ export default function HomePage() {
           <span className="text-muted text-lg">›</span>
         </button>
 
+        {/* 疫苗接种入口 */}
+        <button
+          onClick={() => navigate('/vaccine')}
+          className="card-shadow w-full p-4 mb-3 flex items-center gap-3 hover:shadow-float transition-all duration-200 active:scale-[0.98]"
+        >
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center text-white shadow-soft">
+            <span className="text-lg">💉</span>
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-sm font-outfit font-bold text-ink">疫苗接种</p>
+            <p className="text-xs text-muted">查看接种计划</p>
+          </div>
+          <span className="text-muted text-lg">›</span>
+        </button>
+
         {/* AI 成长分析入口 */}
         <button
           onClick={handleAIAnalysis}

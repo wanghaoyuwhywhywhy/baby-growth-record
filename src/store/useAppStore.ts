@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import { feishuAPI, type Baby, type DailyRecord, type GrowthRecord } from '@/api/feishu';
+import { feishuAPI, type Baby, type DailyRecord, type GrowthRecord, type VaccineRecord } from '@/api/feishu';
 
 interface AppState {
   babies: Baby[];
   currentBabyId: string | null;
   records: DailyRecord[];
   growthRecords: GrowthRecord[];
+  vaccines: VaccineRecord[];
   filterCategory: string;
   loading: boolean;
   initialized: boolean;
@@ -33,6 +34,9 @@ interface AppState {
 
   syncFromCloud: () => Promise<void>;
   checkCloudConnection: () => Promise<void>;
+
+  fetchVaccines: () => Promise<void>;
+  updateVaccineStatus: (record_id: string, 接种时间: string) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -40,6 +44,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentBabyId: null,
   records: [],
   growthRecords: [],
+  vaccines: [],
   filterCategory: '全部',
   loading: false,
   initialized: false,
@@ -216,5 +221,32 @@ export const useAppStore = create<AppState>((set, get) => ({
   checkCloudConnection: async () => {
     const connected = await feishuAPI.checkCloudConnection();
     set({ cloudConnected: connected });
+  },
+
+  fetchVaccines: async () => {
+    const { currentBabyId } = get();
+    if (!currentBabyId) {
+      set({ vaccines: [] });
+      return;
+    }
+    const vaccines = await feishuAPI.getVaccines(currentBabyId);
+    set({ vaccines });
+  },
+
+  updateVaccineStatus: async (record_id, 接种时间) => {
+    const ok = await feishuAPI.updateVaccine(record_id, {
+      接种状态: '已接种',
+      接种时间,
+      预计接种时间: 接种时间,
+    });
+    if (ok) {
+      set((state) => ({
+        vaccines: state.vaccines.map((v) =>
+          v.record_id === record_id
+            ? { ...v, 接种状态: '已接种' as const, 接种时间, 预计接种时间: 接种时间 }
+            : v
+        ),
+      }));
+    }
   },
 }));

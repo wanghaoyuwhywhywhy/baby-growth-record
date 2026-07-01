@@ -161,6 +161,15 @@ export default {
         });
       }
 
+      // /api/vaccines 疫苗接种管理
+      if (path === '/api/vaccines') {
+        const token = await getTenantToken(env);
+        const result = await handleVaccines(request, env, token);
+        return new Response(JSON.stringify(result), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
       // /api/log 仅需认证，不需要编辑权限（view 也可以记录登录）
       if (path === '/api/log') {
         const token = await getTenantToken(env);
@@ -241,6 +250,7 @@ export default {
 
 let tokenCache = { token: null, expires: 0 };
 let logTableIdCache = null; // 缓存"登录日志"表 ID
+let vaccineTableIdCache = null; // 缓存"疫苗接种"表 ID
 
 async function getTenantToken(env) {
   if (tokenCache.token && Date.now() < tokenCache.expires) {
@@ -493,6 +503,122 @@ async function ensureLogTable(token, env) {
   return tableId;
 }
 
+// 查找或创建"疫苗接种"表，返回表 ID
+async function ensureVaccineTable(token, env) {
+  if (vaccineTableIdCache) return vaccineTableIdCache;
+
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+
+  // 列出所有表，查找"疫苗接种"
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const listData = await listResp.json();
+  const tables = listData.data?.items || [];
+  const existing = tables.find(t => t.name === '疫苗接种');
+  if (existing) {
+    vaccineTableIdCache = existing.table_id;
+    return vaccineTableIdCache;
+  }
+
+  // 创建"疫苗接种"表
+  const createResp = await fetch(listUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: { name: '疫苗接种' } }),
+  });
+  const createData = await createResp.json();
+  if (createData.code !== 0) {
+    throw new Error(`创建疫苗接种表失败: ${createData.msg}`);
+  }
+
+  const tableId = createData.data?.table_id;
+  if (!tableId) {
+    throw new Error('创建疫苗接种表成功但未获取到 table_id');
+  }
+
+  // 创建字段
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  const vaccineFields = [
+    { field_name: '疫苗名称', type: 1 },
+    { field_name: '剂次', type: 2 },
+    { field_name: '总剂次', type: 2 },
+    { field_name: '费用类型', type: 3, property: { options: [{ name: '免费' }, { name: '付费' }] } },
+    { field_name: '月龄', type: 1 },
+    { field_name: '预计接种时间', type: 5 },
+    { field_name: '接种状态', type: 3, property: { options: [{ name: '未接种' }, { name: '已接种' }] } },
+    { field_name: '接种时间', type: 5 },
+    { field_name: '关联宝宝', type: 7, property: { table_id: env.FEISHU_TABLE_BABY } },
+  ];
+  for (const field of vaccineFields) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(field),
+    });
+  }
+
+  vaccineTableIdCache = tableId;
+  return tableId;
+}
+
+// 处理疫苗接种请求
+async function handleVaccines(request, env, token) {
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const tableId = await ensureVaccineTable(token, env);
+
+  if (request.method === 'GET') {
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=500`;
+    const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+    const data = await resp.json();
+    if (data.code !== 0) return { error: data.msg };
+    return { ok: true, data: data.data };
+  }
+
+  if (request.method === 'POST') {
+    const body = await request.json();
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: body.fields }),
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { error: data.msg };
+    return { ok: true, data: data.data };
+  }
+
+  if (request.method === 'PUT') {
+    const body = await request.json();
+    const recordId = body.record_id;
+    if (!recordId) return { error: 'record_id is required' };
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const resp = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: body.fields }),
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { error: data.msg };
+    return { ok: true, data: data.data };
+  }
+
+  if (request.method === 'DELETE') {
+    const body = await request.json();
+    const recordId = body.record_id;
+    if (!recordId) return { error: 'record_id is required' };
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const resp = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { error: data.msg };
+    return { ok: true };
+  }
+
+  return { error: 'Method not allowed' };
+}
+
 // 处理登录日志请求
 async function handleLog(request, env, token, ip, authRole) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
@@ -670,6 +796,16 @@ async function handleMigrate(env, token) {
     }
   } catch (e) {
     results.logFieldSupplementError = e.message;
+  }
+
+  // 6. 确保"疫苗接种"表存在
+  try {
+    const vaccineTableId = await ensureVaccineTable(token, env);
+    results.vaccineTableCreated = true;
+    results.vaccineTableId = vaccineTableId;
+  } catch (e) {
+    results.vaccineTableCreated = false;
+    results.vaccineTableError = e.message;
   }
 
   return { ok: true, ...results };
