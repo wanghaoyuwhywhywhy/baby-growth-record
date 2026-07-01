@@ -1,7 +1,7 @@
 /**
  * 飞书云端同步 - Cloudflare Worker API 客户端
  */
-import type { Baby, DailyRecord, GrowthRecord } from '@/api/feishu';
+import type { Baby, DailyRecord, GrowthRecord, VaccineRecord } from '@/api/feishu';
 import { getAuthToken } from '@/lib/auth';
 
 const WORKER_URL = 'https://api.tongxi.xyz';
@@ -397,6 +397,77 @@ export function getCloudAssetUrl(recordId: string, fileToken: string, type?: 'vo
   const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
   const typeParam = type ? `&type=${type}` : '';
   return `${WORKER_URL}/api/asset?record_id=${encodeURIComponent(recordId)}&file_token=${encodeURIComponent(fileToken)}${tokenParam}${typeParam}`;
+}
+
+// 疫苗接种
+
+function feishuToVaccine(item: any): VaccineRecord {
+  const fields = item.fields || {};
+  return {
+    record_id: item.record_id || item.id,
+    疫苗名称: fields['疫苗名称'] || '',
+    剂次: fields['剂次'] || 1,
+    总剂次: fields['总剂次'] || 1,
+    费用类型: fields['费用类型'] || '免费',
+    月龄: fields['月龄'] || '',
+    预计接种时间: typeof fields['预计接种时间'] === 'number'
+      ? new Date(fields['预计接种时间']).toISOString()
+      : fields['预计接种时间'] || '',
+    接种状态: fields['接种状态'] || '未接种',
+    接种时间: typeof fields['接种时间'] === 'number'
+      ? new Date(fields['接种时间']).toISOString()
+      : fields['接种时间'] || '',
+    关联宝宝: extractLinkedIds(fields['关联宝宝']),
+  };
+}
+
+export async function cloudGetVaccines(babyId: string): Promise<VaccineRecord[]> {
+  try {
+    const data = await apiGet('/api/vaccines');
+    if (data.code !== 0 || !data.data?.items) return [];
+    const items: VaccineRecord[] = data.data.items.map(feishuToVaccine);
+    return items.filter((v) => v.关联宝宝.includes(babyId));
+  } catch (e) {
+    console.warn('云端拉取疫苗记录失败:', e);
+    return [];
+  }
+}
+
+export async function cloudCreateVaccine(data: Partial<VaccineRecord>): Promise<VaccineRecord | null> {
+  try {
+    const fields: Record<string, any> = {};
+    if (data.疫苗名称) fields['疫苗名称'] = data.疫苗名称;
+    if (data.剂次) fields['剂次'] = data.剂次;
+    if (data.总剂次) fields['总剂次'] = data.总剂次;
+    if (data.费用类型) fields['费用类型'] = data.费用类型;
+    if (data.月龄) fields['月龄'] = data.月龄;
+    if (data.预计接种时间) fields['预计接种时间'] = toTimestamp(data.预计接种时间);
+    if (data.接种状态) fields['接种状态'] = data.接种状态;
+    if (data.接种时间) fields['接种时间'] = toTimestamp(data.接种时间);
+    if (data.关联宝宝) fields['关联宝宝'] = data.关联宝宝.map((id: string) => ({ record_ids: [id], text: id }));
+
+    const result = await apiPost('/api/vaccines', fields);
+    if (result.code !== 0) return null;
+    const item = result.data?.record;
+    if (!item) return null;
+    return feishuToVaccine(item);
+  } catch (e) {
+    console.warn('云端创建疫苗记录失败:', e);
+    return null;
+  }
+}
+
+export async function cloudUpdateVaccine(record_id: string, rawFields: Record<string, any>): Promise<boolean> {
+  try {
+    const fields = { ...rawFields };
+    if (fields['预计接种时间']) fields['预计接种时间'] = toTimestamp(fields['预计接种时间']);
+    if (fields['接种时间']) fields['接种时间'] = toTimestamp(fields['接种时间']);
+    await apiPut('/api/vaccines', record_id, fields);
+    return true;
+  } catch (e) {
+    console.warn('云端更新疫苗记录失败:', e);
+    return false;
+  }
 }
 
 // 记录登录/登出日志

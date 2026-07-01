@@ -10,6 +10,7 @@ import {
   cloudGetRecords, cloudCreateRecord, cloudUpdateRecord, cloudDeleteRecord,
   cloudGetGrowth, cloudCreateGrowth, cloudUpdateGrowth, cloudDeleteGrowth,
   cloudHealthCheck, cloudLogAccess,
+  cloudGetVaccines, cloudCreateVaccine, cloudUpdateVaccine,
 } from '@/lib/cloud';
 
 export interface Baby {
@@ -56,6 +57,19 @@ export interface GrowthRecord {
   身高?: number;
   体重?: number;
   备注?: string;
+  关联宝宝: string[];
+}
+
+export interface VaccineRecord {
+  record_id: string;
+  疫苗名称: string;
+  剂次: number;
+  总剂次: number;
+  费用类型: '免费' | '付费';
+  月龄: string;
+  预计接种时间: string;
+  接种状态: '未接种' | '已接种';
+  接种时间?: string;
   关联宝宝: string[];
 }
 
@@ -230,5 +244,18 @@ export const feishuAPI = {
 
   async logAccess(action: 'login' | 'logout'): Promise<void> {
     return cloudLogAccess(action);
+  },
+
+  // 疫苗接种
+  async getVaccines(babyId: string): Promise<VaccineRecord[]> {
+    return cloudGetVaccines(babyId);
+  },
+
+  async createVaccine(data: Partial<VaccineRecord>): Promise<VaccineRecord | null> {
+    return cloudCreateVaccine(data);
+  },
+
+  async updateVaccine(record_id: string, fields: Record<string, any>): Promise<boolean> {
+    return cloudUpdateVaccine(record_id, fields);
   },
 };
