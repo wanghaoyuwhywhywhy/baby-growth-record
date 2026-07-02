@@ -206,6 +206,9 @@ async function ensureAccountTable(token, env) {
 
 // 确保默认 admin 账号存在
 async function ensureDefaultAdmin(token, env, tableId) {
+  // 如果已确认admin存在，跳过
+  if (adminExistsCache) return;
+
   const appToken = env.FEISHU_BASE_TOKEN;
   const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=1`;
   const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -213,6 +216,7 @@ async function ensureDefaultAdmin(token, env, tableId) {
 
   // 如果账号表不为空，不需要创建默认账号
   if (listData.code === 0 && listData.data?.items?.length > 0) {
+    adminExistsCache = true;
     return;
   }
 
@@ -230,6 +234,7 @@ async function ensureDefaultAdmin(token, env, tableId) {
       },
     }),
   });
+  adminExistsCache = true;
 }
 
 // 处理认证请求（账号登录 + 旧密码登录兼容）
@@ -643,6 +648,7 @@ export default {
 let tokenCache = { token: null, expires: 0 };
 let logTableIdCache = null; // 缓存"登录日志"表 ID
 let vaccineTableIdCache = null; // 缓存"疫苗接种"表 ID
+let adminExistsCache = false; // 缓存admin账号已存在，避免每次登录都查询
 
 async function getTenantToken(env) {
   if (tokenCache.token && Date.now() < tokenCache.expires) {
