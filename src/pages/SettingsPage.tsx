@@ -12,7 +12,7 @@ export default function SettingsPage() {
 
   // 账号管理状态
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
-  const [accountsLoading, setAccountsLoading] = useState(false);
+
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingAccount, setEditingAccount] = useState<AccountRecord | null>(null);
   const [formName, setFormName] = useState('');
@@ -28,13 +28,22 @@ export default function SettingsPage() {
     cloudLogAccess('logout');
   }
 
-  // 加载账号列表
+  // 加载账号列表：先从 localStorage 缓存秒开，后台刷新
   async function loadAccounts() {
     if (!isAdminUser) return;
-    setAccountsLoading(true);
+    // 优先读取缓存，秒级显示
+    try {
+      const cached = localStorage.getItem('accounts_cache');
+      if (cached) {
+        setAccounts(JSON.parse(cached));
+      }
+    } catch {}
+    // 后台刷新最新数据
     const list = await cloudGetAccounts();
     setAccounts(list);
-    setAccountsLoading(false);
+    try {
+      localStorage.setItem('accounts_cache', JSON.stringify(list));
+    } catch {}
   }
 
   useEffect(() => {
@@ -158,40 +167,34 @@ export default function SettingsPage() {
             </div>
 
             {/* 账号列表 */}
-            {accountsLoading ? (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 size={20} className="animate-spin text-muted" />
-              </div>
-            ) : (
-              <div className="space-y-2 mt-2">
-                {accounts.map(acc => (
-                  <div key={acc.record_id} className="flex items-center justify-between bg-cream-light/50 rounded-xl px-3 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-sm font-medium text-ink">{acc.账号名}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${roleColor(acc.权限)}`}>
-                        {roleLabel(acc.权限)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => startEdit(acc)}
-                        className="p-1.5 rounded-lg hover:bg-cream-dark/50 text-muted hover:text-ink transition-colors"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                      {acc.账号名 !== accountName && (
-                        <button
-                          onClick={() => handleDeleteAccount(acc)}
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-                    </div>
+            <div className="space-y-2 mt-2">
+              {accounts.map(acc => (
+                <div key={acc.record_id} className="flex items-center justify-between bg-cream-light/50 rounded-xl px-3 py-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-sm font-medium text-ink">{acc.账号名}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${roleColor(acc.权限)}`}>
+                      {roleLabel(acc.权限)}
+                    </span>
                   </div>
-                ))}
-              </div>
-            )}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => startEdit(acc)}
+                      className="p-1.5 rounded-lg hover:bg-cream-dark/50 text-muted hover:text-ink transition-colors"
+                    >
+                      <Edit3 size={14} />
+                    </button>
+                    {acc.账号名 !== accountName && (
+                      <button
+                        onClick={() => handleDeleteAccount(acc)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
 
             {/* 新增按钮 */}
             {!showAddForm && !editingAccount && (
