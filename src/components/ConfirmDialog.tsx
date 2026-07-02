@@ -11,8 +11,8 @@ interface ConfirmDialogProps {
 
 export default function ConfirmDialog({ title, message, confirmText = '确定', cancelText = '取消', onConfirm, onClose }: ConfirmDialogProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
-      <div className="w-full max-w-lg bg-cream-light rounded-t-3xl p-5 pb-8 animate-fade-up" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6" onClick={onClose}>
+      <div className="w-full max-w-sm bg-cream-light rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 mb-3">
           <div className="w-9 h-9 rounded-full bg-coral/15 flex items-center justify-center flex-shrink-0">
             <AlertTriangle size={18} className="text-coral" />
