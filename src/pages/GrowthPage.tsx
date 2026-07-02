@@ -441,28 +441,40 @@ function GrowthChart({
         ))}
 
         {/* 点击气泡 */}
-        {tooltip && (
-          <g>
-            <rect
-              x={tooltip.x - 50} y={tooltip.y - 28}
-              width="100" height="22" rx="6" fill="#3D2C2A" opacity="0.9"
-            />
-            <text
-              x={tooltip.x} y={tooltip.y - 14}
-              fontSize="9" fill="#FFFDFB" textAnchor="middle" fontWeight="600"
-            >
-              {formatXLabel(tooltip.date)} {tooltip.value}{unit}
-            </text>
-          </g>
-        )}
+        {tooltip && (() => {
+          const bubbleW = 100;
+          const bx = Math.min(Math.max(tooltip.x, padding.left + bubbleW / 2), width - padding.right - bubbleW / 2);
+          return (
+            <g>
+              <rect
+                x={bx - bubbleW / 2} y={tooltip.y - 28}
+                width={bubbleW} height="22" rx="6" fill="#3D2C2A" opacity="0.9"
+              />
+              <text
+                x={bx} y={tooltip.y - 14}
+                fontSize="9" fill="#FFFDFB" textAnchor="middle" fontWeight="600"
+              >
+                {formatXLabel(tooltip.date)} {tooltip.value}{unit}
+              </text>
+            </g>
+          );
+        })()}
 
         {/* X轴日期（带年份） */}
         {(() => {
-          // 动态计算标签间隔，最多显示4个标签
+          // 固定最多4个标签，均匀分布含首尾
           const maxLabels = 4;
-          const step = Math.max(1, Math.ceil(points.length / maxLabels));
+          const indices: number[] = [];
+          if (points.length <= maxLabels) {
+            for (let i = 0; i < points.length; i++) indices.push(i);
+          } else {
+            for (let i = 0; i < maxLabels; i++) {
+              indices.push(Math.round(i * (points.length - 1) / (maxLabels - 1)));
+            }
+          }
+          const labelSet = new Set(indices);
           return points.map((p, i) => {
-            if (i !== 0 && i !== points.length - 1 && i % step !== 0) return null;
+            if (!labelSet.has(i)) return null;
             return (
               <text key={i} x={p.x} y={height - 8} fontSize="8" fill="#8B7D7A" textAnchor="middle">
                 {formatXLabel(p.date)}
