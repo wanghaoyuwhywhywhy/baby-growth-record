@@ -99,49 +99,87 @@ async function deriveToken(passwordHash, role, accountName) {
   return `${role}:${accountName}:${hash}`;
 }
 
-// 解析 token，返回 { role: 'edit'|'view'|'admin', accountName, valid: boolean }
-// 新格式：role:accountName:hash（三段，role 可能为 admin/edit/view）
-// 旧格式：role:hash（两段，role 为 edit/view）
-async function parseAuth(request, env) {
-  const token = request.headers.get('X-Auth-Token')
-    || new URL(request.url).searchParams.get('token');
-  if (!token) return { role: null, accountName: null, valid: false };
+// 解析 token 字符串，返回 { role: 'edit'|'view'|'admin', accountName, valid: boolean }
+// 格式：role:accountName:hash（三段）
+function parseAuthToken(tokenString) {
+  if (!tokenString) return { role: null, accountName: null, valid: false };
 
-  const parts = token.split(':');
-  // 新格式：role:accountName:hash（至少3段，accountName本身可能不含冒号因为sha256不含冒号）
+  const parts = tokenString.split(':');
   if (parts.length >= 3) {
     const role = parts[0];
     const accountName = parts[1];
-    // hash 部分是 parts.slice(2).join(':')，但 sha256 输出不含冒号，所以就是 parts[2]
     if (role !== 'edit' && role !== 'view' && role !== 'admin') {
       return { role: null, accountName: null, valid: false };
     }
-    // 新格式 token：直接信任（token 在登录时由 deriveToken 生成，hash 校验已内含）
+    if (!accountName) {
+      return { role: null, accountName: null, valid: false };
+    }
+    // token格式正确，但还需验证账号存在（由调用方负责）
     return { role, accountName, valid: true };
   }
 
-  // 旧格式兼容：role:hash（两段）
-  if (parts.length === 2) {
-    const role = parts[0];
-    if (role !== 'edit' && role !== 'view') return { role: null, accountName: null, valid: false };
-
-    // 校验旧格式 token
-    const editHash = env.EDIT_PASSWORD_HASH;
-    const viewHash = env.VIEW_PASSWORD_HASH;
-
-    if (role === 'edit' && editHash) {
-      const expectedHash = await sha256(editHash + ':baby-growth-auth-v2:edit');
-      if (parts[1] === expectedHash) return { role: 'edit', accountName: 'legacy', valid: true };
-    }
-    if (role === 'view' && viewHash) {
-      const expectedHash = await sha256(viewHash + ':baby-growth-auth-v2:view');
-      if (parts[1] === expectedHash) return { role: 'view', accountName: 'legacy', valid: true };
-    }
-
-    return { role: null, accountName: null, valid: false };
-  }
-
+  // 旧格式（两段）和无效格式一律拒绝
   return { role: null, accountName: null, valid: false };
+}
+
+// 从 Request 对象中提取并解析 token
+async function parseAuth(request, env) {
+  const token = request.headers.get('X-Auth-Token')
+    || new URL(request.url).searchParams.get('token');
+  return parseAuthToken(token);
+}
+
+// 账号存在性缓存（避免每次请求都查飞书）
+let validAccountsCache = { accounts: new Set(), expires: 0 };
+
+// 验证账号是否仍存在于账号表中（带缓存，5分钟TTL）
+async function verifyAccountExists(accountName, env) {
+  const now = Date.now();
+  if (validAccountsCache.expires > now && validAccountsCache.accounts.has(accountName)) {
+    return true;
+  }
+  // 缓存过期或未命中，查询飞书账号表
+  try {
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountTable(feishuToken, env);
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const filterStr = `CurrentValue.[账号名]="${accountName}"`;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
+    const exists = listData.code === 0 && listData.data?.items && listData.data.items.length > 0;
+    if (exists) {
+      // 刷新缓存：查询所有账号名
+      await refreshValidAccountsCache(env);
+    }
+    return exists;
+  } catch (e) {
+    console.error('[verifyAccountExists] 查询异常:', e.message);
+    // 查询异常时放行，避免飞书API故障导致所有用户被登出
+    return true;
+  }
+}
+
+// 刷新有效账号缓存
+async function refreshValidAccountsCache(env) {
+  try {
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountTable(feishuToken, env);
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
+    if (listData.code === 0 && listData.data?.items) {
+      const accounts = new Set();
+      for (const item of listData.data.items) {
+        const name = item.fields?.['账号名'];
+        if (name) accounts.add(name);
+      }
+      validAccountsCache = { accounts, expires: Date.now() + 5 * 60 * 1000 }; // 5分钟TTL
+    }
+  } catch (e) {
+    console.error('[refreshValidAccountsCache] 异常:', e.message);
+  }
 }
 
 // 查找或创建"账号表"，返回表 ID
@@ -245,26 +283,19 @@ async function handleAuth(request, env) {
 
   // verify action: 验证token是否仍有效（账号是否仍存在）
   if (body.action === 'verify' && body.token) {
-    const auth = await parseAuth(body.token, env);
+    const auth = parseAuthToken(body.token);
     if (!auth.valid) {
       return { ok: false, error: 'token无效' };
     }
-    // 旧格式token（legacy）不再允许，强制重新登录
-    if (!auth.accountName || auth.accountName === 'legacy') {
-      return { ok: false, error: 'token格式过期，请重新登录' };
+    if (!auth.accountName) {
+      return { ok: false, error: 'token格式无效，请重新登录' };
     }
     // 检查账号是否仍存在于账号表中
-    const feishuToken = await getTenantToken(env);
-    const tableId = await ensureAccountTable(feishuToken, env);
-    const appToken = env.FEISHU_BASE_TOKEN;
-    const filterStr = `CurrentValue.[账号名]="${auth.accountName}"`;
-    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
-    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-    const listData = await listResp.json();
-    if (listData.code !== 0 || !listData.data?.items || listData.data.items.length === 0) {
+    const exists = await verifyAccountExists(auth.accountName, env);
+    if (!exists) {
       return { ok: false, error: '账号已不存在' };
     }
-    return { ok: true };
+    return { ok: true, role: auth.role, accountName: auth.accountName };
   }
 
   const account = body.account;
@@ -509,12 +540,21 @@ export default {
 
       // 所有其他接口需要认证
       const auth = await parseAuth(request, env);
-      const hasAnyPassword = env.EDIT_PASSWORD_HASH || env.VIEW_PASSWORD_HASH || env.ACCESS_PASSWORD_HASH;
-      if (hasAnyPassword && !auth.valid) {
+      if (!auth.valid) {
         return new Response(JSON.stringify({ error: '未认证，请先登录', code: 401 }), {
           status: 401,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
+      }
+      // 验证账号是否仍存在于账号表中（带缓存，5分钟TTL）
+      if (auth.accountName) {
+        const exists = await verifyAccountExists(auth.accountName, env);
+        if (!exists) {
+          return new Response(JSON.stringify({ error: '账号已不存在，请重新登录', code: 401 }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
       }
 
       // /api/accounts 账号管理（需要 admin 权限）
@@ -568,7 +608,7 @@ export default {
 
       // 写操作需要编辑或管理员权限
       const isWriteOp = request.method !== 'GET';
-      if (hasAnyPassword && isWriteOp && auth.role !== 'edit' && auth.role !== 'admin') {
+      if (isWriteOp && auth.role !== 'edit' && auth.role !== 'admin') {
         return new Response(JSON.stringify({ error: '只有编辑权限才能执行此操作', code: 403 }), {
           status: 403,
           headers: { 'Content-Type': 'application/json', ...corsHeaders },

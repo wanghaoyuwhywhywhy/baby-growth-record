@@ -103,8 +103,8 @@ export default function App() {
       });
       const data = await resp.json();
       console.log('[verifyAccount] API返回:', data);
-      // verify明确返回失败则登出（账号不存在、token无效等）
-      if (data.ok === false) {
+      // verify明确返回ok:false，或HTTP状态非200，则登出
+      if (data.ok === false || !resp.ok) {
         console.log('[verifyAccount] 验证失败，执行登出');
         clearAuthInfo();
         setAuthed(false);
@@ -113,8 +113,14 @@ export default function App() {
       }
     } catch (e) {
       console.log('[verifyAccount] 请求异常:', e);
-      // 网络错误时，如果有本地token则放行（离线可用）
-      setAuthed(true);
+      // 网络错误时，如果有格式正确的token则放行（离线可用），否则登出
+      const parts = token.split(':');
+      if (parts.length >= 3 && parts[1]) {
+        setAuthed(true);
+      } else {
+        clearAuthInfo();
+        setAuthed(false);
+      }
     }
     setVerifying(false);
   }, []);
