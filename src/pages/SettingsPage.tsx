@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff } from 'lucide-react';
 import { clearAuthInfo, getAuthRole, getAuthAccount, isAdmin } from '@/lib/auth';
 import { cloudLogAccess } from '@/lib/cloud';
@@ -9,6 +10,7 @@ export default function SettingsPage() {
   const role = getAuthRole();
   const accountName = getAuthAccount();
   const isAdminUser = isAdmin();
+  const [deleteTarget, setDeleteTarget] = useState<AccountRecord | null>(null);
 
   // 账号管理状态
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
@@ -91,7 +93,6 @@ export default function SettingsPage() {
 
   // 删除账号
   async function handleDeleteAccount(account: AccountRecord) {
-    if (!confirm(`确定删除账号 "${account.账号名}" 吗？`)) return;
     await cloudDeleteAccount(account.record_id);
     loadAccounts();
   }
@@ -185,7 +186,7 @@ export default function SettingsPage() {
                     </button>
                     {acc.账号名 !== accountName && (
                       <button
-                        onClick={() => handleDeleteAccount(acc)}
+                        onClick={() => setDeleteTarget(acc)}
                         className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={14} />
@@ -268,6 +269,17 @@ export default function SettingsPage() {
         )}
 
       </div>
+
+      {/* 删除账号确认弹窗 */}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="删除账号"
+          message={`确定删除账号 "${deleteTarget.账号名}" 吗？删除后无法恢复。`}
+          confirmText="删除"
+          onConfirm={() => handleDeleteAccount(deleteTarget)}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

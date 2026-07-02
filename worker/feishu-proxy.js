@@ -249,9 +249,9 @@ async function handleAuth(request, env) {
     if (!auth.valid) {
       return { ok: false, error: 'token无效' };
     }
-    // 旧格式token（legacy）无法按账号名查，直接返回有效
+    // 旧格式token（legacy）不再允许，强制重新登录
     if (!auth.accountName || auth.accountName === 'legacy') {
-      return { ok: true };
+      return { ok: false, error: 'token格式过期，请重新登录' };
     }
     // 检查账号是否仍存在于账号表中
     const feishuToken = await getTenantToken(env);
@@ -345,34 +345,6 @@ async function handleAuth(request, env) {
 
     const token = await deriveToken(await sha256(password), role, accountName);
     return { ok: true, token, role, accountName };
-  }
-
-  // 兼容旧密码登录（如果没提供 account 但提供了 password）
-  if (password) {
-    const passwordHash = await sha256(password);
-    const editHash = env.EDIT_PASSWORD_HASH;
-    const viewHash = env.VIEW_PASSWORD_HASH;
-
-    // 优先匹配编辑密码
-    if (editHash && passwordHash === editHash) {
-      const token = await deriveToken(passwordHash, 'edit', 'legacy');
-      return { ok: true, token, role: 'edit', accountName: 'legacy' };
-    }
-
-    // 再匹配查看密码
-    if (viewHash && passwordHash === viewHash) {
-      const token = await deriveToken(passwordHash, 'view', 'legacy');
-      return { ok: true, token, role: 'view', accountName: 'legacy' };
-    }
-
-    // 兼容：如果只有旧的单密码 ACCESS_PASSWORD_HASH
-    const legacyHash = env.ACCESS_PASSWORD_HASH;
-    if (legacyHash && passwordHash === legacyHash) {
-      const token = await deriveToken(passwordHash, 'edit', 'legacy');
-      return { ok: true, token, role: 'edit', accountName: 'legacy' };
-    }
-
-    return { error: '密码错误' };
   }
 
   return { error: '请输入账号名' };

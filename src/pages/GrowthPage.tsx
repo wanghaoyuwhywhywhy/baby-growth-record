@@ -4,6 +4,7 @@ import type { GrowthRecord } from '@/api/feishu';
 import { isEditMode } from '@/lib/auth';
 import NavHeader from '@/components/NavHeader';
 import CalendarPicker from '@/components/CalendarPicker';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { Plus, Trash2, Pencil, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { calcAge } from '@/utils/date';
 
@@ -23,6 +24,7 @@ export default function GrowthPage() {
   const [submitting, setSubmitting] = useState(false);
   const [metric, setMetric] = useState<MetricType>('height');
   const [calendarTarget, setCalendarTarget] = useState<'date' | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   useEffect(() => {
     if (baby) fetchGrowthRecords();
@@ -327,7 +329,7 @@ export default function GrowthPage() {
                       <Pencil size={14} />
                     </button>
                     <button
-                      onClick={() => { if (confirm('确定删除该条测量记录吗？')) deleteGrowthRecord(r.record_id); }}
+                      onClick={() => setDeleteTarget(r.record_id)}
                       className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-coral/10 text-muted hover:text-coral transition-all"
                       aria-label="删除"
                     >
@@ -351,6 +353,17 @@ export default function GrowthPage() {
           maxDate={new Date().toISOString().split('T')[0]}
           onConfirm={(date) => { setMeasureDate(date); setCalendarTarget(null); }}
           onClose={() => setCalendarTarget(null)}
+        />
+      )}
+
+      {/* 删除确认弹窗 */}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="删除记录"
+          message="确定删除该条测量记录吗？删除后无法恢复。"
+          confirmText="删除"
+          onConfirm={() => deleteGrowthRecord(deleteTarget)}
+          onClose={() => setDeleteTarget(null)}
         />
       )}
     </div>
