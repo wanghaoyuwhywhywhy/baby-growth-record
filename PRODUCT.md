@@ -1,6 +1,6 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-02 23:30
+> 最后更新：2026-07-03 00:30
 
 ---
 
@@ -38,10 +38,10 @@
 │  │            │ Zustand  │                   │ │
 │  │            │  Store   │                   │ │
 │  │            └────┬────┘                   │ │
-│  │          ┌──────┴──────┐                 │ │
-│  │          │ IndexedDB   │  本地缓存       │ │
-│  │          │  (Dexie)    │  离线可用       │ │
-│  │          └─────────────┘                 │ │
+│  │     ┌──────────┴──────────┐             │ │
+│  │     │ localStorage 缓存   │             │ │
+│  │     │ (auth/账号/聊天历史) │             │ │
+│  │     └─────────────────────┘             │ │
 │  └─────────────────────────────────────────┘ │
 │                      │ HTTPS                  │
 └──────────────────────┼───────────────────────┘
@@ -51,11 +51,12 @@
 │  ┌───────────────────┴───────────────────┐   │
 │  │         feishu-proxy.js               │   │
 │  │  ┌──────────┐  ┌──────────┐          │   │
-│  │  │密码认证   │  │CORS 白名单│          │   │
+│  │  │账号认证   │  │CORS 白名单│          │   │
+│  │  │AES加密    │  │          │          │   │
 │  │  └──────────┘  └──────────┘          │   │
 │  │  ┌──────────────────────────┐        │   │
 │  │  │  API 代理 & 数据转换      │        │   │
-│  │  │  /api/auth   (认证)       │        │   │
+│  │  │  /api/auth   (认证+verify)│        │   │
 │  │  │  /api/babies              │        │   │
 │  │  │  /api/records             │        │   │
 │  │  │  /api/growth              │        │   │
@@ -64,6 +65,7 @@
 │  │  │  /api/ai     (DeepSeek)  │        │   │
 │  │  │  /api/log    (登录日志)   │        │   │
 │  │  │  /api/vaccines (疫苗接种) │        │   │
+│  │  │  /api/accounts(账号管理)  │        │   │
 │  │  │  /api/migrate (数据迁移)  │        │   │
 │  │  └──────────────────────────┘        │   │
 │  └───────────────────────────────────────┘   │
@@ -73,16 +75,37 @@
 │   飞书开放平台        │                       │
 │  ┌───────────────────┴───────────────────┐   │
 │  │  多维表格 (Bitable) - 数据存储         │   │
-│  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ │   │
-│  │  │宝宝表   │ │记录表   │ │成长表   │ │疫苗表   │ │   │
-│  │  └────────┘ └────────┘ └────────┘ └────────┘ │   │
+│  │  ┌────────┐ ┌────────┐ ┌────────┐    │   │
+│  │  │宝宝表   │ │记录表   │ │成长表   │    │   │
+│  │  └────────┘ └────────┘ └────────┘    │   │
+│  │  ┌────────┐ ┌────────┐ ┌────────┐    │   │
+│  │  │疫苗表   │ │账号表   │ │登录日志 │    │   │
+│  │  └────────┘ └────────┘ └────────┘    │   │
 │  │  云盘 (Drive) - 媒体文件存储           │   │
 │  └───────────────────────────────────────┘   │
 │                                               │
 │  DeepSeek API - AI 能力                       │
-│  (自动分类 / 润色 / 分析 / 建议)              │
+│  (自动分类 / 润色 / 分析 / 建议 / 咨询)      │
 └───────────────────────────────────────────────┘
 ```
+
+**数据流向**：所有数据操作都通过后端接口，前端不直连飞书。
+
+```
+前端 → Cloudflare Worker API → 飞书 Bitable API
+```
+
+| 操作 | 前端调用 | 后端处理 |
+|------|---------|---------|
+| 查询数据 | `GET /api/babies`、`/api/records` 等 | Worker 用 tenant_access_token 调飞书 API 查表，返回数据给前端 |
+| 新增数据 | `POST /api/babies`、`/api/records` 等 | 前端传 fields，Worker 转发到飞书创建记录 |
+| 修改数据 | `PUT /api/babies`、`/api/records` 等 | 前端传 record_id + fields，Worker 调飞书更新 |
+| 删除数据 | `DELETE /api/xxx?record_id=xxx` | Worker 调飞书删除记录 |
+| 文件上传 | `POST /api/upload` | Worker 代传到飞书云盘，拿回 file_token 写入附件字段 |
+| 文件访问 | `GET /api/asset?file_token=xxx` | Worker 获取飞书临时下载链接，302 重定向到 CDN |
+| AI 分析/咨询 | `POST /api/ai` | Worker 调 DeepSeek API，返回结果 |
+| 登录认证 | `POST /api/auth` | Worker 查飞书账号表校验密码，返回 token |
+| 账号管理 | `GET/POST/PUT/DELETE /api/accounts` | Worker 操作飞书账号表（仅 admin） |
 
 ### 2.2 技术栈
 
@@ -91,7 +114,7 @@
 | 前端框架 | React 18 + TypeScript | SPA 应用 |
 | 构建 | Vite + vite-plugin-pwa | 快速构建 + PWA 支持 |
 | 状态管理 | Zustand | 全局状态 |
-| 本地存储 | Dexie (IndexedDB) | 离线数据缓存 |
+| 本地存储 | localStorage | 认证token/账号缓存/聊天历史 |
 | 样式 | Tailwind CSS | 原子化 CSS |
 | 路由 | React Router (Hash) | 单页路由 |
 | 后端 | Cloudflare Worker | API 代理 + 认证 |
@@ -144,7 +167,15 @@
 | IP | 文本 | 访问者 IP（CF-Connecting-IP） |
 | 设备型号 | 文本 | 解析后的设备类型（iPhone/Android/Mac 等） |
 | 系统版本 | 文本 | 详细系统版本（iOS 17.5/Android 14 等） |
-| 登录账号 | 文本 | 登录角色（edit/view） |
+| 登录账号 | 文本 | 登录的账号名 |
+
+**账号表 (Account)** — Worker 自动创建
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| 账号名 | 文本 | 登录账号名（唯一） |
+| 加密密码 | 文本 | AES-256-GCM 加密后的密码（不可明文） |
+| 权限 | 单选 | view / edit / admin |
+| 最后修改时间 | 日期 | 最后修改时间戳 |
 
 **疫苗接种表 (Vaccine)** — Worker 自动创建
 | 字段 | 类型 | 说明 |
@@ -163,24 +194,30 @@
 
 ## 三、功能模块
 
-### 3.1 双密码登录
+### 3.1 账号登录
 
-- 访问网站需输入密码（密码哈希 SHA-256 存储于 Worker 环境变量）
-- **双密码权限区分**：
-  - 查看密码（VIEW_PASSWORD_HASH）：只读，可浏览所有记录
-  - 编辑密码（EDIT_PASSWORD_HASH）：可增删改记录
-- 无状态 token 认证：token 格式 `role:hash`，由密码哈希确定性派生，Worker 重启不影响
-- 前端 token 存储于 localStorage，401 时自动跳转登录页
-- 图片/语音/视频 URL 也携带 token 参数
-- 登录/登出自动记录到"登录日志"飞书表（时间、操作、IP、设备型号）
-- 登录后默认跳转首页（清除 hash）
+- **账号表登录**：用户输入账号名+密码，Worker 查飞书账号表校验
+- **三级权限区分**：
+  - admin（管理员）：全部操作 + 账号管理
+  - edit（编辑）：可增删改记录
+  - view（查看）：只读，可浏览所有记录
+- **密码安全**：AES-256-GCM 加密存储（密钥存 Worker 环境变量 AES_ENCRYPT_KEY），不可明文展示/存储
+- **旧格式兼容**：仍支持旧 `role:hash` 格式 token（旧密码登录），自动分配 accountName=legacy
+- **Token 格式 v3**：`role:accountName:hash`，确定性派生，Worker 重启不影响
+- **前端 token 存储**：localStorage，401 时自动跳转登录页
+- **媒体 URL**：图片/语音/视频 URL 也携带 token 参数
+- **账号验证**：页面刷新时 /api/auth verify 检查账号是否仍存在，不存在自动登出
+- **登录/登出日志**：自动记录到飞书"登录日志"表（时间、操作、IP、设备型号、系统版本、登录账号）
+- **登录后跳转**：默认跳转首页（清除 hash）
+- **admin 首次登录**：引导设置密码（needsSetup 弹窗）
 
 ### 3.2 设置页
 
 - 所有页面右上角设置为齿轮图标，点击进入设置页
-- 显示当前登录身份（编辑权限/查看权限）
+- 显示当前登录账号名和权限
 - 退出登录按钮（立即跳转，日志后台发送）
-- 飞书云端同步操作
+- **账号管理**（仅 admin 可见）：账号列表+新增/编辑/删除，不可删除自己
+  - localStorage 缓存账号列表，秒级显示，后台静默刷新
 
 ### 3.3 首页
 
@@ -269,14 +306,15 @@
 
 ### 4.1 认证机制
 
-- **双密码保护**：Worker 环境变量存储两个密码 SHA-256 哈希
-  - `EDIT_PASSWORD_HASH`：编辑密码，可增删改
-  - `VIEW_PASSWORD_HASH`：查看密码，只读
-  - `ACCESS_PASSWORD_HASH`：旧版单密码（兼容）
-- **无状态 Token**：`token = role + ":" + SHA256(密码哈希 + ":baby-growth-auth-v2:" + role)`，确定性派生
+- **账号登录**：飞书账号表存储账号名+加密密码+权限
+- **密码加密**：AES-256-GCM（密钥 AES_ENCRYPT_KEY 存 Worker 环境变量），fallback SHA-256 兼容旧数据
+- **Token 格式 v3**：`role:accountName:SHA256(密码哈希 + ":baby-growth-auth-v3:" + role + ":" + accountName)`，确定性派生
+- **旧格式兼容**：`role:hash` 格式 token（accountName=legacy），仍可登录
 - **Token 传递**：API 请求通过 `X-Auth-Token` 头；媒体资源通过 URL `token` 参数
-- **权限控制**：写操作（POST/PUT/DELETE）需要 `edit` 角色，`/api/log` 和 `/api/migrate` 只需认证
-- **登录日志**：自动记录到飞书"登录日志"表（时间、操作、IP、设备型号）
+- **权限控制**：写操作（POST/PUT/DELETE）需要 `edit` 或 `admin` 角色；`/api/log`、`/api/ai` 只需认证
+- **账号管理**：`/api/accounts` 仅 admin 可操作
+- **账号验证**：页面刷新时 /api/auth verify 检查账号是否仍存在
+- **登录日志**：自动记录到飞书"登录日志"表（时间、操作、IP、设备型号、系统版本、登录账号）
 
 ### 4.2 CORS 白名单
 
@@ -368,7 +406,7 @@
 - Framework preset: None
 - Build command: `npm run build`
 - Build output directory: `docs`
-- Root directory: `baby-growth-record`
+- Root directory: `/`（根目录即项目目录）
 - GitHub Pages: 已禁用（防止 Jekyll 冲突）
 
 ### 8.2 Worker 环境变量
@@ -381,9 +419,11 @@
 | FEISHU_TABLE_BABY | 宝宝表 Table ID |
 | FEISHU_TABLE_RECORD | 记录表 Table ID |
 | FEISHU_TABLE_GROWTH | 成长表 Table ID |
+| FEISHU_TABLE_ACCOUNT | 账号表 Table ID（可选，不设则自动查找/创建） |
 | DEEPSEEK_API_KEY | DeepSeek API 密钥 |
-| EDIT_PASSWORD_HASH | 编辑密码 SHA-256 哈希 |
-| VIEW_PASSWORD_HASH | 查看密码 SHA-256 哈希 |
+| AES_ENCRYPT_KEY | 密码 AES-256-GCM 加密密钥（64位十六进制） |
+| EDIT_PASSWORD_HASH | 编辑密码 SHA-256 哈希（旧格式兼容） |
+| VIEW_PASSWORD_HASH | 查看密码 SHA-256 哈希（旧格式兼容） |
 | ACCESS_PASSWORD_HASH | 旧版访问密码 SHA-256 哈希（兼容） |
 
 ### 8.3 飞书多维表格
@@ -394,7 +434,8 @@
 | 记录表 | REDACTED_TABLE_RECORD |
 | 成长表 | REDACTED_TABLE_GROWTH |
 | 登录日志表 | REDACTED_TABLE_LOG |
-| 疫苗接种表 | Worker 自动创建 |
+| 疫苗接种表 | REDACTED_TABLE_VACCINE |
+| 账号表 | Worker 自动创建 |
 
 ---
 
@@ -598,6 +639,16 @@ baby-growth-record/
 - **设置页**：移除同步模块，新增账号管理区域（admin可见）
 - **首页**：快捷入口3列→4列，并行上传优化
 - **登录页**：居中图标标题，左对齐输入框，小眼睛图标preventDefault保持输入法
+
+### v1.11 性能优化 & 仓库迁移（2026-07）
+- **Git 仓库根目录迁移**：从 `/Users/wanghaoyu68/Trae` 改为 `/Users/wanghaoyu68/Trae/baby-growth-record`，避免上传项目外文件
+- **登录速度优化**：
+  - Worker 缓存 adminExists 标记，跳过 ensureDefaultAdmin 重复查询
+  - 前端去掉每次登录的 /api/migrate 调用（数据已迁移完成）
+- **账号列表秒级显示**：localStorage 缓存账号数据，先显示缓存后静默刷新
+- **视频播放**：playsInline 防止移动端默认全屏，"男宝/女宝"改为"男孩/女孩"
+- **Cloudflare Pages Root directory**：从 `baby-growth-record` 改为 `/`
+- **GitHub Actions deploy.yml**：路径从 `baby-growth-record/worker` 改为 `worker`
 
 ---
 
