@@ -29,6 +29,7 @@ const FREE_VACCINES = [
   { 疫苗名称: '乙脑减毒疫苗', 剂次: 2, 总剂次: 2, 费用类型: '免费' as const, 月龄: '2周岁' },
   { 疫苗名称: 'A+C群流脑疫苗', 剂次: 1, 总剂次: 2, 费用类型: '免费' as const, 月龄: '3周岁' },
   { 疫苗名称: '脊灰灭活疫苗', 剂次: 3, 总剂次: 4, 费用类型: '免费' as const, 月龄: '4周岁' },
+  { 疫苗名称: '脊灰灭活疫苗', 剂次: 4, 总剂次: 4, 费用类型: '免费' as const, 月龄: '4周岁' },
   { 疫苗名称: '白破疫苗', 剂次: 1, 总剂次: 1, 费用类型: '免费' as const, 月龄: '6周岁' },
   { 疫苗名称: '百白破疫苗', 剂次: 5, 总剂次: 5, 费用类型: '免费' as const, 月龄: '6周岁' },
   { 疫苗名称: 'A+C群流脑疫苗', 剂次: 2, 总剂次: 2, 费用类型: '免费' as const, 月龄: '6周岁' },
@@ -293,7 +294,7 @@ export default function VaccinePage() {
       {/* 添加疫苗弹窗 */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setShowAddModal(false)}>
-          <div className="w-full max-w-lg bg-cream-light rounded-t-3xl max-h-[85vh] flex flex-col animate-fade-up" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-lg bg-cream-light rounded-t-3xl h-[75vh] flex flex-col animate-fade-up" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-rule/20">
               <h3 className="text-base font-outfit font-bold text-ink">添加疫苗</h3>
               <button onClick={() => setShowAddModal(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors"><X size={18} className="text-muted" /></button>
