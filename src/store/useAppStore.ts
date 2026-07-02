@@ -30,6 +30,7 @@ interface AppState {
 
   fetchGrowthRecords: () => Promise<void>;
   createGrowthRecord: (data: { 测量日期: string; 身高?: number; 体重?: number; 头围?: number; 备注?: string }) => Promise<GrowthRecord>;
+  updateGrowthRecord: (record: GrowthRecord) => Promise<GrowthRecord>;
   deleteGrowthRecord: (record_id: string) => Promise<void>;
 
   syncFromCloud: () => Promise<void>;
@@ -192,6 +193,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     set((state) => ({ growthRecords: [...state.growthRecords, record] }));
     return record;
+  },
+
+  updateGrowthRecord: async (record) => {
+    const updated = await feishuAPI.updateGrowthRecord(record);
+    set((state) => ({
+      growthRecords: state.growthRecords.map((r) => (r.record_id === record.record_id ? updated : r)),
+    }));
+    return updated;
   },
 
   deleteGrowthRecord: async (record_id) => {

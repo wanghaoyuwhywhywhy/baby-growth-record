@@ -1244,6 +1244,29 @@ async function handleMigrate(env, token) {
     results.accountTableError = e.message;
   }
 
+  // 8. 确保成长表"头围"字段存在
+  try {
+    const growthTableId = env.FEISHU_TABLE_GROWTH;
+    if (growthTableId) {
+      const growthFieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${growthTableId}/fields`;
+      const growthFieldsResp = await fetch(growthFieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const growthFieldsData = await growthFieldsResp.json();
+      const growthExistingFields = (growthFieldsData.data?.items || []).map(f => f.field_name);
+      if (!growthExistingFields.includes('头围')) {
+        await fetch(growthFieldsUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field_name: '头围', type: 2 }), // type 2 = 数字
+        });
+        results.headCircumferenceFieldCreated = true;
+      } else {
+        results.headCircumferenceFieldCreated = false; // already exists
+      }
+    }
+  } catch (e) {
+    results.headCircumferenceFieldError = e.message;
+  }
+
   return { ok: true, ...results };
 }
 
