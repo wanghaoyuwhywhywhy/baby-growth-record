@@ -1244,7 +1244,7 @@ async function handleMigrate(env, token) {
     results.accountTableError = e.message;
   }
 
-  // 8. 确保成长表"头围"字段存在
+  // 8. 确保成长表"头围"和"最后修改时间"字段存在
   try {
     const growthTableId = env.FEISHU_TABLE_GROWTH;
     if (growthTableId) {
@@ -1260,7 +1260,17 @@ async function handleMigrate(env, token) {
         });
         results.headCircumferenceFieldCreated = true;
       } else {
-        results.headCircumferenceFieldCreated = false; // already exists
+        results.headCircumferenceFieldCreated = false;
+      }
+      if (!growthExistingFields.includes('最后修改时间')) {
+        await fetch(growthFieldsUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field_name: '最后修改时间', type: 2 }), // type 2 = 数字
+        });
+        results.growthLastModifiedFieldCreated = true;
+      } else {
+        results.growthLastModifiedFieldCreated = false;
       }
     }
   } catch (e) {

@@ -59,6 +59,7 @@ export interface GrowthRecord {
   头围?: number;
   备注?: string;
   关联宝宝: string[];
+  最后修改时间?: number;
 }
 
 export interface VaccineRecord {
@@ -178,6 +179,7 @@ export const feishuAPI = {
       头围: record.头围,
       备注: record.备注,
       关联宝宝: [record.关联宝宝],
+      最后修改时间: Date.now(),
     };
     // 先写云端，拿到飞书的 record_id
     const cloudId = await cloudCreateGrowth(newRecord);
@@ -189,9 +191,10 @@ export const feishuAPI = {
   },
 
   async updateGrowthRecord(record: GrowthRecord): Promise<GrowthRecord> {
-    await dbAddGrowthRecord(record); // put 会覆盖
-    cloudUpdateGrowth(record); // 后台推送到云端
-    return record;
+    const updated = { ...record, 最后修改时间: Date.now() };
+    await dbAddGrowthRecord(updated); // put 会覆盖
+    cloudUpdateGrowth(updated); // 后台推送到云端
+    return updated;
   },
 
   async deleteGrowthRecord(record_id: string): Promise<void> {

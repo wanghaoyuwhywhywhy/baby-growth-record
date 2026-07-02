@@ -35,8 +35,18 @@ export default function GrowthPage() {
     );
   }
 
-  // 按日期排序（升序）
-  const sorted = [...growthRecords].sort((a, b) => new Date(a.测量日期).getTime() - new Date(b.测量日期).getTime());
+  // 按日期排序（升序），同日期去重（保留最后修改时间的记录）
+  const deduped = (() => {
+    const map = new Map<string, GrowthRecord>();
+    for (const r of growthRecords) {
+      const existing = map.get(r.测量日期);
+      if (!existing || (r.最后修改时间 ?? 0) > (existing.最后修改时间 ?? 0)) {
+        map.set(r.测量日期, r);
+      }
+    }
+    return [...map.values()].sort((a, b) => new Date(a.测量日期).getTime() - new Date(b.测量日期).getTime());
+  })();
+  const sorted = deduped;
   // 各指标取最近一次有数据的记录
   const latestHeight = [...sorted].reverse().find(r => r.身高);
   const previousHeight = sorted.filter(r => r.身高 && r !== latestHeight).slice(-1)[0];
@@ -356,6 +366,7 @@ function GrowthChart({
   color: string;
   unit: string;
 }) {
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; date: string; value: number } | null>(null);
   const width = 320;
   const height = 180;
   const padding = { top: 20, right: 20, bottom: 32, left: 36 };
@@ -381,7 +392,7 @@ function GrowthChart({
   }
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="w-full overflow-x-auto relative">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ minWidth: 280 }}>
         {/* 网格线 */}
         {[0, 0.25, 0.5, 0.75, 1].map((t) => {
@@ -411,11 +422,17 @@ function GrowthChart({
         {/* 线 */}
         <path d={pathD} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 
-        {/* 数据点 */}
+        {/* 数据点（可点击） */}
         {points.map((p, i) => (
           <g key={i}>
-            <circle cx={p.x} cy={p.y} r="3" fill="#FFFDFB" stroke={color} strokeWidth="2" />
-            {(i === 0 || i === points.length - 1) && (
+            <circle cx={p.x} cy={p.y} r="8" fill="transparent" stroke="none"
+              onClick={() => setTooltip(tooltip?.x === p.x ? null : { x: p.x, y: p.y, date: p.date, value: p.value })}
+            />
+            <circle cx={p.x} cy={p.y} r="3" fill="#FFFDFB" stroke={color} strokeWidth="2"
+              style={{ cursor: 'pointer' }}
+              onClick={() => setTooltip(tooltip?.x === p.x ? null : { x: p.x, y: p.y, date: p.date, value: p.value })}
+            />
+            {(i === 0 || i === points.length - 1) && !tooltip && (
               <text x={p.x} y={p.y - 8} fontSize="9" fill="#3D2C2A" textAnchor="middle" fontWeight="600">
                 {p.value}
               </text>
@@ -423,9 +440,25 @@ function GrowthChart({
           </g>
         ))}
 
+        {/* 点击气泡 */}
+        {tooltip && (
+          <g>
+            <rect
+              x={tooltip.x - 50} y={tooltip.y - 28}
+              width="100" height="22" rx="6" fill="#3D2C2A" opacity="0.9"
+            />
+            <text
+              x={tooltip.x} y={tooltip.y - 14}
+              fontSize="9" fill="#FFFDFB" textAnchor="middle" fontWeight="600"
+            >
+              {formatXLabel(tooltip.date)} {tooltip.value}{unit}
+            </text>
+          </g>
+        )}
+
         {/* X轴日期（带年份） */}
         {(() => {
-          // 动态计算标签间隔，保证标签之间至少间隔一定像素
+          // 动态计算标签间隔，最多显示4个标签
           const maxLabels = 4;
           const step = Math.max(1, Math.ceil(points.length / maxLabels));
           return points.map((p, i) => {
