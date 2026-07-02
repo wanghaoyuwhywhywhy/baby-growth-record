@@ -27,6 +27,5 @@ docs/
 # Unrelated project files
 *.pdf
 /*.png
-_shared/
-assets/
-baby-growth-record.html
+# Trae IDE
+.trae/
