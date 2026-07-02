@@ -426,7 +426,7 @@ function GrowthChart({
         {/* X轴日期（带年份） */}
         {(() => {
           // 动态计算标签间隔，保证标签之间至少间隔一定像素
-          const maxLabels = 5;
+          const maxLabels = 4;
           const step = Math.max(1, Math.ceil(points.length / maxLabels));
           return points.map((p, i) => {
             if (i !== 0 && i !== points.length - 1 && i % step !== 0) return null;
