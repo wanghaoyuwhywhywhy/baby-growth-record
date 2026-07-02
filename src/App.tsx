@@ -75,7 +75,8 @@ function ScrollToTop({ onVerifyAccount }: { onVerifyAccount: () => void }) {
 }
 
 export default function App() {
-  const [authed, setAuthed] = useState(isAuthenticated());
+  const [authed, setAuthed] = useState(false);
+  const [verifying, setVerifying] = useState(true); // 首次加载时先验证
   const initApp = useAppStore((s) => s.initApp);
   const initialized = useAppStore((s) => s.initialized);
 
@@ -87,7 +88,13 @@ export default function App() {
   // 验证当前账号是否仍存在于账号表中
   const verifyAccount = useCallback(async () => {
     const token = localStorage.getItem('auth_token');
-    if (!token) return;
+    const role = localStorage.getItem('auth_role');
+    const account = localStorage.getItem('auth_account');
+    console.log('[verifyAccount] 本地token信息:', { token: token?.slice(0, 20) + '...', role, account });
+    if (!token) {
+      setVerifying(false);
+      return;
+    }
     try {
       const resp = await fetch('https://api.tongxi.xyz/api/auth', {
         method: 'POST',
@@ -95,23 +102,34 @@ export default function App() {
         body: JSON.stringify({ action: 'verify', token }),
       });
       const data = await resp.json();
+      console.log('[verifyAccount] API返回:', data);
       // verify明确返回失败则登出（账号不存在、token无效等）
       if (data.ok === false) {
+        console.log('[verifyAccount] 验证失败，执行登出');
         clearAuthInfo();
         setAuthed(false);
+      } else {
+        setAuthed(true);
       }
-    } catch {
-      // 网络错误不登出
+    } catch (e) {
+      console.log('[verifyAccount] 请求异常:', e);
+      // 网络错误时，如果有本地token则放行（离线可用）
+      setAuthed(true);
     }
+    setVerifying(false);
   }, []);
 
+  // 首次加载：验证token有效性
+  useEffect(() => {
+    verifyAccount();
+  }, [verifyAccount]);
+
+  // authed变为true时初始化数据
   useEffect(() => {
     if (authed) {
-      // 立即校验账号是否仍存在（不等5秒）
-      verifyAccount();
       initApp();
     }
-  }, [authed, initApp, verifyAccount]);
+  }, [authed, initApp]);
 
   // initialized 变为 true 时（数据加载完成），滚动到顶部
   useEffect(() => {
@@ -143,6 +161,18 @@ export default function App() {
     window.scrollTo(0, 0);
     setAuthed(true);
   }, []);
+
+  // 首次验证token时显示加载
+  if (verifying) {
+    return (
+      <div className="page-container flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
+          <p className="text-sm text-muted">验证中...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!authed) {
     return <LoginPage onSuccess={handleLoginSuccess} />;
