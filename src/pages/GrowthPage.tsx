@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import type { GrowthRecord } from '@/api/feishu';
+import { isEditMode } from '@/lib/auth';
 import NavHeader from '@/components/NavHeader';
 import CalendarPicker from '@/components/CalendarPicker';
 import { Plus, Trash2, Pencil, TrendingUp, TrendingDown, Activity } from 'lucide-react';
@@ -11,6 +12,7 @@ type MetricType = 'height' | 'weight' | 'head';
 export default function GrowthPage() {
   const { currentBaby, growthRecords, fetchGrowthRecords, createGrowthRecord, updateGrowthRecord, deleteGrowthRecord } = useAppStore();
   const baby = currentBaby();
+  const canEdit = isEditMode();
   const [showForm, setShowForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState<GrowthRecord | null>(null);
   const [measureDate, setMeasureDate] = useState(new Date().toISOString().split('T')[0]);
@@ -183,6 +185,7 @@ export default function GrowthPage() {
         )}
 
         {/* 添加按钮 */}
+        {canEdit && (
         <button
           onClick={() => setShowForm(!showForm)}
           className="btn-primary w-full mb-5 flex items-center justify-center gap-2"
@@ -190,6 +193,7 @@ export default function GrowthPage() {
           <Plus size={18} strokeWidth={2.5} />
           添加记录
         </button>
+        )}
 
         {/* 添加表单 */}
         {showForm && (
@@ -313,6 +317,7 @@ export default function GrowthPage() {
                     </div>
                     {r.备注 && <p className="text-xs text-muted/70 mt-0.5">{r.备注}</p>}
                   </div>
+                  {canEdit && (
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => startEdit(r)}
@@ -329,6 +334,7 @@ export default function GrowthPage() {
                       <Trash2 size={14} />
                     </button>
                   </div>
+                  )}
                 </div>
                 );
               })}
