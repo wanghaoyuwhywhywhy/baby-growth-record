@@ -62,14 +62,15 @@ function checkStaleCache() {
   }
 }
 
-// 路由切换时滚动到顶部
-function ScrollToTop() {
+// 路由切换时滚动到顶部 + 验证账号
+function ScrollToTop({ onVerifyAccount }: { onVerifyAccount: () => void }) {
   const { pathname } = useLocation();
   useEffect(() => {
     window.scrollTo(0, 0);
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
-  }, [pathname]);
+    onVerifyAccount();
+  }, [pathname, onVerifyAccount]);
   return null;
 }
 
@@ -83,16 +84,8 @@ export default function App() {
     setupAutoUpdate();
   }, []);
 
-  useEffect(() => {
-    if (authed) {
-      initApp();
-      // 延迟验证账号是否仍有效（等initApp完成+migrate跑完）
-      setTimeout(() => verifyAccount(), 5000);
-    }
-  }, [authed, initApp]);
-
   // 验证当前账号是否仍存在于账号表中
-  async function verifyAccount() {
+  const verifyAccount = useCallback(async () => {
     const token = localStorage.getItem('auth_token');
     if (!token) return;
     try {
@@ -110,7 +103,15 @@ export default function App() {
     } catch {
       // 网络错误不登出
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (authed) {
+      // 立即校验账号是否仍存在（不等5秒）
+      verifyAccount();
+      initApp();
+    }
+  }, [authed, initApp, verifyAccount]);
 
   // initialized 变为 true 时（数据加载完成），滚动到顶部
   useEffect(() => {
@@ -160,7 +161,7 @@ export default function App() {
 
   return (
     <Router>
-      <ScrollToTop />
+      <ScrollToTop onVerifyAccount={verifyAccount} />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/record" element={<RecordPage />} />
