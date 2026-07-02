@@ -1,6 +1,6 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-02 21:30
+> 最后更新：2026-07-02 20:48 (北京时间)
 
 ---
 
@@ -213,11 +213,12 @@
 | 设置管理员密码 | ✗ | ✗ | ✓（首次登录） |
 
 - **密码安全**：AES-256-GCM 加密存储（密钥存 Worker 环境变量 AES_ENCRYPT_KEY），不可明文展示/存储
-- **旧格式兼容**：仍支持旧 `role:hash` 格式 token（旧密码登录），自动分配 accountName=legacy
+- **旧格式兼容**：已移除旧 `role:hash` 格式 token 支持，旧格式统一返回 token 无效
 - **Token 格式 v3**：`role:accountName:hash`，确定性派生，Worker 重启不影响
 - **前端 token 存储**：localStorage，401 时自动跳转登录页
 - **媒体 URL**：图片/语音/视频 URL 也携带 token 参数
-- **账号验证**：页面刷新和路由切换时 /api/auth verify 检查账号是否仍存在，不存在自动登出
+- **账号验证**：页面刷新和路由切换时 /api/auth verify 检查账号是否仍存在，不存在自动登出；Worker 使用 verifyAccountExists 缓存（5分钟TTL）减少飞书API调用
+- **认证函数拆分**：parseAuthToken(tokenString) 解析纯字符串，parseAuth(request,env) 从 Request 对象提取 token 后调用 parseAuthToken
 - **登录/登出日志**：自动记录到飞书"登录日志"表（时间、操作、IP、设备型号、系统版本、登录账号）
 - **登录后跳转**：默认跳转首页（清除 hash）
 - **admin 首次登录**：引导设置密码（needsSetup 弹窗）
@@ -326,11 +327,12 @@
 - **账号登录**：飞书账号表存储账号名+加密密码+权限
 - **密码加密**：AES-256-GCM（密钥 AES_ENCRYPT_KEY 存 Worker 环境变量），fallback SHA-256 兼容旧数据
 - **Token 格式 v3**：`role:accountName:SHA256(密码哈希 + ":baby-growth-auth-v3:" + role + ":" + accountName)`，确定性派生
-- **旧格式兼容**：`role:hash` 格式 token（accountName=legacy），仍可登录
+- **旧格式兼容**：已移除 `role:hash` 格式 token 支持，旧格式统一返回 token 无效
 - **Token 传递**：API 请求通过 `X-Auth-Token` 头；媒体资源通过 URL `token` 参数
 - **权限控制**：写操作（POST/PUT/DELETE）需要 `edit` 或 `admin` 角色；`/api/log`、`/api/ai` 只需认证
 - **账号管理**：`/api/accounts` 仅 admin 可操作
-- **账号验证**：页面刷新时 /api/auth verify 检查账号是否仍存在
+- **账号验证**：页面刷新时 /api/auth verify 检查账号是否仍存在，Worker 端 verifyAccountExists 带5分钟TTL缓存
+- **认证函数拆分**：parseAuthToken(tokenString) 纯字符串解析，parseAuth(request,env) 从 Request 提取 token 后调用 parseAuthToken；数据API也验证账号存在性
 - **登录日志**：自动记录到飞书"登录日志"表（时间、操作、IP、设备型号、系统版本、登录账号）
 
 ### 4.2 CORS 白名单
@@ -667,6 +669,18 @@ baby-growth-record/
 - **Cloudflare Pages Root directory**：从 `baby-growth-record` 改为 `/`
 - **GitHub Actions deploy.yml**：路径从 `baby-growth-record/worker` 改为 `worker`
 
+### v1.13 账号校验核心漏洞修复（2026-07-02）
+- **三层漏洞修复**——account为null仍能访问页面的根因排查与修复：
+  - **漏洞1（根因）**：Worker handleAuth 的 verify action 传字符串给 parseAuth（期望 Request 对象）→ TypeError 崩溃 → 返回 HTTP 500 `{error:"Internal..."}` 而非正常 JSON
+  - **漏洞2**：前端 verifyAccount 只检查 `data.ok === false`，但 500 响应无 ok 字段 → `undefined === false` 为 false → `setAuthed(true)` 放行
+  - **漏洞3**：Worker 数据 API 只检查 `auth.valid`（三段式 token 不校验 hash 直接 valid:true），不验证账号是否仍存在 → 已删除账号的 token 仍能访问数据
+- **修复1**：拆分 `parseAuthToken(tokenString)` 纯字符串解析函数，verify handler 使用它替代 `parseAuth`
+- **修复2**：前端 verifyAccount 增加 `!resp.ok` 检查，处理 HTTP 500 等异常状态码
+- **修复3**：数据 API 增加 `verifyAccountExists()` 验证账号存在性（5分钟 TTL 缓存），不存在返回 401
+- **移除旧格式 token**：`role:hash` 两段式 token 不再支持，统一返回"token无效"
+- **移除 hasAnyPassword 条件**：所有请求必须认证，不再有无密码放行逻辑
+- **前端网络容错**：离线时仅对格式正确的三段式 token 放行，否则登出
+
 ### v1.12 身高体重增强 & 头围修复（2026-07-02）
 - **头围指标**：成长表新增"头围"字段（数字类型，1位小数），Worker migrate自动创建
 - **当前值显示优化**：身高/体重/头围各取最近一次有该数据的记录（而非最新一条记录）
@@ -735,3 +749,4 @@ baby-growth-record/
 | 退出登录卡几秒 | await cloudLogAccess('logout') 阻塞跳转 | 先 clearAuthInfo + 立即刷新，日志后台发送 |
 | 疫苗表字段重复创建 | ensureVaccineTable 每次补全缺失字段 | 表已存在直接返回 ID，不再补全 |
 | 日历5/6行切换高度跳动 | 部分月份占5行，部分6行 | 固定6行，多余行填充下月日期 |
+| 账号为null仍能访问页面 | 三层漏洞叠加：Worker传参类型错误→500无ok字段→前端未检查resp.ok→数据API不验证账号存在性 | 拆分parseAuthToken纯字符串函数+前端增加resp.ok检查+verifyAccountExists缓存验证 |
