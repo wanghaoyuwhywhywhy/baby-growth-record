@@ -327,7 +327,7 @@ export default function GrowthPage() {
                       <Pencil size={14} />
                     </button>
                     <button
-                      onClick={() => deleteGrowthRecord(r.record_id)}
+                      onClick={() => { if (confirm('确定删除该条测量记录吗？')) deleteGrowthRecord(r.record_id); }}
                       className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-coral/10 text-muted hover:text-coral transition-all"
                       aria-label="删除"
                     >

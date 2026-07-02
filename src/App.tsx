@@ -95,8 +95,8 @@ export default function App() {
         body: JSON.stringify({ action: 'verify', token }),
       });
       const data = await resp.json();
-      // 只有明确返回账号不存在才登出，其他错误不登出
-      if (data.ok === false && data.error && data.error.includes('不存在')) {
+      // verify明确返回失败则登出（账号不存在、token无效等）
+      if (data.ok === false) {
         clearAuthInfo();
         setAuthed(false);
       }

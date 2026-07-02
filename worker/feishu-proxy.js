@@ -246,8 +246,12 @@ async function handleAuth(request, env) {
   // verify action: 验证token是否仍有效（账号是否仍存在）
   if (body.action === 'verify' && body.token) {
     const auth = await parseAuth(body.token, env);
-    if (!auth.valid || !auth.accountName || auth.accountName === 'legacy') {
-      return { ok: true }; // 旧格式token不验证
+    if (!auth.valid) {
+      return { ok: false, error: 'token无效' };
+    }
+    // 旧格式token（legacy）无法按账号名查，直接返回有效
+    if (!auth.accountName || auth.accountName === 'legacy') {
+      return { ok: true };
     }
     // 检查账号是否仍存在于账号表中
     const feishuToken = await getTenantToken(env);
