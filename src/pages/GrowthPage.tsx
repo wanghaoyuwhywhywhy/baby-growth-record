@@ -424,14 +424,19 @@ function GrowthChart({
         ))}
 
         {/* X轴日期（带年份） */}
-        {points.map((p, i) => {
-          if (points.length > 8 && i !== 0 && i !== points.length - 1 && i !== Math.floor(points.length / 2) && i !== Math.floor(points.length * 0.75)) return null;
-          return (
-            <text key={i} x={p.x} y={height - 8} fontSize="8" fill="#8B7D7A" textAnchor="middle">
-              {formatXLabel(p.date)}
-            </text>
-          );
-        })}
+        {(() => {
+          // 动态计算标签间隔，保证标签之间至少间隔一定像素
+          const maxLabels = 5;
+          const step = Math.max(1, Math.ceil(points.length / maxLabels));
+          return points.map((p, i) => {
+            if (i !== 0 && i !== points.length - 1 && i % step !== 0) return null;
+            return (
+              <text key={i} x={p.x} y={height - 8} fontSize="8" fill="#8B7D7A" textAnchor="middle">
+                {formatXLabel(p.date)}
+              </text>
+            );
+          });
+        })()}
       </svg>
     </div>
   );
