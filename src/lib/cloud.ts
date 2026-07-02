@@ -104,6 +104,7 @@ function feishuToGrowth(item: any): GrowthRecord {
     头围: typeof fields['头围'] === 'string' ? parseFloat(fields['头围']) : fields['头围'] || undefined,
     备注: fields['备注'] || '',
     关联宝宝: extractLinkedIds(fields['关联宝宝']),
+    最后修改时间: typeof fields['最后修改时间'] === 'number' ? fields['最后修改时间'] : undefined,
   };
 }
 
@@ -255,6 +256,7 @@ export async function cloudCreateGrowth(record: GrowthRecord): Promise<string | 
     const fields: Record<string, any> = {
       '测量日期': toTimestamp(record.测量日期),
       '关联宝宝': record.关联宝宝,
+      '最后修改时间': record.最后修改时间 || Date.now(),
     };
     if (record.身高 != null) fields['身高'] = record.身高;
     if (record.体重 != null) fields['体重'] = record.体重;
@@ -330,6 +332,7 @@ export async function cloudUpdateGrowth(record: GrowthRecord): Promise<boolean> 
     const fields: Record<string, any> = {
       '测量日期': toTimestamp(record.测量日期),
       '关联宝宝': record.关联宝宝,
+      '最后修改时间': Date.now(),
     };
     if (record.身高 != null) fields['身高'] = record.身高;
     if (record.体重 != null) fields['体重'] = record.体重;
