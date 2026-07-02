@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
+import type { GrowthRecord } from '@/api/feishu';
 import NavHeader from '@/components/NavHeader';
 import CalendarPicker from '@/components/CalendarPicker';
-import { Plus, Trash2, TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import { Plus, Trash2, Pencil, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { calcAge } from '@/utils/date';
 
 type MetricType = 'height' | 'weight' | 'head';
 
 export default function GrowthPage() {
-  const { currentBaby, growthRecords, fetchGrowthRecords, createGrowthRecord, deleteGrowthRecord } = useAppStore();
+  const { currentBaby, growthRecords, fetchGrowthRecords, createGrowthRecord, updateGrowthRecord, deleteGrowthRecord } = useAppStore();
   const baby = currentBaby();
   const [showForm, setShowForm] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<GrowthRecord | null>(null);
   const [measureDate, setMeasureDate] = useState(new Date().toISOString().split('T')[0]);
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
@@ -40,23 +42,49 @@ export default function GrowthPage() {
   const heightDelta = latest?.身高 && previous?.身高 ? +(latest.身高 - previous.身高).toFixed(1) : 0;
   const weightDelta = latest?.体重 && previous?.体重 ? +(latest.体重 - previous.体重).toFixed(1) : 0;
 
+  function startEdit(record: GrowthRecord) {
+    setEditingRecord(record);
+    setMeasureDate(record.测量日期);
+    setHeight(record.身高?.toString() ?? '');
+    setWeight(record.体重?.toString() ?? '');
+    setHeadCircumference(record.头围?.toString() ?? '');
+    setRemark(record.备注 ?? '');
+    setShowForm(true);
+  }
+
+  function resetForm() {
+    setHeight('');
+    setWeight('');
+    setHeadCircumference('');
+    setRemark('');
+    setMeasureDate(new Date().toISOString().split('T')[0]);
+    setEditingRecord(null);
+    setShowForm(false);
+  }
+
   async function handleSubmit() {
     if (!measureDate || (!height && !weight && !headCircumference) || submitting) return;
     setSubmitting(true);
     try {
-      await createGrowthRecord({
-        测量日期: measureDate,
-        身高: height ? parseFloat(height) : undefined,
-        体重: weight ? parseFloat(weight) : undefined,
-        头围: headCircumference ? parseFloat(headCircumference) : undefined,
-        备注: remark.trim() || undefined,
-      });
-      setHeight('');
-      setWeight('');
-      setHeadCircumference('');
-      setRemark('');
-      setMeasureDate(new Date().toISOString().split('T')[0]);
-      setShowForm(false);
+      if (editingRecord) {
+        await updateGrowthRecord({
+          ...editingRecord,
+          测量日期: measureDate,
+          身高: height ? parseFloat(height) : undefined,
+          体重: weight ? parseFloat(weight) : undefined,
+          头围: headCircumference ? parseFloat(headCircumference) : undefined,
+          备注: remark.trim() || undefined,
+        });
+      } else {
+        await createGrowthRecord({
+          测量日期: measureDate,
+          身高: height ? parseFloat(height) : undefined,
+          体重: weight ? parseFloat(weight) : undefined,
+          头围: headCircumference ? parseFloat(headCircumference) : undefined,
+          备注: remark.trim() || undefined,
+        });
+      }
+      resetForm();
     } catch (e) {
       alert(e instanceof Error ? e.message : '保存失败');
     }
@@ -144,13 +172,13 @@ export default function GrowthPage() {
           className="btn-primary w-full mb-5 flex items-center justify-center gap-2"
         >
           <Plus size={18} strokeWidth={2.5} />
-          记录身高体重
+          添加记录
         </button>
 
         {/* 添加表单 */}
         {showForm && (
           <div className="card-shadow p-4 mb-5 animate-fade-up">
-            <h3 className="text-sm font-outfit font-bold text-ink mb-3">新增测量数据</h3>
+            <h3 className="text-sm font-outfit font-bold text-ink mb-3">{editingRecord ? '编辑测量数据' : '新增测量数据'}</h3>
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-muted mb-1.5">测量日期</label>
@@ -212,7 +240,7 @@ export default function GrowthPage() {
               </div>
               <div className="flex gap-2 pt-1">
                 <button
-                  onClick={() => setShowForm(false)}
+                  onClick={resetForm}
                   className="flex-1 btn-secondary py-2.5 text-sm"
                 >
                   取消
@@ -222,7 +250,7 @@ export default function GrowthPage() {
                   disabled={!measureDate || (!height && !weight && !headCircumference) || submitting}
                   className="flex-1 btn-primary py-2.5 text-sm"
                 >
-                  {submitting ? '保存中...' : '保存'}
+                  {submitting ? '保存中...' : editingRecord ? '更新' : '保存'}
                 </button>
               </div>
             </div>
@@ -241,10 +269,13 @@ export default function GrowthPage() {
             </div>
           ) : (
             <div className="divide-y divide-rule/30">
-              {[...sorted].reverse().map((r) => (
+              {[...sorted].reverse().map((r) => {
+                const d = new Date(r.测量日期);
+                return (
                 <div key={r.record_id} className="px-4 py-3 flex items-center gap-3 group">
-                  <div className="w-10 h-10 rounded-full bg-mint/15 flex items-center justify-center text-sm font-bold text-mint-dark flex-shrink-0">
-                    {new Date(r.测量日期).getMonth() + 1}/{new Date(r.测量日期).getDate()}
+                  <div className="w-[52px] flex-shrink-0 text-center">
+                    <div className="text-[10px] text-muted">{d.getFullYear()}</div>
+                    <div className="text-sm font-bold text-mint-dark">{d.getMonth() + 1}.{d.getDate()}</div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
@@ -266,15 +297,25 @@ export default function GrowthPage() {
                     </div>
                     {r.备注 && <p className="text-xs text-muted/70 mt-0.5">{r.备注}</p>}
                   </div>
-                  <button
-                    onClick={() => deleteGrowthRecord(r.record_id)}
-                    className="opacity-0 group-hover:opacity-100 w-7 h-7 flex items-center justify-center rounded-full hover:bg-coral/10 text-muted hover:text-coral transition-all"
-                    aria-label="删除"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => startEdit(r)}
+                      className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-mint/10 text-muted hover:text-mint-dark transition-all"
+                      aria-label="编辑"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => deleteGrowthRecord(r.record_id)}
+                      className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-coral/10 text-muted hover:text-coral transition-all"
+                      aria-label="删除"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

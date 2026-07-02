@@ -188,6 +188,12 @@ export const feishuAPI = {
     return newRecord;
   },
 
+  async updateGrowthRecord(record: GrowthRecord): Promise<GrowthRecord> {
+    await dbAddGrowthRecord(record); // put 会覆盖
+    cloudUpdateGrowth(record); // 后台推送到云端
+    return record;
+  },
+
   async deleteGrowthRecord(record_id: string): Promise<void> {
     await dbDeleteGrowthRecord(record_id);
     cloudDeleteGrowth(record_id); // 后台推送到云端

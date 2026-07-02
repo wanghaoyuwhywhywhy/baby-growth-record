@@ -333,6 +333,7 @@ export async function cloudUpdateGrowth(record: GrowthRecord): Promise<boolean> 
     };
     if (record.身高 != null) fields['身高'] = record.身高;
     if (record.体重 != null) fields['体重'] = record.体重;
+    if (record.头围 != null) fields['头围'] = record.头围;
     if (record.备注) fields['备注'] = record.备注;
     await apiPut('/api/growth', record.record_id, fields);
     return true;
