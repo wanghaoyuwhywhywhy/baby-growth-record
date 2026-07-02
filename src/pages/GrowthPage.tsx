@@ -37,10 +37,16 @@ export default function GrowthPage() {
 
   // 按日期排序（升序）
   const sorted = [...growthRecords].sort((a, b) => new Date(a.测量日期).getTime() - new Date(b.测量日期).getTime());
-  const latest = sorted[sorted.length - 1];
-  const previous = sorted[sorted.length - 2];
-  const heightDelta = latest?.身高 && previous?.身高 ? +(latest.身高 - previous.身高).toFixed(1) : 0;
-  const weightDelta = latest?.体重 && previous?.体重 ? +(latest.体重 - previous.体重).toFixed(1) : 0;
+  // 各指标取最近一次有数据的记录
+  const latestHeight = [...sorted].reverse().find(r => r.身高);
+  const previousHeight = sorted.filter(r => r.身高 && r !== latestHeight).slice(-1)[0];
+  const latestWeight = [...sorted].reverse().find(r => r.体重);
+  const previousWeight = sorted.filter(r => r.体重 && r !== latestWeight).slice(-1)[0];
+  const latestHead = [...sorted].reverse().find(r => r.头围);
+  const previousHead = sorted.filter(r => r.头围 && r !== latestHead).slice(-1)[0];
+  const heightDelta = latestHeight?.身高 && previousHeight?.身高 ? +(latestHeight.身高 - previousHeight.身高).toFixed(1) : 0;
+  const weightDelta = latestWeight?.体重 && previousWeight?.体重 ? +(latestWeight.体重 - previousWeight.体重).toFixed(1) : 0;
+  const headDelta = latestHead?.头围 && previousHead?.头围 ? +(latestHead.头围 - previousHead?.头围).toFixed(1) : null;
 
   function startEdit(record: GrowthRecord) {
     setEditingRecord(record);
@@ -100,9 +106,9 @@ export default function GrowthPage() {
 
   // 当前值显示
   const metricConfig = {
-    height: { label: '当前身高', value: latest?.身高 ?? '--', unit: 'cm', delta: heightDelta },
-    weight: { label: '当前体重', value: latest?.体重 ?? '--', unit: 'kg', delta: weightDelta },
-    head: { label: '当前头围', value: latest?.头围 ?? '--', unit: 'cm', delta: null },
+    height: { label: '当前身高', value: latestHeight?.身高 ?? '--', unit: 'cm', delta: heightDelta },
+    weight: { label: '当前体重', value: latestWeight?.体重 ?? '--', unit: 'kg', delta: weightDelta },
+    head: { label: '当前头围', value: latestHead?.头围 ?? '--', unit: 'cm', delta: headDelta },
   };
 
   return (
