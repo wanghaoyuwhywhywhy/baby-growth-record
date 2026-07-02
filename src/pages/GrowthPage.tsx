@@ -369,7 +369,7 @@ function GrowthChart({
   const [tooltip, setTooltip] = useState<{ x: number; y: number; date: string; value: number } | null>(null);
   const width = 320;
   const height = 180;
-  const padding = { top: 20, right: 20, bottom: 32, left: 36 };
+  const padding = { top: 30, right: 20, bottom: 32, left: 36 };
   const chartW = width - padding.left - padding.right;
   const chartH = height - padding.top - padding.bottom;
 
