@@ -56,6 +56,7 @@ export interface GrowthRecord {
   测量日期: string;
   身高?: number;
   体重?: number;
+  头围?: number;
   备注?: string;
   关联宝宝: string[];
 }
@@ -165,6 +166,7 @@ export const feishuAPI = {
     测量日期: string;
     身高?: number;
     体重?: number;
+    头围?: number;
     备注?: string;
     关联宝宝: string;
   }): Promise<GrowthRecord> {
@@ -173,6 +175,7 @@ export const feishuAPI = {
       测量日期: record.测量日期,
       身高: record.身高,
       体重: record.体重,
+      头围: record.头围,
       备注: record.备注,
       关联宝宝: [record.关联宝宝],
     };

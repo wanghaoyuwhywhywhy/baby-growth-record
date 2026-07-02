@@ -29,7 +29,7 @@ interface AppState {
   setFilterCategory: (category: string) => void;
 
   fetchGrowthRecords: () => Promise<void>;
-  createGrowthRecord: (data: { 测量日期: string; 身高?: number; 体重?: number; 备注?: string }) => Promise<GrowthRecord>;
+  createGrowthRecord: (data: { 测量日期: string; 身高?: number; 体重?: number; 头围?: number; 备注?: string }) => Promise<GrowthRecord>;
   deleteGrowthRecord: (record_id: string) => Promise<void>;
 
   syncFromCloud: () => Promise<void>;

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import NavHeader from '@/components/NavHeader';
+import CalendarPicker from '@/components/CalendarPicker';
 import { Plus, Trash2, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { calcAge } from '@/utils/date';
+
+type MetricType = 'height' | 'weight' | 'head';
 
 export default function GrowthPage() {
   const { currentBaby, growthRecords, fetchGrowthRecords, createGrowthRecord, deleteGrowthRecord } = useAppStore();
@@ -11,9 +14,11 @@ export default function GrowthPage() {
   const [measureDate, setMeasureDate] = useState(new Date().toISOString().split('T')[0]);
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
+  const [headCircumference, setHeadCircumference] = useState('');
   const [remark, setRemark] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [metric, setMetric] = useState<'height' | 'weight'>('height');
+  const [metric, setMetric] = useState<MetricType>('height');
+  const [calendarTarget, setCalendarTarget] = useState<'date' | null>(null);
 
   useEffect(() => {
     if (baby) fetchGrowthRecords();
@@ -28,23 +33,27 @@ export default function GrowthPage() {
     );
   }
 
-  const latest = growthRecords[growthRecords.length - 1];
-  const previous = growthRecords[growthRecords.length - 2];
-  const heightDelta = latest?.身高 && previous?.身高 ? latest.身高 - previous.身高 : 0;
+  // 按日期排序（升序）
+  const sorted = [...growthRecords].sort((a, b) => new Date(a.测量日期).getTime() - new Date(b.测量日期).getTime());
+  const latest = sorted[sorted.length - 1];
+  const previous = sorted[sorted.length - 2];
+  const heightDelta = latest?.身高 && previous?.身高 ? +(latest.身高 - previous.身高).toFixed(1) : 0;
   const weightDelta = latest?.体重 && previous?.体重 ? +(latest.体重 - previous.体重).toFixed(1) : 0;
 
   async function handleSubmit() {
-    if (!measureDate || (!height && !weight) || submitting) return;
+    if (!measureDate || (!height && !weight && !headCircumference) || submitting) return;
     setSubmitting(true);
     try {
       await createGrowthRecord({
         测量日期: measureDate,
         身高: height ? parseFloat(height) : undefined,
         体重: weight ? parseFloat(weight) : undefined,
+        头围: headCircumference ? parseFloat(headCircumference) : undefined,
         备注: remark.trim() || undefined,
       });
       setHeight('');
       setWeight('');
+      setHeadCircumference('');
       setRemark('');
       setMeasureDate(new Date().toISOString().split('T')[0]);
       setShowForm(false);
@@ -54,14 +63,19 @@ export default function GrowthPage() {
     setSubmitting(false);
   }
 
-  // 图表数据
-  const chartRecords = growthRecords.slice(-12);
-  const heights = chartRecords.map((r) => r.身高).filter(Boolean) as number[];
-  const weights = chartRecords.map((r) => r.体重).filter(Boolean) as number[];
-  const currentData = metric === 'height' ? heights : weights;
+  // 图表数据：取最近12条
+  const chartRecords = sorted.slice(-12);
+  const currentData = chartRecords.map((r) => r[metric === 'height' ? '身高' : metric === 'weight' ? '体重' : '头围']).filter(Boolean) as number[];
   const minValue = currentData.length ? Math.min(...currentData) : 0;
   const maxValue = currentData.length ? Math.max(...currentData) : 100;
   const range = maxValue - minValue || 1;
+
+  // 当前值显示
+  const metricConfig = {
+    height: { label: '当前身高', value: latest?.身高 ?? '--', unit: 'cm', delta: heightDelta },
+    weight: { label: '当前体重', value: latest?.体重 ?? '--', unit: 'kg', delta: weightDelta },
+    head: { label: '当前头围', value: latest?.头围 ?? '--', unit: 'cm', delta: null },
+  };
 
   return (
     <div className="page-container">
@@ -80,81 +94,53 @@ export default function GrowthPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-cream-dark/40 rounded-card p-3.5">
-              <p className="text-xs text-muted mb-1">当前身高</p>
-              <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-outfit font-bold text-ink">{latest?.身高 ?? '--'}</span>
-                <span className="text-xs text-muted">cm</span>
-              </div>
-              {heightDelta > 0 && (
-                <p className="text-xs text-mint-dark mt-1 flex items-center gap-0.5">
-                  <TrendingUp size={12} /> +{heightDelta}cm
-                </p>
-              )}
-            </div>
-            <div className="bg-cream-dark/40 rounded-card p-3.5">
-              <p className="text-xs text-muted mb-1">当前体重</p>
-              <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-outfit font-bold text-ink">{latest?.体重 ?? '--'}</span>
-                <span className="text-xs text-muted">kg</span>
-              </div>
-              {weightDelta > 0 && (
-                <p className="text-xs text-mint-dark mt-1 flex items-center gap-0.5">
-                  <TrendingUp size={12} /> +{weightDelta}kg
-                </p>
-              )}
-              {weightDelta < 0 && (
-                <p className="text-xs text-coral mt-1 flex items-center gap-0.5">
-                  <TrendingDown size={12} /> {weightDelta}kg
-                </p>
-              )}
-            </div>
+          <div className="grid grid-cols-3 gap-3">
+            {(['height', 'weight', 'head'] as MetricType[]).map((m) => {
+              const cfg = metricConfig[m];
+              return (
+                <button key={m} onClick={() => setMetric(m)}
+                  className={`bg-cream-dark/40 rounded-card p-3.5 text-left transition-all ${metric === m ? 'ring-2 ring-coral/30' : ''}`}>
+                  <p className="text-xs text-muted mb-1">{cfg.label}</p>
+                  <div className="flex items-baseline gap-0.5">
+                    <span className="text-xl font-outfit font-bold text-ink">{cfg.value}</span>
+                    <span className="text-[10px] text-muted">{cfg.unit}</span>
+                  </div>
+                  {cfg.delta != null && (
+                    <p className={`text-xs mt-1 flex items-center gap-0.5 ${cfg.delta > 0 ? 'text-mint-dark' : 'text-coral'}`}>
+                      {cfg.delta > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                      {cfg.delta > 0 ? '+' : ''}{cfg.delta}{m === 'weight' ? 'kg' : 'cm'}
+                    </p>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* 图表 */}
-        {chartRecords.length > 1 && (
+        {chartRecords.filter(r => r[metric === 'height' ? '身高' : metric === 'weight' ? '体重' : '头围']).length >= 2 && (
           <div className="card-shadow p-5 mb-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-outfit font-bold text-ink">成长曲线</h3>
-              <div className="flex bg-cream-dark/60 rounded-full p-0.5">
-                <button
-                  onClick={() => setMetric('height')}
-                  className={`px-3 py-1 text-xs rounded-full transition-all ${
-                    metric === 'height' ? 'bg-cream-light text-ink shadow-soft' : 'text-muted'
-                  }`}
-                >
-                  身高
-                </button>
-                <button
-                  onClick={() => setMetric('weight')}
-                  className={`px-3 py-1 text-xs rounded-full transition-all ${
-                    metric === 'weight' ? 'bg-cream-light text-ink shadow-soft' : 'text-muted'
-                  }`}
-                >
-                  体重
-                </button>
-              </div>
-            </div>
+            <h3 className="text-sm font-outfit font-bold text-ink mb-4">
+              成长曲线 · {metricConfig[metric].label.replace('当前', '')}
+            </h3>
 
             <GrowthChart
               data={chartRecords.map((r) => ({
                 date: r.测量日期,
-                value: metric === 'height' ? r.身高 : r.体重,
+                value: metric === 'height' ? r.身高 : metric === 'weight' ? r.体重 : r.头围,
               }))}
               min={minValue}
               max={maxValue}
               range={range}
-              color={metric === 'height' ? '#6FD3B5' : '#7BCEFF'}
-              unit={metric === 'height' ? 'cm' : 'kg'}
+              color={metric === 'height' ? '#6FD3B5' : metric === 'weight' ? '#7BCEFF' : '#FF9F7F'}
+              unit={metricConfig[metric].unit}
             />
           </div>
         )}
 
         {/* 添加按钮 */}
         <button
-          onClick={() => setShowForm(true)}
+          onClick={() => setShowForm(!showForm)}
           className="btn-primary w-full mb-5 flex items-center justify-center gap-2"
         >
           <Plus size={18} strokeWidth={2.5} />
@@ -168,17 +154,16 @@ export default function GrowthPage() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-muted mb-1.5">测量日期</label>
-                <input
-                  type="date"
-                  value={measureDate}
-                  onChange={(e) => setMeasureDate(e.target.value)}
-                  max={new Date().toISOString().split('T')[0]}
-                  className="input-field py-2.5"
-                />
+                <button type="button"
+                  onClick={() => setCalendarTarget('date')}
+                  className="w-full py-2.5 px-3 rounded-xl bg-cream-dark text-sm text-ink outline-none focus:ring-2 focus:ring-coral/30 text-left flex justify-between items-center">
+                  <span>{measureDate}</span>
+                  <span className="text-xs text-muted">选择</span>
+                </button>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs text-muted mb-1.5">身高 (cm)</label>
+                  <label className="block text-xs text-muted mb-1.5">身高(cm)</label>
                   <input
                     type="number"
                     value={height}
@@ -190,12 +175,24 @@ export default function GrowthPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-muted mb-1.5">体重 (kg)</label>
+                  <label className="block text-xs text-muted mb-1.5">体重(kg)</label>
                   <input
                     type="number"
                     value={weight}
                     onChange={(e) => setWeight(e.target.value)}
                     placeholder="如 9.5"
+                    step="0.1"
+                    min="0"
+                    className="input-field py-2.5"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted mb-1.5">头围(cm)</label>
+                  <input
+                    type="number"
+                    value={headCircumference}
+                    onChange={(e) => setHeadCircumference(e.target.value)}
+                    placeholder="如 44"
                     step="0.1"
                     min="0"
                     className="input-field py-2.5"
@@ -222,7 +219,7 @@ export default function GrowthPage() {
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={!measureDate || (!height && !weight) || submitting}
+                  disabled={!measureDate || (!height && !weight && !headCircumference) || submitting}
                   className="flex-1 btn-primary py-2.5 text-sm"
                 >
                   {submitting ? '保存中...' : '保存'}
@@ -244,13 +241,13 @@ export default function GrowthPage() {
             </div>
           ) : (
             <div className="divide-y divide-rule/30">
-              {[...growthRecords].reverse().map((r) => (
+              {[...sorted].reverse().map((r) => (
                 <div key={r.record_id} className="px-4 py-3 flex items-center gap-3 group">
                   <div className="w-10 h-10 rounded-full bg-mint/15 flex items-center justify-center text-sm font-bold text-mint-dark flex-shrink-0">
                     {new Date(r.测量日期).getMonth() + 1}/{new Date(r.测量日期).getDate()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                       {r.身高 && (
                         <span className="text-sm text-ink">
                           <span className="text-muted text-xs">身高</span> {r.身高}cm
@@ -259,6 +256,11 @@ export default function GrowthPage() {
                       {r.体重 && (
                         <span className="text-sm text-ink">
                           <span className="text-muted text-xs">体重</span> {r.体重}kg
+                        </span>
+                      )}
+                      {r.头围 && (
+                        <span className="text-sm text-ink">
+                          <span className="text-muted text-xs">头围</span> {r.头围}cm
                         </span>
                       )}
                     </div>
@@ -277,6 +279,17 @@ export default function GrowthPage() {
           )}
         </div>
       </div>
+
+      {/* 日历选择器 */}
+      {calendarTarget && (
+        <CalendarPicker
+          initialDate={measureDate}
+          title="选择测量日期"
+          maxDate={new Date().toISOString().split('T')[0]}
+          onConfirm={(date) => { setMeasureDate(date); setCalendarTarget(null); }}
+          onClose={() => setCalendarTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -296,9 +309,9 @@ function GrowthChart({
   color: string;
   unit: string;
 }) {
-  const width = 300;
-  const height = 160;
-  const padding = { top: 20, right: 16, bottom: 28, left: 32 };
+  const width = 320;
+  const height = 180;
+  const padding = { top: 20, right: 20, bottom: 32, left: 36 };
   const chartW = width - padding.left - padding.right;
   const chartH = height - padding.top - padding.bottom;
 
@@ -313,6 +326,12 @@ function GrowthChart({
 
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
   const areaD = `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${padding.top + chartH} L ${points[0].x.toFixed(1)} ${padding.top + chartH} Z`;
+
+  // X轴日期格式化函数
+  function formatXLabel(dateStr: string): string {
+    const d = new Date(dateStr);
+    return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
+  }
 
   return (
     <div className="w-full overflow-x-auto">
@@ -357,13 +376,12 @@ function GrowthChart({
           </g>
         ))}
 
-        {/* X轴日期 */}
+        {/* X轴日期（带年份） */}
         {points.map((p, i) => {
-          if (points.length > 6 && i !== 0 && i !== points.length - 1 && i !== Math.floor(points.length / 2)) return null;
-          const d = new Date(p.date);
+          if (points.length > 8 && i !== 0 && i !== points.length - 1 && i !== Math.floor(points.length / 2) && i !== Math.floor(points.length * 0.75)) return null;
           return (
             <text key={i} x={p.x} y={height - 8} fontSize="8" fill="#8B7D7A" textAnchor="middle">
-              {d.getMonth() + 1}/{d.getDate()}
+              {formatXLabel(p.date)}
             </text>
           );
         })}
