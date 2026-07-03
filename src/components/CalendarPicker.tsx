@@ -202,18 +202,19 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
               }
 
               return (
-                <button key={i} disabled={afterMax}
-                  onClick={() => !afterMax && handleDateClick(c.dateStr)}
-                  className={`relative w-8 h-8 mx-auto flex items-center justify-center text-xs transition-all overflow-visible
-                    ${afterMax ? 'text-muted/30 cursor-default' : !currentMonth ? 'text-muted/50 hover:bg-coral/10 active:scale-95' : 'text-ink hover:bg-coral/10 active:scale-95'}
-                    ${isEndpoint ? 'bg-coral text-white hover:bg-coral-dark font-semibold rounded-full z-10' : ''}
-                    ${isInRange ? 'text-coral font-medium' : ''}
-                    ${!isEndpoint && !afterMax ? 'rounded-full' : ''}
-                    ${rangeBarClass}`}
-                >
-                  {c.day}
-                  {todayMark && !isEndpoint && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-coral z-10" />}
-                </button>
+                <div key={i} className={`relative h-8 flex items-center justify-center ${rangeBarClass}`}>
+                  <button disabled={afterMax}
+                    onClick={() => !afterMax && handleDateClick(c.dateStr)}
+                    className={`relative w-8 h-8 flex items-center justify-center text-xs transition-all z-10
+                      ${afterMax ? 'text-muted/30 cursor-default' : !currentMonth ? 'text-muted/50 hover:bg-coral/10 active:scale-95' : 'text-ink hover:bg-coral/10 active:scale-95'}
+                      ${isEndpoint ? 'bg-coral text-white hover:bg-coral-dark font-semibold rounded-full' : ''}
+                      ${isInRange ? 'text-coral font-medium rounded-full' : ''}
+                      ${!isEndpoint && !isInRange && !afterMax ? 'rounded-full' : ''}`}
+                  >
+                    {c.day}
+                    {todayMark && !isEndpoint && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-coral" />}
+                  </button>
+                </div>
               );
             })}
           </div>
