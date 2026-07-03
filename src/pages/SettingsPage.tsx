@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff } from 'lucide-react';
+import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock } from 'lucide-react';
 import { clearAuthInfo, getAuthRole, getAuthAccount, isAdmin } from '@/lib/auth';
 import { cloudLogAccess } from '@/lib/cloud';
-import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, type AccountRecord } from '@/lib/cloud';
+import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, cloudApproveAccount, cloudRejectAccount, type AccountRecord } from '@/lib/cloud';
 
 export default function SettingsPage() {
   const role = getAuthRole();
@@ -97,6 +97,18 @@ export default function SettingsPage() {
     loadAccounts();
   }
 
+  // 审核通过
+  async function handleApprove(acc: AccountRecord, approveRole?: string) {
+    await cloudApproveAccount(acc.record_id, approveRole || 'edit');
+    loadAccounts();
+  }
+
+  // 审核拒绝
+  async function handleReject(acc: AccountRecord) {
+    await cloudRejectAccount(acc.record_id);
+    loadAccounts();
+  }
+
   // 开始编辑
   function startEdit(account: AccountRecord) {
     setEditingAccount(account);
@@ -124,6 +136,21 @@ export default function SettingsPage() {
     if (r === 'edit') return 'bg-amber-100 text-amber-700';
     return 'bg-sky-100 text-sky-700';
   };
+
+  const statusLabel = (s: string) => {
+    if (s === 'pending') return '待审核';
+    if (s === 'rejected') return '已拒绝';
+    return '已通过';
+  };
+
+  const statusColor = (s: string) => {
+    if (s === 'pending') return 'bg-amber-100 text-amber-700';
+    if (s === 'rejected') return 'bg-red-100 text-red-700';
+    return 'bg-green-100 text-green-700';
+  };
+
+  const pendingAccounts = accounts.filter(a => a.状态 === 'pending');
+  const approvedAccounts = accounts.filter(a => a.状态 !== 'pending');
 
   return (
     <div className="page-container">
@@ -167,15 +194,60 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* 账号列表 */}
+            {/* 待审核账号 */}
+            {pendingAccounts.length > 0 && (
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock size={14} className="text-amber-500" />
+                  <span className="text-xs font-medium text-amber-700">待审核 ({pendingAccounts.length})</span>
+                </div>
+                <div className="space-y-2">
+                  {pendingAccounts.map(acc => (
+                    <div key={acc.record_id} className="flex items-center justify-between bg-amber-50/50 rounded-xl px-3 py-2.5 border border-amber-100">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-sm font-medium text-ink">{acc.账号名}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor(acc.状态)}`}>
+                          {statusLabel(acc.状态)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          defaultValue="edit"
+                          onChange={e => handleApprove(acc, e.target.value)}
+                          className="text-xs bg-green-50 border border-green-200 text-green-700 rounded-lg px-2 py-1 outline-none cursor-pointer"
+                        >
+                          <option value="edit">通过(编辑)</option>
+                          <option value="view">通过(查看)</option>
+                          <option value="admin">通过(管理员)</option>
+                        </select>
+                        <button
+                          onClick={() => handleReject(acc)}
+                          className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 transition-colors"
+                          title="拒绝"
+                        >
+                          <XCircle size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 已通过/已拒绝账号列表 */}
             <div className="space-y-2 mt-2">
-              {accounts.map(acc => (
+              {approvedAccounts.map(acc => (
                 <div key={acc.record_id} className="flex items-center justify-between bg-cream-light/50 rounded-xl px-3 py-2.5">
                   <div className="flex items-center gap-2.5">
                     <span className="text-sm font-medium text-ink">{acc.账号名}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${roleColor(acc.权限)}`}>
                       {roleLabel(acc.权限)}
                     </span>
+                    {acc.状态 === 'rejected' && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor(acc.状态)}`}>
+                        {statusLabel(acc.状态)}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button

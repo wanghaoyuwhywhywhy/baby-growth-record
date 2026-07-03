@@ -501,6 +501,7 @@ export interface AccountRecord {
   record_id: string;
   账号名: string;
   权限: 'view' | 'edit' | 'admin';
+  状态: 'pending' | 'approved' | 'rejected';
   hasPassword: boolean;
   最后修改时间: number | null;
 }
@@ -513,6 +514,7 @@ export async function cloudGetAccounts(): Promise<AccountRecord[]> {
       record_id: item.record_id,
       账号名: item.账号名 || '',
       权限: item.权限 || 'view',
+      状态: item.状态 || 'approved',
       hasPassword: !!item.hasPassword,
       最后修改时间: item.最后修改时间 || null,
     }));
@@ -565,6 +567,54 @@ export async function cloudDeleteAccount(record_id: string): Promise<boolean> {
     return data.code === 0;
   } catch (e) {
     console.warn('云端删除账号失败:', e);
+    return false;
+  }
+}
+
+// 自助注册
+export async function cloudRegister(account: string, password: string): Promise<{ ok: boolean; error?: string; message?: string }> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'register', account, password }),
+    });
+    const data = await resp.json();
+    return data;
+  } catch (e) {
+    console.warn('注册失败:', e);
+    return { ok: false, error: '网络错误，请稍后重试' };
+  }
+}
+
+// 审核通过
+export async function cloudApproveAccount(record_id: string, role?: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/accounts`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'approve', record_id, role: role || 'edit' }),
+    });
+    const data = await resp.json();
+    return data.code === 0;
+  } catch (e) {
+    console.warn('审核通过失败:', e);
+    return false;
+  }
+}
+
+// 审核拒绝
+export async function cloudRejectAccount(record_id: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/accounts`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'reject', record_id }),
+    });
+    const data = await resp.json();
+    return data.code === 0;
+  } catch (e) {
+    console.warn('审核拒绝失败:', e);
     return false;
   }
 }

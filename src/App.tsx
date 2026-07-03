@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { isAuthenticated, clearAuthInfo, type AuthRole, isEditMode } from '@/lib/auth';
+import { isAuthenticated, clearAuthInfo, verifyAuth, type AuthRole, isEditMode } from '@/lib/auth';
 import LoginPage from '@/pages/LoginPage';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
@@ -85,31 +85,22 @@ export default function App() {
     setupAutoUpdate();
   }, []);
 
-  // 验证当前账号是否仍存在于账号表中
+  // 验证当前账号是否仍存在且状态为approved
   const verifyAccount = useCallback(async () => {
     const token = localStorage.getItem('auth_token');
-    const role = localStorage.getItem('auth_role');
-    const account = localStorage.getItem('auth_account');
-    console.log('[verifyAccount] 本地token信息:', { token: token?.slice(0, 20) + '...', role, account });
     if (!token) {
       setVerifying(false);
       return;
     }
     try {
-      const resp = await fetch('https://api.tongxi.xyz/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'verify', token }),
-      });
-      const data = await resp.json();
-      console.log('[verifyAccount] API返回:', data);
-      // verify明确返回ok:false，或HTTP状态非200，则登出
-      if (data.ok === false || !resp.ok) {
+      const result = await verifyAuth();
+      console.log('[verifyAccount] API返回:', result);
+      if (result.ok) {
+        setAuthed(true);
+      } else {
         console.log('[verifyAccount] 验证失败，执行登出');
         clearAuthInfo();
         setAuthed(false);
-      } else {
-        setAuthed(true);
       }
     } catch (e) {
       console.log('[verifyAccount] 请求异常:', e);

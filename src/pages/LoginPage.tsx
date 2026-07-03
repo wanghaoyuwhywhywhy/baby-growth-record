@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { login, type AuthRole } from '@/lib/auth';
+import { login, register, type AuthRole } from '@/lib/auth';
 import { User, Loader2, Eye, EyeOff } from 'lucide-react';
 import { cloudLogAccess } from '@/lib/cloud';
 
@@ -14,12 +14,26 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
   const [loading, setLoading] = useState(false);
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [registerSuccess, setRegisterSuccess] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!account.trim()) return;
     setLoading(true);
     setError('');
+
+    if (mode === 'register') {
+      const result = await register(account.trim(), password);
+      setLoading(false);
+      if (result.ok) {
+        setRegisterSuccess(true);
+      } else {
+        setError(result.error || '注册失败');
+      }
+      return;
+    }
+
     const result = await login(account.trim(), password || undefined);
     setLoading(false);
     if (result.ok) {
@@ -30,6 +44,32 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     } else {
       setError(result.error || '登录失败');
     }
+  }
+
+  function switchMode(newMode: 'login' | 'register') {
+    setMode(newMode);
+    setError('');
+    setRegisterSuccess(false);
+  }
+
+  if (registerSuccess) {
+    return (
+      <div className="bg-gradient-to-br from-cream via-cream-light to-cream-dark flex items-center justify-center px-5" style={{ minHeight: '100dvh' }}>
+        <div className="w-full max-w-sm text-center">
+          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-400 to-green-500 flex items-center justify-center mx-auto mb-4 shadow-float">
+            <User size={32} className="text-white" />
+          </div>
+          <h2 className="text-xl font-outfit font-bold text-ink mb-2">注册成功</h2>
+          <p className="text-sm text-muted mb-6">请等待管理员审核通过后即可登录使用</p>
+          <button
+            onClick={() => { setRegisterSuccess(false); setMode('login'); }}
+            className="btn-primary w-full py-3 text-base"
+          >
+            返回登录
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -92,10 +132,28 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
             {loading ? (
               <Loader2 size={18} className="animate-spin" />
             ) : (
-              '进入'
+              mode === 'login' ? '进入' : '注册'
             )}
           </button>
         </form>
+
+        <div className="mt-4 text-center">
+          {mode === 'login' ? (
+            <p className="text-sm text-muted">
+              还没有账号？
+              <button onClick={() => switchMode('register')} className="text-coral font-medium ml-1">
+                注册
+              </button>
+            </p>
+          ) : (
+            <p className="text-sm text-muted">
+              已有账号？
+              <button onClick={() => switchMode('login')} className="text-coral font-medium ml-1">
+                登录
+              </button>
+            </p>
+          )}
+        </div>
       </div>
 
       {showSetupModal && (

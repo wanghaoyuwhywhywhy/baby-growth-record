@@ -2,6 +2,7 @@ const WORKER_URL = 'https://api.tongxi.xyz';
 const AUTH_TOKEN_KEY = 'auth_token';
 const AUTH_ROLE_KEY = 'auth_role'; // 'edit' | 'view' | 'admin'
 const AUTH_ACCOUNT_KEY = 'auth_account'; // 账号名
+const AUTH_BABIES_KEY = 'auth_babies'; // 关联宝宝列表
 
 export type AuthRole = 'edit' | 'view' | 'admin';
 
@@ -47,6 +48,22 @@ export function clearAuthInfo(): void {
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(AUTH_ROLE_KEY);
   localStorage.removeItem(AUTH_ACCOUNT_KEY);
+  localStorage.removeItem(AUTH_BABIES_KEY);
+}
+
+// 获取关联宝宝列表
+export function getAuthBabies(): any[] {
+  try {
+    const raw = localStorage.getItem(AUTH_BABIES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+// 保存认证关联宝宝
+export function setAuthBabies(babies: any[]): void {
+  localStorage.setItem(AUTH_BABIES_KEY, JSON.stringify(babies));
 }
 
 // 是否已认证
@@ -55,7 +72,7 @@ export function isAuthenticated(): boolean {
 }
 
 // 账号登录（account 必填，password 必填）
-export async function login(account: string, password?: string): Promise<{ ok: boolean; token?: string; role?: AuthRole; accountName?: string; error?: string; needsSetup?: boolean; accountNotFound?: boolean }> {
+export async function login(account: string, password?: string): Promise<{ ok: boolean; token?: string; role?: AuthRole; accountName?: string; error?: string; code?: string; needsSetup?: boolean; accountNotFound?: boolean; status?: string; babies?: any[] }> {
   try {
     const resp = await fetch(`${WORKER_URL}/api/auth`, {
       method: 'POST',
@@ -67,7 +84,16 @@ export async function login(account: string, password?: string): Promise<{ ok: b
       const role = data.role || 'view';
       const accountName = data.accountName || account;
       setAuthInfo(data.token, role, accountName);
-      return { ok: true, token: data.token, role, accountName };
+      if (data.babies) setAuthBabies(data.babies);
+      return { ok: true, token: data.token, role, accountName, status: data.status, babies: data.babies };
+    }
+    // 账号待审核
+    if (data.code === 'pending') {
+      return { ok: false, error: data.error || '账号待审核', code: 'pending' };
+    }
+    // 账号被拒绝
+    if (data.code === 'rejected') {
+      return { ok: false, error: data.error || '账号已被拒绝', code: 'rejected' };
     }
     // 账号不存在时自动登出
     if (data.code === 'account_not_found' || (data.error && data.error.includes('账号不存在'))) {
@@ -81,5 +107,43 @@ export async function login(account: string, password?: string): Promise<{ ok: b
     return { ok: false, error: data.error || '登录失败' };
   } catch (e) {
     return { ok: false, error: '网络错误，请重试' };
+  }
+}
+
+// 自助注册
+export async function register(account: string, password: string): Promise<{ ok: boolean; error?: string; message?: string }> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'register', account, password }),
+    });
+    const data = await resp.json();
+    return data;
+  } catch (e) {
+    return { ok: false, error: '网络错误，请重试' };
+  }
+}
+
+// 验证 token 是否仍有效（含状态检查）
+export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; accountName?: string; status?: string; babies?: any[] }> {
+  const token = getAuthToken();
+  if (!token) return { ok: false };
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'verify', token }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      setAuthInfo(token, data.role, data.accountName);
+      if (data.babies) setAuthBabies(data.babies);
+      return { ok: true, role: data.role, accountName: data.accountName, status: data.status, babies: data.babies };
+    }
+    clearAuthInfo();
+    return { ok: false };
+  } catch (e) {
+    return { ok: false };
   }
 }

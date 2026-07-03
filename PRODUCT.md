@@ -1,6 +1,6 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-03 18:28 (北京时间)
+> 最后更新：2026-07-04 02:35 (北京时间)
 
 ---
 
@@ -56,8 +56,8 @@
 │  │  └──────────┘  └──────────┘          │   │
 │  │  ┌──────────────────────────┐        │   │
 │  │  │  API 代理 & 数据转换      │        │   │
-│  │  │  /api/auth   (认证+verify)│        │   │
-│  │  │  /api/babies              │        │   │
+│  │  │  /api/auth   (认证+注册+verify)│   │   │
+  │  │  /api/babies              │        │   │
 │  │  │  /api/records             │        │   │
 │  │  │  /api/growth              │        │   │
 │  │  │  /api/upload (Drive)      │        │   │
@@ -175,7 +175,15 @@
 | 账号名 | 文本 | 登录账号名（唯一） |
 | 加密密码 | 文本 | AES-256-GCM 加密后的密码（不可明文） |
 | 权限 | 单选 | view / edit / admin |
+| 状态 | 单选 | pending / approved / rejected |
 | 最后修改时间 | 日期 | 最后修改时间戳 |
+
+**账号宝宝关联表 (AccountBaby)** — Worker 自动创建
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| 账号名 | 文本 | 关联的账号名 |
+| 宝宝ID | 文本 | 关联的宝宝 record_id |
+| 角色 | 单选 | owner / editor / viewer |
 
 **疫苗接种表 (Vaccine)** — Worker 自动创建
 | 字段 | 类型 | 说明 |
@@ -194,9 +202,12 @@
 
 ## 三、功能模块
 
-### 3.1 账号登录
+### 3.1 账号登录与注册
 
-- **账号表登录**：用户输入账号名+密码，Worker 查飞书账号表校验
+- **自助注册**：登录页"注册"按钮，填写账号名+密码，提交后状态为pending，需管理员审核
+- **管理员审核**：设置页账号管理区域显示待审核账号，管理员可选择通过（并分配权限）或拒绝
+- **账号表登录**：用户输入账号名+密码，Worker 查飞书账号表校验（pending/rejected状态无法登录）
+- **数据隔离**：每个账号只能访问其关联的宝宝数据（通过账号宝宝关联表过滤）
 - **三级权限区分**：
 
 | 功能 | view（浏览） | edit（编辑） | admin（管理员） |
@@ -457,6 +468,7 @@
 | 登录日志表 | Worker 自动创建 |
 | 疫苗接种表 | Worker 自动创建 |
 | 账号表 | Worker 自动创建 |
+| 账号宝宝关联表 | Worker 自动创建 |
 
 ---
 
@@ -704,6 +716,27 @@ baby-growth-record/
 - **权限控制修复**：身高体重页添加/编辑/删除按钮对浏览权限隐藏
 - **账号校验加强**：页面刷新和路由切换时均校验账号是否存在，不存在自动登出
 - **产品文档更新**：三种权限功能点对照表
+
+### v1.14 多租户架构 & 数据隔离（2026-07-04）
+- **多租户数据隔离**：每个账号只能访问其关联的宝宝数据
+  - Worker 新增"账号宝宝关联"表（账号名/宝宝ID/角色：owner/editor/viewer）
+  - Worker 所有数据 API（babies/records/growth/vaccines）GET 请求按关联宝宝ID过滤
+  - Worker handleBabies POST 自动关联新宝宝到创建者（owner角色）
+- **自助注册**：登录页新增"注册"入口，用户填写账号名+密码，提交后状态为pending
+  - 注册成功页面提示"等待管理员审核"
+  - Worker /api/auth 新增 action=register，创建状态=pending 的账号
+- **管理员审核**：设置页账号管理区域新增待审核账号列表
+  - 管理员可选择"通过（编辑/查看/管理员权限）"或"拒绝"
+  - Worker /api/accounts PUT 新增 action=approve/reject
+- **账号状态字段**：账号表新增"状态"字段（pending/approved/rejected）
+  - 登录时检查状态：pending 提示"待审核"，rejected 提示"已被拒绝"
+  - verify 时检查状态：非 approved 的账号自动登出
+  - 管理员创建的账号默认 approved，自助注册默认 pending
+- **数据迁移**：/api/migrate 新增步骤将现有账号设为 approved 并关联到所有现有宝宝
+- **前端 auth.ts**：新增 register()、verifyAuth() 函数，login 返回 babies 列表
+- **前端 cloud.ts**：新增 cloudRegister()、cloudApproveAccount()、cloudRejectAccount() API
+- **登录页**：支持登录/注册模式切换，注册成功显示等待审核提示
+- **设置页**：待审核账号高亮显示（黄色边框），支持一键通过/拒绝
 
 ---
 

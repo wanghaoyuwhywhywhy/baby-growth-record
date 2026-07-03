@@ -138,24 +138,14 @@ async function verifyAccountExists(accountName, env) {
   if (validAccountsCache.expires > now && validAccountsCache.accounts.has(accountName)) {
     return true;
   }
-  // 缓存过期或未命中，查询飞书账号表
   try {
-    const feishuToken = await getTenantToken(env);
-    const tableId = await ensureAccountTable(feishuToken, env);
-    const appToken = env.FEISHU_BASE_TOKEN;
-    const filterStr = `CurrentValue.[账号名]="${accountName}"`;
-    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
-    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-    const listData = await listResp.json();
-    const exists = listData.code === 0 && listData.data?.items && listData.data.items.length > 0;
-    if (exists) {
-      // 刷新缓存：查询所有账号名
-      await refreshValidAccountsCache(env);
-    }
-    return exists;
+    const accountInfo = await getAccountInfo(accountName, env);
+    if (!accountInfo) return false;
+    if (accountInfo.status !== 'approved') return false;
+    await refreshValidAccountsCache(env);
+    return true;
   } catch (e) {
     console.error('[verifyAccountExists] 查询异常:', e.message);
-    // 查询异常时放行，避免飞书API故障导致所有用户被登出
     return true;
   }
 }
@@ -228,6 +218,7 @@ async function ensureAccountTable(token, env) {
     { field_name: '账号名', type: 1 },
     { field_name: '加密密码', type: 1 },
     { field_name: '权限', type: 3, property: { options: [{ name: 'view' }, { name: 'edit' }, { name: 'admin' }] } },
+    { field_name: '状态', type: 3, property: { options: [{ name: 'pending' }, { name: 'approved' }, { name: 'rejected' }] } },
     { field_name: '最后修改时间', type: 5 },
   ];
   for (const field of accountFields) {
@@ -268,11 +259,192 @@ async function ensureDefaultAdmin(token, env, tableId) {
         '账号名': 'admin',
         '加密密码': '',
         '权限': 'admin',
+        '状态': 'approved',
         '最后修改时间': Date.now(),
       },
     }),
   });
   adminExistsCache = true;
+}
+
+// 查找或创建"账号宝宝关联"表，返回表 ID
+async function ensureAccountBabyTable(token, env) {
+  if (accountBabyTableIdCache) return accountBabyTableIdCache;
+
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const listData = await listResp.json();
+  const tables = listData.data?.items || [];
+  const existing = tables.find(t => t.name === '账号宝宝关联');
+  if (existing) {
+    accountBabyTableIdCache = existing.table_id;
+    return accountBabyTableIdCache;
+  }
+
+  const createResp = await fetch(listUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: { name: '账号宝宝关联' } }),
+  });
+  const createData = await createResp.json();
+  if (createData.code !== 0) {
+    throw new Error(`创建账号宝宝关联表失败: ${createData.msg}`);
+  }
+
+  const tableId = createData.data?.table_id;
+  if (!tableId) {
+    throw new Error('创建账号宝宝关联表成功但未获取到 table_id');
+  }
+
+  const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  const abFields = [
+    { field_name: '账号名', type: 1 },
+    { field_name: '宝宝ID', type: 1 },
+    { field_name: '角色', type: 3, property: { options: [{ name: 'owner' }, { name: 'editor' }, { name: 'viewer' }] } },
+  ];
+  for (const field of abFields) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(field),
+    });
+  }
+
+  accountBabyTableIdCache = tableId;
+  return tableId;
+}
+
+// 获取账号关联的宝宝ID列表（带缓存，5分钟TTL）
+async function getAccountBabyIds(accountName, env) {
+  const now = Date.now();
+  if (accountBabyCache.expires > now && accountBabyCache.data.has(accountName)) {
+    return accountBabyCache.data.get(accountName);
+  }
+
+  try {
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountBabyTable(feishuToken, env);
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const filterStr = `CurrentValue.[账号名]="${accountName}"`;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
+
+    const babyIds = [];
+    if (listData.code === 0 && listData.data?.items) {
+      for (const item of listData.data.items) {
+        const babyId = item.fields?.['宝宝ID'];
+        if (babyId) babyIds.push(babyId);
+      }
+    }
+
+    accountBabyCache.data.set(accountName, babyIds);
+    accountBabyCache.expires = now + 5 * 60 * 1000;
+    return babyIds;
+  } catch (e) {
+    console.error('[getAccountBabyIds] Error:', e.message);
+    return [];
+  }
+}
+
+// 将账号关联到宝宝
+async function linkAccountToBaby(accountName, babyId, role, env) {
+  const feishuToken = await getTenantToken(env);
+  const tableId = await ensureAccountBabyTable(feishuToken, env);
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+
+  // 检查是否已存在关联
+  const filterStr = `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${babyId}"`;
+  const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+  const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+  const checkData = await checkResp.json();
+  if (checkData.code === 0 && checkData.data?.items?.length > 0) {
+    return; // 已存在，跳过
+  }
+
+  await fetch(recordUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        '账号名': accountName,
+        '宝宝ID': babyId,
+        '角色': role || 'owner',
+      },
+    }),
+  });
+
+  // 清除缓存
+  accountBabyCache = { data: new Map(), expires: 0 };
+}
+
+// 从关联字段提取 record_ids
+function extractLinkedIds(field) {
+  if (!field) return [];
+  if (Array.isArray(field)) {
+    return field.flatMap(item => {
+      if (typeof item === 'string') return [item];
+      if (item.record_ids) return item.record_ids;
+      if (item.record_id) return [item.record_id];
+      return [];
+    });
+  }
+  if (typeof field === 'string') return [field];
+  if (field.record_ids) return field.record_ids;
+  if (field.record_id) return [field.record_id];
+  return [];
+}
+
+// 获取账号信息（含状态）
+async function getAccountInfo(accountName, env) {
+  try {
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountTable(feishuToken, env);
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const filterStr = `CurrentValue.[账号名]="${accountName}"`;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
+    if (listData.code !== 0 || !listData.data?.items || listData.data.items.length === 0) {
+      return null;
+    }
+    const fields = listData.data.items[0].fields || {};
+    return {
+      record_id: listData.data.items[0].record_id,
+      accountName: fields['账号名'],
+      role: fields['权限'] || 'view',
+      status: fields['状态'] || 'approved',
+    };
+  } catch (e) {
+    console.error('[getAccountInfo] Error:', e.message);
+    return null;
+  }
+}
+
+// 根据宝宝ID列表获取宝宝详细信息
+async function getBabiesByIds(babyIds, env) {
+  if (!babyIds || babyIds.length === 0) return [];
+  try {
+    const feishuToken = await getTenantToken(env);
+    const tableId = env.FEISHU_TABLE_BABY;
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const babies = [];
+    for (const babyId of babyIds) {
+      const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${babyId}`;
+      const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+      const data = await resp.json();
+      if (data.code === 0 && data.data?.record) {
+        babies.push(data.data.record);
+      }
+    }
+    return babies;
+  } catch (e) {
+    console.error('[getBabiesByIds] Error:', e.message);
+    return [];
+  }
 }
 
 // 处理认证请求（账号登录 + 旧密码登录兼容）
@@ -281,7 +453,49 @@ async function handleAuth(request, env) {
 
   const body = await request.json();
 
-  // verify action: 验证token是否仍有效（账号是否仍存在）
+  // register action: 自助注册（状态pending，需管理员审核）
+  if (body.action === 'register') {
+    const account = body.account;
+    const password = body.password;
+    if (!account || !account.trim()) return { error: '请输入账号名' };
+    if (!password) return { error: '请输入密码' };
+    if (account.trim().length < 2) return { error: '账号名至少2个字符' };
+    if (password.length < 4) return { error: '密码至少4个字符' };
+
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountTable(feishuToken, env);
+    const appToken = env.FEISHU_BASE_TOKEN;
+
+    // 检查账号名唯一性
+    const filterStr = `CurrentValue.[账号名]="${account.trim()}"`;
+    const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const checkData = await checkResp.json();
+    if (checkData.code === 0 && checkData.data?.items?.length > 0) {
+      return { error: '账号名已存在', code: 'account_exists' };
+    }
+
+    const encryptedPassword = await encryptPassword(password, env);
+    const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+    const resp = await fetch(recordUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          '账号名': account.trim(),
+          '加密密码': encryptedPassword,
+          '权限': 'edit',
+          '状态': 'pending',
+          '最后修改时间': Date.now(),
+        },
+      }),
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { error: `注册失败: ${data.msg}` };
+    return { ok: true, message: '注册成功，请等待管理员审核' };
+  }
+
+  // verify action: 验证token是否仍有效
   if (body.action === 'verify' && body.token) {
     const auth = parseAuthToken(body.token);
     if (!auth.valid) {
@@ -290,25 +504,30 @@ async function handleAuth(request, env) {
     if (!auth.accountName) {
       return { ok: false, error: 'token格式无效，请重新登录' };
     }
-    // 检查账号是否仍存在于账号表中
-    const exists = await verifyAccountExists(auth.accountName, env);
-    if (!exists) {
+    // 检查账号是否仍存在且状态为approved
+    const accountInfo = await getAccountInfo(auth.accountName, env);
+    if (!accountInfo) {
       return { ok: false, error: '账号已不存在' };
     }
-    return { ok: true, role: auth.role, accountName: auth.accountName };
+    if (accountInfo.status !== 'approved') {
+      return { ok: false, error: '账号未通过审核', code: accountInfo.status };
+    }
+    // 获取关联的宝宝列表
+    const babyIds = await getAccountBabyIds(auth.accountName, env);
+    const babies = await getBabiesByIds(babyIds, env);
+    return { ok: true, role: auth.role, accountName: auth.accountName, status: accountInfo.status, babies };
   }
 
   const account = body.account;
   const password = body.password;
 
-  // 如果提供了 account，走账号登录
+  // 账号登录
   if (account) {
     const feishuToken = await getTenantToken(env);
     const tableId = await ensureAccountTable(feishuToken, env);
     await ensureDefaultAdmin(feishuToken, env, tableId);
 
     const appToken = env.FEISHU_BASE_TOKEN;
-    // 查找账号
     const filterStr = `CurrentValue.[账号名]="${account}"`;
     const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
     const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
@@ -323,59 +542,60 @@ async function handleAuth(request, env) {
     const storedEncryptedPassword = fields['加密密码'] || fields['密码哈希'] || '';
     const role = fields['权限'] || 'view';
     const accountName = fields['账号名'] || account;
+    const status = fields['状态'] || 'approved'; // 旧账号没有状态字段，默认approved
     const recordId = accountRecord.record_id;
+
+    // 检查账号状态
+    if (status === 'pending') {
+      return { error: '账号待审核，请等待管理员批准', code: 'pending' };
+    }
+    if (status === 'rejected') {
+      return { error: '账号已被拒绝，请联系管理员', code: 'rejected' };
+    }
 
     // admin首次登录，密码字段为空
     if (!storedEncryptedPassword && role === 'admin') {
       if (!password) {
         return { error: '请设置管理员密码', needsSetup: true };
       }
-      // 自动设置admin密码（加密存储）
       const encryptedPassword = await encryptPassword(password, env);
       const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
       await fetch(updateUrl, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: { '加密密码': encryptedPassword, '最后修改时间': Date.now() } }),
+        body: JSON.stringify({ fields: { '加密密码': encryptedPassword, '状态': 'approved', '最后修改时间': Date.now() } }),
       });
       const token = await deriveToken(await sha256(password), role, accountName);
-      return { ok: true, token, role, accountName };
+      const babyIds = await getAccountBabyIds(accountName, env);
+      const babies = await getBabiesByIds(babyIds, env);
+      return { ok: true, token, role, accountName, status: 'approved', babies };
     }
 
-    // 普通账号密码为空（防御性处理）
     if (!storedEncryptedPassword) {
       return { error: '账号未设置密码，请联系管理员' };
     }
 
-    // 密码校验
     if (!password) return { error: '请输入密码' };
 
-    // 先尝试AES解密比对
-    const aesKey = env.AES_ENCRYPT_KEY;
+    // 密码校验
     let passwordMatch = false;
+    const aesKey = env.AES_ENCRYPT_KEY;
     if (aesKey) {
       try {
         const decryptedPassword = await aesDecrypt(storedEncryptedPassword, aesKey);
-        if (decryptedPassword === password) {
-          passwordMatch = true;
-        }
-      } catch (e) {
-        // 解密失败，可能是旧SHA-256哈希格式，fallback
-      }
+        if (decryptedPassword === password) passwordMatch = true;
+      } catch (e) {}
     }
-
-    // AES解密失败或没有AES密钥，fallback到SHA-256比对
     if (!passwordMatch) {
       const inputHash = await sha256(password);
-      if (inputHash === storedEncryptedPassword) {
-        passwordMatch = true;
-      }
+      if (inputHash === storedEncryptedPassword) passwordMatch = true;
     }
-
     if (!passwordMatch) return { error: '密码错误' };
 
     const token = await deriveToken(await sha256(password), role, accountName);
-    return { ok: true, token, role, accountName };
+    const babyIds = await getAccountBabyIds(accountName, env);
+    const babies = await getBabiesByIds(babyIds, env);
+    return { ok: true, token, role, accountName, status, babies };
   }
 
   return { error: '请输入账号名' };
@@ -383,7 +603,6 @@ async function handleAuth(request, env) {
 
 // 处理账号管理请求（仅 admin 可操作）
 async function handleAccounts(request, env, token, auth) {
-  // 仅 admin 权限可操作
   if (auth.role !== 'admin') {
     return { error: '只有管理员才能管理账号', code: 403 };
   }
@@ -394,7 +613,6 @@ async function handleAccounts(request, env, token, auth) {
   const appToken = env.FEISHU_BASE_TOKEN;
 
   if (request.method === 'GET') {
-    // 列出所有账号
     const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`;
     const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
     const data = await listResp.json();
@@ -406,6 +624,7 @@ async function handleAccounts(request, env, token, auth) {
         record_id: item.record_id,
         账号名: fields['账号名'] || '',
         权限: fields['权限'] || 'view',
+        状态: fields['状态'] || 'approved',
         最后修改时间: fields['最后修改时间'] || null,
         hasPassword,
       };
@@ -414,7 +633,6 @@ async function handleAccounts(request, env, token, auth) {
   }
 
   if (request.method === 'POST') {
-    // 新增账号
     const body = await request.json();
     const accountName = body.accountName;
     const password = body.password;
@@ -424,7 +642,6 @@ async function handleAccounts(request, env, token, auth) {
     if (!password) return { code: -1, msg: '密码不能为空' };
     if (!['view', 'edit', 'admin'].includes(role)) return { code: -1, msg: '权限值无效' };
 
-    // 检查账号名唯一性
     const filterStr = `CurrentValue.[账号名]="${accountName}"`;
     const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
     const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
@@ -443,6 +660,7 @@ async function handleAccounts(request, env, token, auth) {
           '账号名': accountName,
           '加密密码': encryptedPassword,
           '权限': role,
+          '状态': 'approved',
           '最后修改时间': Date.now(),
         },
       }),
@@ -453,14 +671,52 @@ async function handleAccounts(request, env, token, auth) {
   }
 
   if (request.method === 'PUT') {
-    // 编辑账号
     const body = await request.json();
     const recordId = body.record_id;
-    if (!recordId) return { code: -1, msg: 'record_id is required' };
+    if (!recordId && !body.action) return { code: -1, msg: 'record_id is required' };
 
+    // 审核操作
+    if (body.action === 'approve') {
+      if (!recordId) return { code: -1, msg: 'record_id is required' };
+      const updateFields = {
+        '状态': 'approved',
+        '权限': body.role || 'edit',
+        '最后修改时间': Date.now(),
+      };
+      const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+      const resp = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: updateFields }),
+      });
+      const data = await resp.json();
+      if (data.code !== 0) return { code: -1, msg: data.msg };
+      // 清除缓存
+      validAccountsCache = { accounts: new Set(), expires: 0 };
+      return { code: 0, data: { record: data.data?.record } };
+    }
+
+    if (body.action === 'reject') {
+      if (!recordId) return { code: -1, msg: 'record_id is required' };
+      const updateFields = {
+        '状态': 'rejected',
+        '最后修改时间': Date.now(),
+      };
+      const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+      const resp = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: updateFields }),
+      });
+      const data = await resp.json();
+      if (data.code !== 0) return { code: -1, msg: data.msg };
+      validAccountsCache = { accounts: new Set(), expires: 0 };
+      return { code: 0, data: { record: data.data?.record } };
+    }
+
+    // 普通编辑
     const updateFields = {};
     if (body.accountName !== undefined) {
-      // 检查新账号名唯一性（排除自身）
       const filterStr = `CurrentValue.[账号名]="${body.accountName}"`;
       const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=10`;
       const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
@@ -493,7 +749,6 @@ async function handleAccounts(request, env, token, auth) {
   }
 
   if (request.method === 'DELETE') {
-    // 删除账号
     const body = await request.json();
     const recordId = body.record_id;
     if (!recordId) return { code: -1, msg: 'record_id is required' };
@@ -568,10 +823,23 @@ export default {
         });
       }
 
+      // /api/account-baby 账号-宝宝关联管理
+      if (path === '/api/account-baby') {
+        const token = await getTenantToken(env);
+        if (request.method === 'POST') {
+          const body = await request.json();
+          const babyId = body.babyId;
+          if (!babyId) return new Response(JSON.stringify({ error: 'babyId is required' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+          await linkAccountToBaby(auth.accountName, babyId, 'owner', env);
+          return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+        }
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+      }
+
       // /api/vaccines 疫苗接种管理
       if (path === '/api/vaccines') {
         const token = await getTenantToken(env);
-        const result = await handleVaccines(request, env, token);
+        const result = await handleVaccines(request, env, token, auth);
         return new Response(JSON.stringify(result), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -620,17 +888,17 @@ export default {
       switch (path) {
         case '/api/babies': {
           const token = await getTenantToken(env);
-          result = await handleBabies(request, env, token);
+          result = await handleBabies(request, env, token, auth);
           break;
         }
         case '/api/records': {
           const token = await getTenantToken(env);
-          result = await handleRecords(request, env, token);
+          result = await handleRecords(request, env, token, auth);
           break;
         }
         case '/api/growth': {
           const token = await getTenantToken(env);
-          result = await handleGrowth(request, env, token);
+          result = await handleGrowth(request, env, token, auth);
           break;
         }
         case '/api/upload': {
@@ -665,6 +933,8 @@ let tokenCache = { token: null, expires: 0 };
 let logTableIdCache = null; // 缓存"登录日志"表 ID
 let vaccineTableIdCache = null; // 缓存"疫苗接种"表 ID
 let adminExistsCache = false; // 缓存admin账号已存在，避免每次登录都查询
+let accountBabyTableIdCache = null;
+let accountBabyCache = { data: new Map(), expires: 0 };
 
 async function getTenantToken(env) {
   if (tokenCache.token && Date.now() < tokenCache.expires) {
@@ -726,14 +996,28 @@ async function bitableRequest(env, token, method, tableId, params = {}, recordId
   }
 }
 
-async function handleBabies(request, env, token) {
+async function handleBabies(request, env, token, auth) {
   const tableId = env.FEISHU_TABLE_BABY;
+  const appToken = env.FEISHU_BASE_TOKEN;
+
   if (request.method === 'GET') {
-    return await bitableRequest(env, token, 'GET', tableId, { page_size: 100 });
+    // 只返回该账号关联的宝宝
+    const babyIds = await getAccountBabyIds(auth.accountName, env);
+    if (babyIds.length === 0) {
+      return { code: 0, data: { items: [], has_more: false, total: 0 } };
+    }
+    // 逐个获取宝宝详情
+    const babies = await getBabiesByIds(babyIds, env);
+    return { code: 0, data: { items: babies, has_more: false, total: babies.length } };
   }
   if (request.method === 'POST') {
     const body = await request.json();
-    return await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
+    const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
+    // 自动关联新宝宝到创建者
+    if (result.data?.record?.record_id) {
+      await linkAccountToBaby(auth.accountName, result.data.record.record_id, 'owner', env);
+    }
+    return result;
   }
   if (request.method === 'PUT') {
     const body = await request.json();
@@ -750,15 +1034,27 @@ async function handleBabies(request, env, token) {
   return { error: 'Method not allowed' };
 }
 
-async function handleRecords(request, env, token) {
+async function handleRecords(request, env, token, auth) {
   const tableId = env.FEISHU_TABLE_RECORD;
+  const appToken = env.FEISHU_BASE_TOKEN;
+
   if (request.method === 'GET') {
-    return await bitableRequest(env, token, 'GET', tableId, { page_size: 100 });
+    const babyIds = await getAccountBabyIds(auth.accountName, env);
+    const result = await bitableRequest(env, token, 'GET', tableId, { page_size: 500 });
+    if (babyIds.length === 0) {
+      result.data = { items: [], has_more: false, total: 0 };
+    } else if (result.data?.items) {
+      result.data.items = result.data.items.filter(item => {
+        const linkedIds = extractLinkedIds(item.fields?.['关联宝宝']);
+        return linkedIds.some(id => babyIds.includes(id));
+      });
+      result.data.total = result.data.items.length;
+    }
+    return result;
   }
   if (request.method === 'POST') {
     const body = await request.json();
     await ensureRecordFields(token, env);
-    // 如果前端没传"上传时间"，自动填充为当前时间戳
     if (!body.fields['上传时间']) {
       body.fields['上传时间'] = Date.now();
     }
@@ -838,10 +1134,23 @@ async function ensureRecordFields(token, env) {
   }
 }
 
-async function handleGrowth(request, env, token) {
+async function handleGrowth(request, env, token, auth) {
   const tableId = env.FEISHU_TABLE_GROWTH;
+  const appToken = env.FEISHU_BASE_TOKEN;
+
   if (request.method === 'GET') {
-    return await bitableRequest(env, token, 'GET', tableId, { page_size: 100 });
+    const babyIds = await getAccountBabyIds(auth.accountName, env);
+    const result = await bitableRequest(env, token, 'GET', tableId, { page_size: 100 });
+    if (babyIds.length === 0) {
+      result.data = { items: [], has_more: false, total: 0 };
+    } else if (result.data?.items) {
+      result.data.items = result.data.items.filter(item => {
+        const linkedIds = extractLinkedIds(item.fields?.['关联宝宝']);
+        return linkedIds.some(id => babyIds.includes(id));
+      });
+      result.data.total = result.data.items.length;
+    }
+    return result;
   }
   if (request.method === 'POST') {
     const body = await request.json();
@@ -978,16 +1287,26 @@ async function ensureVaccineTable(token, env) {
 }
 
 // 处理疫苗接种请求
-async function handleVaccines(request, env, token) {
+async function handleVaccines(request, env, token, auth) {
   const appToken = env.FEISHU_BASE_TOKEN;
   const tableId = await ensureVaccineTable(token, env);
 
   if (request.method === 'GET') {
+    const babyIds = await getAccountBabyIds(auth.accountName, env);
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=500`;
     const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
     const data = await resp.json();
     if (data.code !== 0) return { code: -1, msg: data.msg };
-    return { code: 0, data: { items: data.data?.items || [] } };
+    let items = data.data?.items || [];
+    if (babyIds.length > 0) {
+      items = items.filter(item => {
+        const linkedIds = extractLinkedIds(item.fields?.['关联宝宝']);
+        return linkedIds.some(id => babyIds.includes(id));
+      });
+    } else {
+      items = [];
+    }
+    return { code: 0, data: { items } };
   }
 
   if (request.method === 'POST') {
@@ -1291,6 +1610,80 @@ async function handleMigrate(env, token) {
     }
   } catch (e) {
     results.headCircumferenceFieldError = e.message;
+  }
+
+  // 9. 确保"账号宝宝关联"表存在
+  try {
+    const abTableId = await ensureAccountBabyTable(token, env);
+    results.accountBabyTableCreated = true;
+    results.accountBabyTableId = abTableId;
+  } catch (e) {
+    results.accountBabyTableCreated = false;
+    results.accountBabyTableError = e.message;
+  }
+
+  // 10. 确保账号表有"状态"字段
+  try {
+    const accountTableId = await ensureAccountTable(token, env);
+    const accFieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/fields`;
+    const accFieldsResp = await fetch(accFieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const accFieldsData = await accFieldsResp.json();
+    const accExistingFields = (accFieldsData.data?.items || []).map(f => f.field_name);
+    if (!accExistingFields.includes('状态')) {
+      await fetch(accFieldsUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_name: '状态', type: 3, property: { options: [{ name: 'pending' }, { name: 'approved' }, { name: 'rejected' }] } }),
+      });
+      results.statusFieldCreated = true;
+    } else {
+      results.statusFieldCreated = false;
+    }
+  } catch (e) {
+    results.statusFieldError = e.message;
+  }
+
+  // 11. 将所有现有账号状态设为approved，并关联到现有宝宝
+  try {
+    const accountTableId = await ensureAccountTable(token, env);
+    const babyTableId = env.FEISHU_TABLE_BABY;
+
+    // 获取所有账号
+    const accListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records?page_size=100`;
+    const accListResp = await fetch(accListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const accListData = await accListResp.json();
+
+    // 获取所有宝宝
+    const babyListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${babyTableId}/records?page_size=100`;
+    const babyListResp = await fetch(babyListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const babyListData = await babyListResp.json();
+    const babyItems = babyListData.data?.items || [];
+
+    if (accListData.code === 0 && accListData.data?.items) {
+      for (const accItem of accListData.data.items) {
+        const fields = accItem.fields || {};
+        const accName = fields['账号名'];
+        const accStatus = fields['状态'];
+
+        // 设置状态为approved（如果还没有状态字段）
+        if (!accStatus) {
+          const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records/${accItem.record_id}`;
+          await fetch(updateUrl, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { '状态': 'approved' } }),
+          });
+        }
+
+        // 关联所有现有宝宝到该账号
+        for (const baby of babyItems) {
+          await linkAccountToBaby(accName, baby.record_id, fields['权限'] === 'admin' ? 'owner' : 'editor', env);
+        }
+      }
+      results.existingAccountsMigrated = accListData.data.items.length;
+    }
+  } catch (e) {
+    results.accountMigrationError = e.message;
   }
 
   return { ok: true, ...results };
