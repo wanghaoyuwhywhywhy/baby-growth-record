@@ -714,7 +714,7 @@ export default function TimelinePage() {
         >
           <Calendar size={12} />
           {dateFilterStart || dateFilterEnd
-            ? `${dateFilterStart ? dateFilterStart.slice(5) : '...'} ~ ${dateFilterEnd ? dateFilterEnd.slice(5) : '...'}`
+            ? <>{dateFilterStart || '...'}<span className="mx-0.5 text-coral/60">至</span>{dateFilterEnd || '...'}</>
             : '日期'}
           {(dateFilterStart || dateFilterEnd) && (
             <span
@@ -884,7 +884,7 @@ export default function TimelinePage() {
           onClose={() => setShowDatePicker(false)}
           title={datePickerStep === 'start' ? '选择开始日期' : '选择结束日期'}
           rangeLabel={dateFilterStart
-            ? `${dateFilterStart.slice(5)} ~ ${datePickerStep === 'end' ? (dateFilterEnd ? dateFilterEnd.slice(5) : '...') : '...'}`
+            ? `${dateFilterStart} 至 ${datePickerStep === 'end' ? (dateFilterEnd || '...') : '...'}`
             : undefined}
         />
       )}
