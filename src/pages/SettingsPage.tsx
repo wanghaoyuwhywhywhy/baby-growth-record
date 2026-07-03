@@ -2,14 +2,12 @@ import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock, Users } from 'lucide-react';
-import { clearAuthInfo, getAuthRole, getAuthAccount, isAdmin, isSuperAdmin } from '@/lib/auth';
+import { clearAuthInfo, getAuthAccount, isSuperAdmin } from '@/lib/auth';
 import { cloudLogAccess } from '@/lib/cloud';
 import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, cloudApproveAccount, cloudRejectAccount, type AccountRecord } from '@/lib/cloud';
 
 export default function SettingsPage() {
-  const role = getAuthRole();
   const accountName = getAuthAccount();
-  const isAdminUser = isAdmin();
   const isSuperAdminUser = isSuperAdmin();
   const [deleteTarget, setDeleteTarget] = useState<AccountRecord | null>(null);
 
@@ -23,7 +21,6 @@ export default function SettingsPage() {
   const [editingAccount, setEditingAccount] = useState<AccountRecord | null>(null);
   const [formName, setFormName] = useState('');
   const [formPassword, setFormPassword] = useState('');
-  const [formRole, setFormRole] = useState('view');
   const [formError, setFormError] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [showFormPassword, setShowFormPassword] = useState(false);
@@ -62,11 +59,11 @@ export default function SettingsPage() {
     if (!formPassword) { setFormError('请输入密码'); return; }
     setFormSubmitting(true);
     setFormError('');
-    const result = await cloudCreateAccount(formName.trim(), formPassword, formRole);
+    const result = await cloudCreateAccount(formName.trim(), formPassword);
     setFormSubmitting(false);
     if (result) {
       setShowAddForm(false);
-      setFormName(''); setFormPassword(''); setFormRole('view'); setFormError('');
+      setFormName(''); setFormPassword(''); setFormError('');
       loadAccounts();
     } else {
       setFormError('创建失败，账号名可能已存在');
@@ -80,15 +77,14 @@ export default function SettingsPage() {
     if (!formPassword) { setFormError('请输入新密码'); return; }
     setFormSubmitting(true);
     setFormError('');
-    const updates: { accountName?: string; password?: string; role?: string } = {};
+    const updates: { accountName?: string; password?: string } = {};
     if (formName.trim() !== editingAccount.账号名) updates.accountName = formName.trim();
     if (formPassword) updates.password = formPassword;
-    if (formRole !== editingAccount.权限) updates.role = formRole;
     const ok = await cloudUpdateAccount(editingAccount.record_id, updates);
     setFormSubmitting(false);
     if (ok) {
       setEditingAccount(null);
-      setFormName(''); setFormPassword(''); setFormRole('view'); setFormError('');
+      setFormName(''); setFormPassword(''); setFormError('');
       loadAccounts();
     } else {
       setFormError('更新失败');
@@ -102,8 +98,8 @@ export default function SettingsPage() {
   }
 
   // 审核通过
-  async function handleApprove(acc: AccountRecord, approveRole?: string) {
-    await cloudApproveAccount(acc.record_id, approveRole || 'edit');
+  async function handleApprove(acc: AccountRecord) {
+    await cloudApproveAccount(acc.record_id);
     loadAccounts();
   }
 
@@ -118,7 +114,6 @@ export default function SettingsPage() {
     setEditingAccount(account);
     setFormName(account.账号名);
     setFormPassword('');
-    setFormRole(account.权限);
     setFormError('');
   }
 
@@ -126,22 +121,8 @@ export default function SettingsPage() {
   function cancelForm() {
     setShowAddForm(false);
     setEditingAccount(null);
-    setFormName(''); setFormPassword(''); setFormRole('view'); setFormError('');
+    setFormName(''); setFormPassword(''); setFormError('');
   }
-
-  const roleLabel = (r: string) => {
-    if (r === 'superadmin') return '超级管理员';
-    if (r === 'admin') return '管理员';
-    if (r === 'edit') return '编辑';
-    return '查看';
-  };
-
-  const roleColor = (r: string) => {
-    if (r === 'superadmin') return 'bg-purple-100 text-purple-700';
-    if (r === 'admin') return 'bg-indigo-100 text-indigo-700';
-    if (r === 'edit') return 'bg-amber-100 text-amber-700';
-    return 'bg-sky-100 text-sky-700';
-  };
 
   const statusLabel = (s: string) => {
     if (s === '待审批') return '待审批';
@@ -187,9 +168,9 @@ export default function SettingsPage() {
               <h3 className="text-sm font-outfit font-bold text-ink">
                 {accountName || '未知账号'}
               </h3>
-              <p className="text-xs text-muted">
-                {role === 'superadmin' ? '超级管理员权限（全部操作）' : role === 'admin' ? '管理员权限（全部操作）' : role === 'edit' ? '编辑权限（可增删改）' : '查看权限（仅浏览）'}
-              </p>
+              {isSuperAdminUser && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-purple-100 text-purple-700">超级管理员</span>
+              )}
             </div>
           </div>
           <button
@@ -253,16 +234,13 @@ export default function SettingsPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <select
-                          defaultValue="edit"
-                          onChange={e => handleApprove(acc, e.target.value)}
-                          className="text-xs bg-green-50 border border-green-200 text-green-700 rounded-lg px-2 py-1 outline-none cursor-pointer"
+                        <button
+                          onClick={() => handleApprove(acc)}
+                          className="p-1.5 rounded-lg bg-green-50 hover:bg-green-100 text-green-600 transition-colors"
+                          title="通过"
                         >
-                          <option value="edit">通过(编辑)</option>
-                          <option value="view">通过(查看)</option>
-                          <option value="admin">通过(管理员)</option>
-                          <option value="superadmin">通过(超管)</option>
-                        </select>
+                          <Check size={14} />
+                        </button>
                         <button
                           onClick={() => handleReject(acc)}
                           className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 transition-colors"
@@ -283,9 +261,6 @@ export default function SettingsPage() {
                 <div key={acc.record_id} className="flex items-center justify-between bg-cream-light/50 rounded-xl px-3 py-2.5">
                   <div className="flex items-center gap-2.5">
                     <span className="text-sm font-medium text-ink">{acc.账号名}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${roleColor(acc.权限)}`}>
-                      {roleLabel(acc.权限)}
-                    </span>
                     {acc.状态 !== '正常' && (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor(acc.状态)}`}>
                         {statusLabel(acc.状态)}
@@ -315,7 +290,7 @@ export default function SettingsPage() {
             {/* 新增按钮 */}
             {!showAddForm && !editingAccount && (
               <button
-                onClick={() => { setShowAddForm(true); setFormName(''); setFormPassword(''); setFormRole('view'); setFormError(''); }}
+                onClick={() => { setShowAddForm(true); setFormName(''); setFormPassword(''); setFormError(''); }}
                 className="w-full mt-3 py-2.5 rounded-xl border border-dashed border-rule text-muted text-sm font-medium flex items-center justify-center gap-2 hover:bg-cream-light/50 active:scale-[0.98] transition-all"
               >
                 <Plus size={16} />
@@ -381,17 +356,6 @@ export default function SettingsPage() {
                     {showFormPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
-                <select
-                  value={formRole}
-                  onChange={e => setFormRole(e.target.value)}
-                  className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5"
-                  disabled={formSubmitting}
-                >
-                  <option value="view">查看权限</option>
-                  <option value="edit">编辑权限</option>
-                  <option value="admin">管理员权限</option>
-                  <option value="superadmin">超级管理员权限</option>
-                </select>
                 {formError && <p className="text-xs text-red-500">{formError}</p>}
                 <button
                   onClick={editingAccount ? handleEditAccount : handleAddAccount}

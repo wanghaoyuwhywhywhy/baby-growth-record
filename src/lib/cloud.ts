@@ -524,9 +524,9 @@ export async function cloudGetAccounts(): Promise<AccountRecord[]> {
   }
 }
 
-export async function cloudCreateAccount(accountName: string, password: string, role: string): Promise<AccountRecord | null> {
+export async function cloudCreateAccount(accountName: string, password: string): Promise<AccountRecord | null> {
   try {
-    const fields: Record<string, any> = { accountName, password, role };
+    const fields: Record<string, any> = { accountName, password };
     const resp = await fetch(`${WORKER_URL}/api/accounts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -541,7 +541,7 @@ export async function cloudCreateAccount(accountName: string, password: string, 
   }
 }
 
-export async function cloudUpdateAccount(record_id: string, updates: { accountName?: string; password?: string; role?: string }): Promise<boolean> {
+export async function cloudUpdateAccount(record_id: string, updates: { accountName?: string; password?: string }): Promise<boolean> {
   try {
     const resp = await fetch(`${WORKER_URL}/api/accounts`, {
       method: 'PUT',
@@ -587,13 +587,13 @@ export async function cloudRegister(account: string, password: string): Promise<
   }
 }
 
-// 审核通过
-export async function cloudApproveAccount(record_id: string, role?: string): Promise<boolean> {
+// 审核通过（仅改状态为正常，不涉及权限）
+export async function cloudApproveAccount(record_id: string): Promise<boolean> {
   try {
     const resp = await fetch(`${WORKER_URL}/api/accounts`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ action: 'approve', record_id, role: role || 'edit' }),
+      body: JSON.stringify({ action: 'approve', record_id }),
     });
     const data = await resp.json();
     return data.code === 0;

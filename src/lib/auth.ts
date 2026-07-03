@@ -22,10 +22,29 @@ export function getAuthAccount(): string | null {
   return localStorage.getItem(AUTH_ACCOUNT_KEY);
 }
 
-// 是否为编辑权限（edit 或 admin）
+// 是否为编辑权限（基于当前宝宝的关联角色）
 export function isEditMode(): boolean {
-  const role = getAuthRole();
-  return role === 'edit' || role === 'admin' || role === 'superadmin';
+  const linkRoles = getAuthBabyLinkRoles();
+  const currentBabyId = localStorage.getItem('current_baby_id');
+  if (currentBabyId && linkRoles[currentBabyId]) {
+    const role = linkRoles[currentBabyId];
+    return role === 'owner' || role === 'editor';
+  }
+  // 降级：如果没有关联角色信息，检查是否有 owner/editor 角色
+  for (const role of Object.values(linkRoles)) {
+    if (role === 'owner' || role === 'editor') return true;
+  }
+  return false;
+}
+
+// 是否为当前宝宝的owner
+export function isCurrentBabyOwner(): boolean {
+  const linkRoles = getAuthBabyLinkRoles();
+  const currentBabyId = localStorage.getItem('current_baby_id');
+  if (currentBabyId && linkRoles[currentBabyId]) {
+    return linkRoles[currentBabyId] === 'owner';
+  }
+  return false;
 }
 
 // 是否为管理员
