@@ -79,7 +79,8 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
     }
 
     if (mode === 'single') {
-      onConfirm(dateStr, dateStr);
+      setDate1(dateStr);
+      setDate2(null);
       return;
     }
 
@@ -97,15 +98,15 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
   }
 
   function handleConfirm() {
-    if (mode === 'range') {
+    if (mode === 'single') {
+      if (date1) onConfirm(date1, date1);
+    } else {
       if (date1 && date2) {
         const sorted = [date1, date2].sort();
         onConfirm(sorted[0], sorted[1]);
       } else if (date1) {
         onConfirm(date1, date1);
       }
-    } else {
-      if (date1) onConfirm(date1, date1);
     }
   }
 
@@ -187,7 +188,9 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
               let isInRange = false;
               let rangeBarClass = '';
 
-              if (mode === 'range') {
+              if (mode === 'single') {
+                if (date1 && c.dateStr === date1) isEndpoint = true;
+              } else if (mode === 'range') {
                 if (date1 && date2) {
                   const sorted = [date1, date2].sort();
                   if (c.dateStr === sorted[0] || c.dateStr === sorted[1]) {

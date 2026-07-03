@@ -456,19 +456,26 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
   const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
   const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
 
-  // 生成日期格子
-  const calendarCells: { day: number; current: boolean }[] = [];
+  // 生成日期格子（含完整日期字符串）
+  const calendarCells: { day: number; dateStr: string }[] = [];
   for (let i = firstDayOfWeek - 1; i >= 0; i--) {
-    calendarCells.push({ day: daysInPrevMonth - i, current: false });
+    const d = daysInPrevMonth - i;
+    const pm = viewMonth === 0 ? 11 : viewMonth - 1;
+    const py = viewMonth === 0 ? viewYear - 1 : viewYear;
+    calendarCells.push({ day: d, dateStr: `${py}-${String(pm + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}` });
   }
   for (let d = 1; d <= daysInMonth; d++) {
-    calendarCells.push({ day: d, current: true });
+    calendarCells.push({ day: d, dateStr: `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}` });
   }
-  const rows = 6; // 固定6行，避免5/6行切换时高度跳动
+  const rows = 6;
   const remaining = rows * 7 - calendarCells.length;
+  const nm = viewMonth === 11 ? 0 : viewMonth + 1;
+  const ny = viewMonth === 11 ? viewYear + 1 : viewYear;
   for (let d = 1; d <= remaining; d++) {
-    calendarCells.push({ day: d, current: false });
+    calendarCells.push({ day: d, dateStr: `${ny}-${String(nm + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}` });
   }
+
+  const isCurrentMonth = (dateStr: string) => dateStr.startsWith(`${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-`);
 
   function prevMonth() {
     if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); }
@@ -481,14 +488,23 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
   function prevYear() { setViewYear(viewYear - 1); }
   function nextYear() { setViewYear(viewYear + 1); }
 
-  function selectDate(d: number) {
-    setYear(viewYear);
-    setMonth(viewMonth);
+  function selectDate(dateStr: string) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    setYear(y);
+    setMonth(m - 1);
     setDay(d);
+    // 如果是非当月日期，跳转视图
+    if (!isCurrentMonth(dateStr)) {
+      setViewYear(y);
+      setViewMonth(m - 1);
+    }
   }
 
-  const isSelected = (d: number) => viewYear === year && viewMonth === month && d === day;
-  const isToday = (d: number) => viewYear === today.getFullYear() && viewMonth === today.getMonth() && d === today.getDate();
+  const selectedDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const isToday = (dateStr: string) => {
+    const now = new Date();
+    return dateStr === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  };
 
   const rangeOptions = (max: number) => Array.from({ length: max }, (_, i) => i);
 
@@ -542,16 +558,16 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
             {/* 日期网格 */}
             <div className="grid grid-cols-7">
               {calendarCells.map((cell, i) => {
-                const selected = cell.current && isSelected(cell.day);
-                const todayMark = cell.current && isToday(cell.day);
+                const curMonth = isCurrentMonth(cell.dateStr);
+                const selected = cell.dateStr === selectedDateStr;
+                const todayMark = isToday(cell.dateStr);
                 return (
                   <button
                     key={i}
-                    disabled={!cell.current}
-                    onClick={() => cell.current && selectDate(cell.day)}
+                    onClick={() => selectDate(cell.dateStr)}
                     className={`
                       relative w-8 h-8 mx-auto flex items-center justify-center text-xs rounded-full transition-all
-                      ${!cell.current ? 'text-muted/30 cursor-default' : 'text-ink hover:bg-coral/10 active:scale-95'}
+                      ${!curMonth ? 'text-muted/50 hover:bg-coral/10 active:scale-95' : 'text-ink hover:bg-coral/10 active:scale-95'}
                       ${selected ? 'bg-coral text-white hover:bg-coral-dark font-semibold' : ''}
                     `}
                   >
