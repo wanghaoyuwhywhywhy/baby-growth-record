@@ -640,8 +640,10 @@ export default function TimelinePage() {
   const currentBabyId = currentBaby()?.record_id;
   const [mediaFilter, setMediaFilter] = useState('全部');
   const [categoryFilter, setCategoryFilter] = useState('全部');
-  const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const [dateFilterStart, setDateFilterStart] = useState<string | null>(null);
+  const [dateFilterEnd, setDateFilterEnd] = useState<string | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [datePickerStep, setDatePickerStep] = useState<'start' | 'end'>('start');
   const [editingRecord, setEditingRecord] = useState<DailyRecord | null>(null);
   const editMode = isEditMode();
 
@@ -654,7 +656,7 @@ export default function TimelinePage() {
   useEffect(() => { fetchRecords(); }, [fetchRecords, currentBabyId]);
 
   // 切换筛选时重置显示数量
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [mediaFilter, categoryFilter, dateFilter]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [mediaFilter, categoryFilter, dateFilterStart, dateFilterEnd]);
 
   const filtered = records.filter(r => {
     const mediaTypes = r.媒体类型 || ['text'];
@@ -670,11 +672,12 @@ export default function TimelinePage() {
     }
     const matchCategory = categoryFilter === '全部' || r.分类 === categoryFilter;
     let matchDate = true;
-    if (dateFilter) {
+    if (dateFilterStart || dateFilterEnd) {
       const recordDate = new Date(r.记录时间);
       const pad = (n: number) => String(n).padStart(2, '0');
       const recordDateStr = `${recordDate.getFullYear()}-${pad(recordDate.getMonth() + 1)}-${pad(recordDate.getDate())}`;
-      matchDate = recordDateStr === dateFilter;
+      if (dateFilterStart && recordDateStr < dateFilterStart) matchDate = false;
+      if (dateFilterEnd && recordDateStr > dateFilterEnd) matchDate = false;
     }
     return matchMedia && matchCategory && matchDate;
   });
@@ -700,7 +703,29 @@ export default function TimelinePage() {
 
   return (
     <div className="page-container">
-      <NavHeader title="成长时间线" showBack />
+      <NavHeader title="成长时间线" showBack titleAction={
+        <button
+          onClick={() => { setDatePickerStep('start'); setShowDatePicker(true); }}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-all ${
+            (dateFilterStart || dateFilterEnd)
+              ? 'bg-coral/15 text-coral font-medium'
+              : 'bg-cream-dark text-muted hover:bg-rule/50'
+          }`}
+        >
+          <Calendar size={12} />
+          {dateFilterStart || dateFilterEnd
+            ? `${dateFilterStart ? dateFilterStart.slice(5) : '...'} - ${dateFilterEnd ? dateFilterEnd.slice(5) : '...'}`
+            : '日期'}
+          {(dateFilterStart || dateFilterEnd) && (
+            <span
+              onClick={(e) => { e.stopPropagation(); setDateFilterStart(null); setDateFilterEnd(null); }}
+              className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-coral/20 active:scale-95"
+            >
+              <X size={10} />
+            </span>
+          )}
+        </button>
+      } />
 
       <div className="mt-4">
         {/* 分类筛选 */}
@@ -724,8 +749,8 @@ export default function TimelinePage() {
           })}
         </div>
 
-        {/* 媒体类型筛选 + 日期选择器 */}
-        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-5 px-5 mb-3 items-center">
+        {/* 媒体类型筛选 */}
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-5 px-5 mb-3">
           {MEDIA_TYPES.map(mt => {
             const isActive = mediaFilter === mt.key;
             return (
@@ -743,26 +768,6 @@ export default function TimelinePage() {
               </button>
             );
           })}
-          {/* 日期筛选按钮 */}
-          <button
-            onClick={() => setShowDatePicker(true)}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm whitespace-nowrap transition-all flex-shrink-0 ${
-              dateFilter
-                ? 'bg-coral text-white shadow-soft font-medium'
-                : 'bg-cream-dark text-muted hover:bg-rule/50'
-            }`}
-          >
-            <Calendar size={14} />
-            {dateFilter ? `${dateFilter.slice(5)}` : '日期'}
-            {dateFilter && (
-              <span
-                onClick={(e) => { e.stopPropagation(); setDateFilter(null); }}
-                className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-white/30 active:scale-95"
-              >
-                <X size={10} />
-              </span>
-            )}
-          </button>
         </div>
 
         {filtered.length === 0 ? (
@@ -856,13 +861,28 @@ export default function TimelinePage() {
         />
       )}
 
-      {/* 日期选择弹窗 */}
+      {/* 日期选择弹窗：先选开始日期，再选结束日期 */}
       {showDatePicker && (
         <CalendarPicker
-          initialDate={dateFilter || new Date().toISOString().slice(0, 10)}
-          onConfirm={(date) => { setDateFilter(date); setShowDatePicker(false); }}
+          initialDate={datePickerStep === 'start'
+            ? (dateFilterStart || new Date().toISOString().slice(0, 10))
+            : (dateFilterEnd || dateFilterStart || new Date().toISOString().slice(0, 10))}
+          onConfirm={(date) => {
+            if (datePickerStep === 'start') {
+              setDateFilterStart(date);
+              setDatePickerStep('end');
+            } else {
+              if (date < (dateFilterStart || '')) {
+                setDateFilterEnd(dateFilterStart);
+                setDateFilterStart(date);
+              } else {
+                setDateFilterEnd(date);
+              }
+              setShowDatePicker(false);
+            }
+          }}
           onClose={() => setShowDatePicker(false)}
-          title="选择日期"
+          title={datePickerStep === 'start' ? '选择开始日期' : '选择结束日期'}
         />
       )}
     </div>
