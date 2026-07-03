@@ -618,3 +618,59 @@ export async function cloudRejectAccount(record_id: string): Promise<boolean> {
     return false;
   }
 }
+
+// 创建邀请码
+export async function cloudCreateInvite(babyId: string, role: string, relation: string): Promise<{ ok: boolean; code?: string; error?: string }> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'create', babyId, role, relation }),
+    });
+    return await resp.json();
+  } catch (e) {
+    return { ok: false, error: '网络错误' };
+  }
+}
+
+// 使用邀请码
+export async function cloudRedeemInvite(code: string): Promise<{ ok: boolean; babyId?: string; relation?: string; error?: string }> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'redeem', code }),
+    });
+    return await resp.json();
+  } catch (e) {
+    return { ok: false, error: '网络错误' };
+  }
+}
+
+// 获取宝宝联系人列表
+export async function cloudGetBabyContacts(babyId: string): Promise<{ ok: boolean; contacts?: any[]; error?: string }> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'list', babyId }),
+    });
+    return await resp.json();
+  } catch (e) {
+    return { ok: false, error: '网络错误' };
+  }
+}
+
+// 移除联系人/取消邀请
+export async function cloudRemoveContact(record_id: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'remove', record_id }),
+    });
+    return await resp.json();
+  } catch (e) {
+    return { ok: false, error: '网络错误' };
+  }
+}

@@ -3,7 +3,7 @@ import { calcAge } from '@/utils/date';
 import { useAppStore } from '@/store/useAppStore';
 import { useNavigate } from 'react-router-dom';
 import { Edit3 } from 'lucide-react';
-import { isEditMode } from '@/lib/auth';
+import { isEditMode, getAuthBabyRelations } from '@/lib/auth';
 
 interface BabyCardProps {
   baby: Baby;
@@ -12,6 +12,8 @@ interface BabyCardProps {
 export default function BabyCard({ baby }: BabyCardProps) {
   const age = calcAge(baby.出生日期);
   const initials = baby.宝宝姓名.charAt(0);
+  const babyRelations = getAuthBabyRelations();
+  const relation = babyRelations[baby.record_id];
   const { growthRecords } = useAppStore();
   const navigate = useNavigate();
 
@@ -30,6 +32,11 @@ export default function BabyCard({ baby }: BabyCardProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <h1 className="text-xl font-outfit font-bold text-ink truncate">{baby.宝宝姓名}</h1>
+            {relation && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral/10 text-coral font-medium flex-shrink-0">
+                {relation}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3 mt-1">

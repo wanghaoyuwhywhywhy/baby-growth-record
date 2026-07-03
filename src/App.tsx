@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { isAuthenticated, clearAuthInfo, verifyAuth, type AuthRole, isEditMode } from '@/lib/auth';
+import { isAuthenticated, clearAuthInfo, verifyAuth, type AuthRole, isEditMode, setAuthBabyRelations } from '@/lib/auth';
 import LoginPage from '@/pages/LoginPage';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
@@ -97,6 +97,16 @@ export default function App() {
       console.log('[verifyAccount] API返回:', result);
       if (result.ok) {
         setAuthed(true);
+        // Store baby relations from verify result
+        if (result.babies) {
+          const relations: Record<string, string> = {};
+          for (const baby of result.babies) {
+            if (baby.record_id && baby.relation) {
+              relations[baby.record_id] = baby.relation;
+            }
+          }
+          setAuthBabyRelations(relations);
+        }
       } else {
         console.log('[verifyAccount] 验证失败，执行登出');
         clearAuthInfo();

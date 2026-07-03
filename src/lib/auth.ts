@@ -3,8 +3,9 @@ const AUTH_TOKEN_KEY = 'auth_token';
 const AUTH_ROLE_KEY = 'auth_role'; // 'edit' | 'view' | 'admin'
 const AUTH_ACCOUNT_KEY = 'auth_account'; // 账号名
 const AUTH_BABIES_KEY = 'auth_babies'; // 关联宝宝列表
+const AUTH_RELATIONS_KEY = 'auth_baby_relations';
 
-export type AuthRole = 'edit' | 'view' | 'admin';
+export type AuthRole = 'edit' | 'view' | 'admin' | 'superadmin';
 
 // 获取存储的认证 token
 export function getAuthToken(): string | null {
@@ -24,12 +25,13 @@ export function getAuthAccount(): string | null {
 // 是否为编辑权限（edit 或 admin）
 export function isEditMode(): boolean {
   const role = getAuthRole();
-  return role === 'edit' || role === 'admin';
+  return role === 'edit' || role === 'admin' || role === 'superadmin';
 }
 
 // 是否为管理员
 export function isAdmin(): boolean {
-  return getAuthRole() === 'admin';
+  const role = getAuthRole();
+  return role === 'admin' || role === 'superadmin';
 }
 
 // 保存认证信息
@@ -49,6 +51,8 @@ export function clearAuthInfo(): void {
   localStorage.removeItem(AUTH_ROLE_KEY);
   localStorage.removeItem(AUTH_ACCOUNT_KEY);
   localStorage.removeItem(AUTH_BABIES_KEY);
+  localStorage.removeItem(AUTH_RELATIONS_KEY);
+  localStorage.removeItem('auth_baby_link_roles');
 }
 
 // 获取关联宝宝列表
@@ -64,6 +68,41 @@ export function getAuthBabies(): any[] {
 // 保存认证关联宝宝
 export function setAuthBabies(babies: any[]): void {
   localStorage.setItem(AUTH_BABIES_KEY, JSON.stringify(babies));
+}
+
+// 获取宝宝关系映射
+export function getAuthBabyRelations(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(AUTH_RELATIONS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+// 保存宝宝关系映射
+export function setAuthBabyRelations(relations: Record<string, string>): void {
+  localStorage.setItem(AUTH_RELATIONS_KEY, JSON.stringify(relations));
+}
+
+// 获取宝宝链接角色映射
+export function getAuthBabyLinkRoles(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem('auth_baby_link_roles');
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+// 保存宝宝链接角色映射
+export function setAuthBabyLinkRoles(roles: Record<string, string>): void {
+  localStorage.setItem('auth_baby_link_roles', JSON.stringify(roles));
+}
+
+// 判断是否为超级管理员
+export function isSuperAdmin(): boolean {
+  return localStorage.getItem(AUTH_ROLE_KEY) === 'superadmin';
 }
 
 // 是否已认证
@@ -85,6 +124,20 @@ export async function login(account: string, password?: string): Promise<{ ok: b
       const accountName = data.accountName || account;
       setAuthInfo(data.token, role, accountName);
       if (data.babies) setAuthBabies(data.babies);
+      if (data.babies) {
+        const relations: Record<string, string> = {};
+        const linkRoles: Record<string, string> = {};
+        for (const baby of data.babies) {
+          if (baby.record_id && baby.relation) {
+            relations[baby.record_id] = baby.relation;
+          }
+          if (baby.record_id && baby.linkRole) {
+            linkRoles[baby.record_id] = baby.linkRole;
+          }
+        }
+        setAuthBabyRelations(relations);
+        setAuthBabyLinkRoles(linkRoles);
+      }
       return { ok: true, token: data.token, role, accountName, status: data.status, babies: data.babies };
     }
     // 账号待审批
@@ -143,6 +196,20 @@ export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; acco
     if (data.ok) {
       setAuthInfo(token, data.role, data.accountName);
       if (data.babies) setAuthBabies(data.babies);
+      if (data.babies) {
+        const relations: Record<string, string> = {};
+        const linkRoles: Record<string, string> = {};
+        for (const baby of data.babies) {
+          if (baby.record_id && baby.relation) {
+            relations[baby.record_id] = baby.relation;
+          }
+          if (baby.record_id && baby.linkRole) {
+            linkRoles[baby.record_id] = baby.linkRole;
+          }
+        }
+        setAuthBabyRelations(relations);
+        setAuthBabyLinkRoles(linkRoles);
+      }
       return { ok: true, role: data.role, accountName: data.accountName, status: data.status, babies: data.babies };
     }
     clearAuthInfo();

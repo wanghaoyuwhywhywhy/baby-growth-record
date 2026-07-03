@@ -13,11 +13,13 @@ interface AppState {
   syncStatus: 'idle' | 'syncing' | 'success' | 'error';
   lastSyncResult: { babies: number; records: number; growth: number } | null;
   cloudConnected: boolean | null;
+  babyRelations: Record<string, string>; // babyId -> relation
 
   currentBaby: () => Baby | null;
   initApp: () => Promise<void>;
   fetchBabies: () => Promise<void>;
   switchBaby: (id: string) => void;
+  setBabyRelations: (relations: Record<string, string>) => void;
   addBaby: (data: Omit<Baby, 'record_id'>) => Promise<Baby>;
   updateBaby: (record_id: string, data: Partial<Omit<Baby, 'record_id'>>) => Promise<void>;
   deleteBaby: (record_id: string) => Promise<void>;
@@ -54,6 +56,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   syncStatus: 'idle',
   lastSyncResult: null,
   cloudConnected: null,
+  babyRelations: {},
 
   currentBaby: () => {
     const { babies, currentBabyId } = get();
@@ -109,6 +112,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().fetchRecords();
     get().fetchGrowthRecords();
   },
+
+  setBabyRelations: (relations) => set({ babyRelations: relations }),
 
   addBaby: async (data) => {
     const baby = await feishuAPI.createBaby(data);

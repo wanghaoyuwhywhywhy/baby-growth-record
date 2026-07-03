@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock } from 'lucide-react';
-import { clearAuthInfo, getAuthRole, getAuthAccount, isAdmin } from '@/lib/auth';
+import { clearAuthInfo, getAuthRole, getAuthAccount, isAdmin, isSuperAdmin } from '@/lib/auth';
 import { cloudLogAccess } from '@/lib/cloud';
 import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, cloudApproveAccount, cloudRejectAccount, type AccountRecord } from '@/lib/cloud';
 
@@ -10,6 +10,7 @@ export default function SettingsPage() {
   const role = getAuthRole();
   const accountName = getAuthAccount();
   const isAdminUser = isAdmin();
+  const isSuperAdminUser = isSuperAdmin();
   const [deleteTarget, setDeleteTarget] = useState<AccountRecord | null>(null);
 
   // 账号管理状态
@@ -32,7 +33,7 @@ export default function SettingsPage() {
 
   // 加载账号列表：先从 localStorage 缓存秒开，后台刷新
   async function loadAccounts() {
-    if (!isAdminUser) return;
+    if (!isSuperAdminUser) return;
     // 优先读取缓存，秒级显示
     try {
       const cached = localStorage.getItem('accounts_cache');
@@ -49,8 +50,8 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    if (isAdminUser) loadAccounts();
-  }, [isAdminUser]);
+    if (isSuperAdminUser) loadAccounts();
+  }, [isSuperAdminUser]);
 
   // 新增账号
   async function handleAddAccount() {
@@ -126,13 +127,15 @@ export default function SettingsPage() {
   }
 
   const roleLabel = (r: string) => {
+    if (r === 'superadmin') return '超级管理员';
     if (r === 'admin') return '管理员';
     if (r === 'edit') return '编辑';
     return '查看';
   };
 
   const roleColor = (r: string) => {
-    if (r === 'admin') return 'bg-purple-100 text-purple-700';
+    if (r === 'superadmin') return 'bg-purple-100 text-purple-700';
+    if (r === 'admin') return 'bg-indigo-100 text-indigo-700';
     if (r === 'edit') return 'bg-amber-100 text-amber-700';
     return 'bg-sky-100 text-sky-700';
   };
@@ -170,7 +173,7 @@ export default function SettingsPage() {
                 {accountName || '未知账号'}
               </h3>
               <p className="text-xs text-muted">
-                {role === 'admin' ? '管理员权限（全部操作）' : role === 'edit' ? '编辑权限（可增删改）' : '查看权限（仅浏览）'}
+                {role === 'superadmin' ? '超级管理员权限（全部操作）' : role === 'admin' ? '管理员权限（全部操作）' : role === 'edit' ? '编辑权限（可增删改）' : '查看权限（仅浏览）'}
               </p>
             </div>
           </div>
@@ -183,8 +186,8 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        {/* 账号管理（仅admin可见） */}
-        {isAdminUser && (
+        {/* 账号管理（仅superadmin可见） */}
+        {isSuperAdminUser && (
           <div className="card-shadow p-5">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center text-white shadow-soft">
@@ -221,6 +224,7 @@ export default function SettingsPage() {
                           <option value="edit">通过(编辑)</option>
                           <option value="view">通过(查看)</option>
                           <option value="admin">通过(管理员)</option>
+                          <option value="superadmin">通过(超管)</option>
                         </select>
                         <button
                           onClick={() => handleReject(acc)}
@@ -328,6 +332,7 @@ export default function SettingsPage() {
                   <option value="view">查看权限</option>
                   <option value="edit">编辑权限</option>
                   <option value="admin">管理员权限</option>
+                  <option value="superadmin">超级管理员权限</option>
                 </select>
                 {formError && <p className="text-xs text-red-500">{formError}</p>}
                 <button

@@ -1,20 +1,24 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { type DailyRecord } from '@/api/feishu';
+import { type DailyRecord, type Baby } from '@/api/feishu';
 import BabyCard from '@/components/BabyCard';
 import RecordItem from '@/components/RecordItem';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Sparkles, Loader2, X, MessageCircle } from 'lucide-react';
+import { Activity, Sparkles, Loader2, X, MessageCircle, Plus, Settings } from 'lucide-react';
 import { analyzeBaby } from '@/lib/ai';
+import { getAuthBabyRelations } from '@/lib/auth';
 
 export default function HomePage() {
   const currentBaby = useAppStore((s) => s.currentBaby);
+  const babies = useAppStore((s) => s.babies);
+  const switchBaby = useAppStore((s) => s.switchBaby);
   const fetchRecentRecords = useAppStore((s) => s.fetchRecentRecords);
   const fetchGrowthRecords = useAppStore((s) => s.fetchGrowthRecords);
   const [recentRecords, setRecentRecords] = useState<DailyRecord[]>([]);
   const navigate = useNavigate();
+  const babyRelations = getAuthBabyRelations();
 
   const baby = currentBaby();
   const records = useAppStore((s) => s.records);
@@ -24,12 +28,10 @@ export default function HomePage() {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
 
-  // 首次加载和 records 变化时刷新最近记录
   useEffect(() => {
     fetchRecentRecords().then(setRecentRecords);
   }, [fetchRecentRecords, baby?.record_id, records]);
 
-  // 加载成长记录（用于 BabyCard 显示身高体重）
   useEffect(() => {
     if (baby?.record_id) {
       fetchGrowthRecords();
@@ -37,14 +39,12 @@ export default function HomePage() {
   }, [baby?.record_id, fetchGrowthRecords]);
 
   async function handleAIAnalysis() {
-    // 如果正在分析，再次点击取消
     if (aiAnalyzing) {
       aiAbortRef.current?.abort();
       setAiAnalyzing(false);
       setAiResult(null);
       return;
     }
-    // 如果已有结果，再次点击关闭弹窗
     if (aiResult) {
       setAiResult(null);
       return;
@@ -66,14 +66,26 @@ export default function HomePage() {
     }
   }
 
-  if (!baby) {
+  // 无宝宝引导页
+  if (babies.length === 0) {
     return (
       <div className="page-container">
-        <NavHeader title="宝宝成长记录" />
-        <div className="mt-20 flex flex-col items-center text-center">
+        <NavHeader title="宝宝成长记录" rightAction={
+          <button onClick={() => navigate('/settings')} className="w-9 h-9 flex items-center justify-center rounded-full text-muted hover:bg-cream-dark transition-colors">
+            <Settings size={20} />
+          </button>
+        } />
+        <div className="mt-20 flex flex-col items-center text-center px-8">
           <span className="text-6xl mb-4">👶</span>
-          <h2 className="text-lg font-outfit font-bold text-ink mb-2">加载中...</h2>
-          <p className="text-sm text-muted">正在获取宝宝档案</p>
+          <h2 className="text-lg font-outfit font-bold text-ink mb-2">添加宝宝</h2>
+          <p className="text-sm text-muted mb-6">记录宝宝的成长点滴，从添加宝宝档案开始</p>
+          <button
+            onClick={() => navigate('/baby/edit')}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus size={18} />
+            添加宝宝
+          </button>
         </div>
       </div>
     );
@@ -81,14 +93,58 @@ export default function HomePage() {
 
   return (
     <div className="page-container">
-      <NavHeader title="宝宝成长记录" />
+      <NavHeader title="宝宝成长记录" rightAction={
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => navigate('/baby/edit')}
+            className="w-9 h-9 flex items-center justify-center rounded-full text-coral hover:bg-coral/5 transition-colors"
+            aria-label="添加宝宝"
+          >
+            <Plus size={20} />
+          </button>
+          <button
+            onClick={() => navigate('/settings')}
+            className="w-9 h-9 flex items-center justify-center rounded-full text-muted hover:bg-cream-dark transition-colors"
+            aria-label="设置"
+          >
+            <Settings size={20} />
+          </button>
+        </div>
+      } />
 
       <div className="mt-4">
-        <BabyCard baby={baby} />
+        {/* 多宝宝切换标签 */}
+        {babies.length > 1 && (
+          <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
+            {babies.map((b) => {
+              const isActive = b.record_id === (baby?.record_id);
+              const relation = babyRelations[b.record_id];
+              return (
+                <button
+                  key={b.record_id}
+                  onClick={() => switchBaby(b.record_id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all
+                    ${isActive
+                      ? 'bg-coral text-white shadow-soft'
+                      : 'bg-cream-dark/50 text-muted hover:bg-cream-dark'
+                    }`}
+                >
+                  <span>{b.宝宝姓名}</span>
+                  {relation && (
+                    <span className={`text-[10px] px-1 py-0.5 rounded-full ${isActive ? 'bg-white/20' : 'bg-rule/30'}`}>
+                      {relation}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {baby && <BabyCard baby={baby} />}
 
         {/* 四个快捷入口并排 */}
         <div className="grid grid-cols-4 gap-2.5 mb-3">
-          {/* 身高体重入口 */}
           <button
             onClick={() => navigate('/growth')}
             className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97]"
@@ -99,7 +155,6 @@ export default function HomePage() {
             <p className="text-xs font-outfit font-bold text-ink">身高体重</p>
           </button>
 
-          {/* 疫苗接种入口 */}
           <button
             onClick={() => navigate('/vaccine')}
             className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97]"
@@ -110,7 +165,6 @@ export default function HomePage() {
             <p className="text-xs font-outfit font-bold text-ink">疫苗接种</p>
           </button>
 
-          {/* AI 成长分析入口 */}
           <button
             onClick={handleAIAnalysis}
             className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97]"
@@ -125,7 +179,6 @@ export default function HomePage() {
             <p className="text-xs font-outfit font-bold text-ink">{aiAnalyzing ? '取消' : 'AI 分析'}</p>
           </button>
 
-          {/* AI 咨询入口 */}
           <button
             onClick={() => navigate('/chat')}
             className="card-shadow p-3 flex flex-col items-center gap-1.5 hover:shadow-float transition-all duration-200 active:scale-[0.97]"
