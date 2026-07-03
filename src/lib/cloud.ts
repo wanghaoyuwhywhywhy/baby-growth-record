@@ -541,7 +541,7 @@ export async function cloudCreateAccount(accountName: string, password: string):
   }
 }
 
-export async function cloudUpdateAccount(record_id: string, updates: { accountName?: string; password?: string; status?: string }): Promise<boolean> {
+export async function cloudUpdateAccount(record_id: string, updates: { password?: string; status?: string }): Promise<boolean> {
   try {
     const resp = await fetch(`${WORKER_URL}/api/accounts`, {
       method: 'PUT',

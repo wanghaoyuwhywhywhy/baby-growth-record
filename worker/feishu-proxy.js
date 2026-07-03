@@ -881,19 +881,8 @@ async function handleAccounts(request, env, token, auth) {
       return { code: 0, data: { record: data.data?.record } };
     }
 
-    // 普通编辑
+    // 普通编辑（账号名不可修改）
     const updateFields = {};
-    if (body.accountName !== undefined) {
-      const filterStr = `CurrentValue.[账号名]="${body.accountName}"`;
-      const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=10`;
-      const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-      const checkData = await checkResp.json();
-      if (checkData.code === 0 && checkData.data?.items?.length > 0) {
-        const otherRecord = checkData.data.items.find(i => i.record_id !== recordId);
-        if (otherRecord) return { code: -1, msg: '账号名已存在' };
-      }
-      updateFields['账号名'] = body.accountName;
-    }
     if (body.password !== undefined) {
       if (!body.password) return { code: -1, msg: '密码不能为空' };
       updateFields['加密密码'] = await encryptPassword(body.password, env);
@@ -2066,6 +2055,38 @@ async function handleMigrate(env, token) {
         body: JSON.stringify({ field_name: '邀请码', type: 1 }),
       });
     }
+    if (!abExistingFields.includes('关联宝宝')) {
+      try {
+        await fetch(abFieldsUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field_name: '关联宝宝', type: 17, property: { table_id: env.FEISHU_TABLE_BABY } }),
+        });
+      } catch (e2) {
+        // 关联字段创建可能因权限不足失败，静默忽略
+      }
+    }
+    // 补充"审批未通过"状态到账号表状态字段
+    try {
+      const accountTableId2 = await ensureAccountTable(token, env);
+      const accFieldsUrl2 = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId2}/fields`;
+      const accFieldsResp2 = await fetch(accFieldsUrl2, { headers: { 'Authorization': `Bearer ${token}` } });
+      const accFieldsData2 = await accFieldsResp2.json();
+      if (accFieldsData2.code === 0 && accFieldsData2.data?.items) {
+        const statusField = accFieldsData2.data.items.find(f => f.field_name === '状态');
+        if (statusField && statusField.property?.options) {
+          const existingOptions = statusField.property.options.map(o => o.name);
+          if (!existingOptions.includes('审批未通过')) {
+            statusField.property.options.push({ name: '审批未通过' });
+            await fetch(`${accFieldsUrl2}/${statusField.field_id}`, {
+              method: 'PUT',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ property: statusField.property }),
+            });
+          }
+        }
+      }
+    } catch (e3) {}
   } catch (e) {
     results.accountBabyTableCreated = false;
     results.accountBabyTableError = e.message;

@@ -14,6 +14,7 @@ export default function SettingsPage() {
   // 账号管理状态
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('全部');
   const [accountPage, setAccountPage] = useState(1);
   const ACCOUNTS_PER_PAGE = 10;
 
@@ -71,14 +72,12 @@ export default function SettingsPage() {
     }
   }
 
-  // 编辑账号
+  // 编辑账号（账号名不可修改）
   async function handleEditAccount() {
     if (!editingAccount) return;
-    if (!formName.trim()) { setFormError('请输入账号名'); return; }
     setFormSubmitting(true);
     setFormError('');
-    const updates: { accountName?: string; password?: string; status?: string } = {};
-    if (formName.trim() !== editingAccount.账号名) updates.accountName = formName.trim();
+    const updates: { password?: string; status?: string } = {};
     if (formPassword) updates.password = formPassword;
     if (formStatus !== editingAccount.状态) updates.status = formStatus;
     const ok = await cloudUpdateAccount(editingAccount.record_id, updates);
@@ -142,9 +141,11 @@ export default function SettingsPage() {
     return 'bg-green-100 text-green-700';
   };
 
-  const filteredAccounts = accounts.filter(a =>
-    !searchQuery || a.账号名.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredAccounts = accounts.filter(a => {
+    const matchSearch = !searchQuery || a.账号名.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchStatus = statusFilter === '全部' || a.状态 === statusFilter;
+    return matchSearch && matchStatus;
+  });
 
   const totalPages = Math.ceil(filteredAccounts.length / ACCOUNTS_PER_PAGE);
   const paginatedAccounts = filteredAccounts.slice(
@@ -155,7 +156,7 @@ export default function SettingsPage() {
   const pendingAccounts = filteredAccounts.filter(a => a.状态 === '待审批');
   const approvedAccounts = paginatedAccounts.filter(a => a.状态 !== '待审批');
 
-  useEffect(() => { setAccountPage(1); }, [searchQuery]);
+  useEffect(() => { setAccountPage(1); }, [searchQuery, statusFilter]);
 
   return (
     <div className="page-container">
@@ -199,13 +200,27 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="搜索账号..."
-              className="w-full bg-white border border-rule rounded-xl px-3 py-2 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5 mb-3"
-            />
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="搜索账号..."
+                className="flex-1 bg-white border border-rule rounded-xl px-3 py-2 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5"
+              />
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="bg-white border border-rule rounded-xl px-3 py-2 text-sm text-ink outline-none focus:border-coral/50"
+              >
+                <option value="全部">全部状态</option>
+                <option value="正常">正常</option>
+                <option value="待审批">待审批</option>
+                <option value="冻结">冻结</option>
+                <option value="审批未通过">审批未通过</option>
+                <option value="删除">已删除</option>
+              </select>
+            </div>
 
             {/* 待审核账号 */}
             {pendingAccounts.length > 0 && (
@@ -361,7 +376,8 @@ export default function SettingsPage() {
               </button>
             </div>
             <div className="space-y-3">
-              <input type="text" value={formName} onChange={e => { setFormName(e.target.value); setFormError(''); }} placeholder="账号名" className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50" disabled={formSubmitting} />
+              <input type="text" value={formName} className="w-full bg-gray-100 border border-rule rounded-xl px-3 py-2.5 text-sm text-muted outline-none cursor-not-allowed" disabled />
+              <p className="text-[10px] text-muted/60 -mt-2">账号名不可修改</p>
               <div className="relative">
                 <input type={showFormPassword ? 'text' : 'password'} value={formPassword} onChange={e => { setFormPassword(e.target.value); setFormError(''); }} placeholder="新密码（留空则不修改）" className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 pr-10 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50" disabled={formSubmitting} />
                 <button type="button" onMouseDown={(e) => { e.preventDefault(); setShowFormPassword(!showFormPassword); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors">
