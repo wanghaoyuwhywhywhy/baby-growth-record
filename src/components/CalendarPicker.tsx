@@ -3,21 +3,25 @@ import { X } from 'lucide-react';
 
 interface CalendarPickerProps {
   initialDate: string;
-  onConfirm: (date: string) => void;
+  onConfirm: (date1: string, date2: string) => void;
   onClose: () => void;
   title: string;
-  maxDate?: string; // 最大可选日期（如今天）
-  rangeStart?: string; // 范围开始日期 YYYY-MM-DD（用于范围高亮）
+  maxDate?: string;
+  mode?: 'single' | 'range';
 }
 
-export default function CalendarPicker({ initialDate, onConfirm, onClose, title, maxDate, rangeStart }: CalendarPickerProps) {
+function toDateStr(y: number, m: number, d: number): string {
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+export default function CalendarPicker({ initialDate, onConfirm, onClose, title, maxDate, mode = 'single' }: CalendarPickerProps) {
   const d0 = new Date(initialDate);
-  const [year, setYear] = useState(d0.getFullYear());
-  const [month, setMonth] = useState(d0.getMonth());
-  const [day, setDay] = useState(d0.getDate());
   const [viewYear, setViewYear] = useState(d0.getFullYear());
   const [viewMonth, setViewMonth] = useState(d0.getMonth());
   const today = new Date();
+
+  const [date1, setDate1] = useState<string | null>(null);
+  const [date2, setDate2] = useState<string | null>(null);
 
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
@@ -26,7 +30,7 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
   const calendarCells: { day: number; current: boolean }[] = [];
   for (let i = firstDayOfWeek - 1; i >= 0; i--) calendarCells.push({ day: daysInPrevMonth - i, current: false });
   for (let d = 1; d <= daysInMonth; d++) calendarCells.push({ day: d, current: true });
-  const rows = 6; // 固定6行，避免5/6行切换时高度跳动
+  const rows = 6;
   const remaining = rows * 7 - calendarCells.length;
   for (let d = 1; d <= remaining; d++) calendarCells.push({ day: d, current: false });
 
@@ -34,11 +38,8 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
   function nextMonth() { if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); } else setViewMonth(viewMonth + 1); }
   function prevYear() { setViewYear(viewYear - 1); }
   function nextYear() { setViewYear(viewYear + 1); }
-  function selectDate(d: number) { setYear(viewYear); setMonth(viewMonth); setDay(d); }
-  const isSelected = (d: number) => viewYear === year && viewMonth === month && d === day;
   const isToday = (d: number) => viewYear === today.getFullYear() && viewMonth === today.getMonth() && d === today.getDate();
 
-  // 检查日期是否超过最大可选日期
   function isAfterMax(d: number): boolean {
     if (!maxDate) return false;
     const max = new Date(maxDate);
@@ -46,33 +47,68 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
     return date > max;
   }
 
-  // 判断日期是否在范围内（开始日期～当前选中日期之间）
-  function isInRange(d: number): boolean {
-    if (!rangeStart) return false;
-    const cellDate = new Date(viewYear, viewMonth, d);
-    const start = new Date(rangeStart + 'T00:00:00');
-    const end = new Date(year, month, day);
-    const minDate = start < end ? start : end;
-    const maxDate = start < end ? end : start;
-    // 不包含端点（端点用选中样式）
-    return cellDate > minDate && cellDate < maxDate;
-  }
+  function handleDateClick(d: number) {
+    if (isAfterMax(d)) return;
+    const clicked = toDateStr(viewYear, viewMonth, d);
 
-  // 判断是否为范围开始日期
-  function isRangeStart(d: number): boolean {
-    if (!rangeStart) return false;
-    const start = new Date(rangeStart + 'T00:00:00');
-    return viewYear === start.getFullYear() && viewMonth === start.getMonth() && d === start.getDate();
+    if (mode === 'single') {
+      onConfirm(clicked, clicked);
+      return;
+    }
+
+    if (!date1 || date2) {
+      setDate1(clicked);
+      setDate2(null);
+    } else {
+      if (clicked === date1) {
+        setDate1(null);
+        setDate2(null);
+      } else {
+        setDate2(clicked);
+      }
+    }
   }
 
   function handleConfirm() {
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    onConfirm(dateStr);
+    if (mode === 'range') {
+      if (date1 && date2) {
+        const sorted = [date1, date2].sort();
+        onConfirm(sorted[0], sorted[1]);
+      } else if (date1) {
+        onConfirm(date1, date1);
+      }
+    } else {
+      // single mode 不会到这里，但保险起见
+      if (date1) onConfirm(date1, date1);
+    }
   }
+
   function handleToday() {
     const now = new Date();
-    setYear(now.getFullYear()); setMonth(now.getMonth()); setDay(now.getDate());
-    setViewYear(now.getFullYear()); setViewMonth(now.getMonth());
+    setViewYear(now.getFullYear());
+    setViewMonth(now.getMonth());
+    handleDateClick(now.getDate());
+  }
+
+  // 获取范围高亮条样式
+  function getRangeBarClass(cellDateStr: string): string {
+    if (mode !== 'range' || !date1 || !date2) return '';
+    const sorted = [date1, date2].sort();
+    if (cellDateStr < sorted[0] || cellDateStr > sorted[1]) return '';
+
+    const isStart = cellDateStr === sorted[0];
+    const isEnd = cellDateStr === sorted[1];
+    if (isStart && !isEnd) {
+      return 'after:content-[""] after:absolute after:top-0 after:right-0 after:w-1/2 after:h-full after:bg-coral/15';
+    }
+    if (isEnd && !isStart) {
+      return 'before:content-[""] before:absolute before:top-0 before:left-0 before:w-1/2 before:h-full before:bg-coral/15';
+    }
+    if (!isStart && !isEnd) {
+      return 'before:content-[""] before:absolute before:inset-0 before:bg-coral/15';
+    }
+    // 同一天既开始又结束（不会到这里因为上面已排除）
+    return '';
   }
 
   return (
@@ -85,7 +121,6 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
           </button>
         </div>
         <div className="mb-4">
-          {/* 《 < 年月 > 》 */}
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
               <button onClick={prevYear} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors text-ink active:scale-95">
@@ -111,31 +146,68 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
             ))}
           </div>
           <div className="grid grid-cols-7">
-            {calendarCells.map((cell, i) => {
-              const selected = cell.current && isSelected(cell.day);
-              const todayMark = cell.current && isToday(cell.day);
-              const disabled = !cell.current || isAfterMax(cell.day);
-              const inRange = cell.current && isInRange(cell.day);
-              const isStart = cell.current && isRangeStart(cell.day);
+            {calendarCells.map((c, i) => {
+              const todayMark = c.current && isToday(c.day);
+              const disabled = !c.current || isAfterMax(c.day);
+              const cellDateStr = c.current ? toDateStr(viewYear, viewMonth, c.day) : '';
+
+              let isEndpoint = false;
+              let isInRange = false;
+              let rangeBarClass = '';
+
+              if (mode === 'range' && c.current) {
+                if (date1 && date2) {
+                  const sorted = [date1, date2].sort();
+                  if (cellDateStr === sorted[0] || cellDateStr === sorted[1]) {
+                    isEndpoint = true;
+                  } else if (cellDateStr > sorted[0] && cellDateStr < sorted[1]) {
+                    isInRange = true;
+                  }
+                  rangeBarClass = getRangeBarClass(cellDateStr);
+                } else if (date1 && !date2) {
+                  if (cellDateStr === date1) isEndpoint = true;
+                }
+              }
+
               return (
-                <button key={i} disabled={disabled} onClick={() => cell.current && !isAfterMax(cell.day) && selectDate(cell.day)}
-                  className={`relative w-8 h-8 mx-auto flex items-center justify-center text-xs rounded-full transition-all
+                <button key={i} disabled={disabled}
+                  onClick={() => c.current && !isAfterMax(c.day) && handleDateClick(c.day)}
+                  className={`relative w-8 h-8 mx-auto flex items-center justify-center text-xs transition-all overflow-visible
                     ${disabled ? 'text-muted/30 cursor-default' : 'text-ink hover:bg-coral/10 active:scale-95'}
-                    ${selected ? 'bg-coral text-white hover:bg-coral-dark font-semibold' : ''}
-                    ${isStart && !selected ? 'bg-coral text-white hover:bg-coral-dark font-semibold' : ''}
-                    ${inRange ? 'bg-coral/15 text-coral font-medium rounded-lg' : ''}`}
+                    ${isEndpoint ? 'bg-coral text-white hover:bg-coral-dark font-semibold rounded-full z-10' : ''}
+                    ${isInRange ? 'text-coral font-medium' : ''}
+                    ${!isEndpoint && !disabled ? 'rounded-full' : ''}
+                    ${rangeBarClass}`}
                 >
-                  {cell.day}
-                  {todayMark && !selected && !isStart && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-coral" />}
+                  {c.day}
+                  {todayMark && !isEndpoint && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-coral z-10" />}
                 </button>
               );
             })}
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2">
-          <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">今天</button>
-          <button onClick={handleConfirm} className="btn-primary py-1.5 px-4 text-xs rounded-btn">确认</button>
-        </div>
+
+        {mode === 'range' ? (
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-muted">
+              {date1 && date2
+                ? <span className="font-outfit text-ink font-medium">{[date1, date2].sort().join(' ～ ')}</span>
+                : date1
+                  ? <span>请选择第二个日期</span>
+                  : <span>点击选择日期范围</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={onClose} className="text-xs text-muted border border-rule rounded-full px-3 py-1.5 hover:bg-cream-dark transition-colors">取消</button>
+              <button onClick={handleConfirm} disabled={!date1 || !date2}
+                className="btn-primary py-1.5 px-4 text-xs rounded-btn disabled:opacity-40 disabled:cursor-not-allowed">确认</button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">今天</button>
+            <button onClick={handleConfirm} className="btn-primary py-1.5 px-4 text-xs rounded-btn">确认</button>
+          </div>
+        )}
       </div>
     </div>
   );

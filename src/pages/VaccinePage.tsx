@@ -282,10 +282,10 @@ export default function VaccinePage() {
         <CalendarPicker
           initialDate={calendarTarget.currentDate}
           title={calendarTarget.type === 'vaccinate' ? '选择接种日期' : calendarTarget.type === 'vaccinateDate' ? '修改接种时间' : '修改预计接种时间'}
-          onConfirm={(date) => {
-            if (calendarTarget.type === 'vaccinate') handleVaccinate(calendarTarget.id, date);
-            else if (calendarTarget.type === 'vaccinateDate') handleUpdateVaccinateDate(calendarTarget.id, date);
-            else handleUpdateExpected(calendarTarget.id, date);
+          onConfirm={(date1) => {
+            if (calendarTarget.type === 'vaccinate') handleVaccinate(calendarTarget.id, date1);
+            else if (calendarTarget.type === 'vaccinateDate') handleUpdateVaccinateDate(calendarTarget.id, date1);
+            else handleUpdateExpected(calendarTarget.id, date1);
           }}
           onClose={() => setCalendarTarget(null)}
         />

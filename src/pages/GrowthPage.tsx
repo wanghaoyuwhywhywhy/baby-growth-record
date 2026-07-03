@@ -351,7 +351,7 @@ export default function GrowthPage() {
           initialDate={measureDate}
           title="选择测量日期"
           maxDate={new Date().toISOString().split('T')[0]}
-          onConfirm={(date) => { setMeasureDate(date); setCalendarTarget(null); }}
+          onConfirm={(date1) => { setMeasureDate(date1); setCalendarTarget(null); }}
           onClose={() => setCalendarTarget(null)}
         />
       )}

@@ -643,7 +643,6 @@ export default function TimelinePage() {
   const [dateFilterStart, setDateFilterStart] = useState<string | null>(null);
   const [dateFilterEnd, setDateFilterEnd] = useState<string | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [datePickerStep, setDatePickerStep] = useState<'start' | 'end'>('start');
   const [editingRecord, setEditingRecord] = useState<DailyRecord | null>(null);
   const editMode = isEditMode();
 
@@ -705,7 +704,7 @@ export default function TimelinePage() {
     <div className="page-container">
       <NavHeader title="成长时间线" showBack titleAction={
         <button
-          onClick={() => { setDatePickerStep('start'); setShowDatePicker(true); }}
+          onClick={() => setShowDatePicker(true)}
           className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs whitespace-nowrap transition-all ${
             (dateFilterStart || dateFilterEnd)
               ? 'bg-coral/15 text-coral font-medium'
@@ -713,8 +712,8 @@ export default function TimelinePage() {
           }`}
         >
           <Calendar size={12} />
-          {dateFilterStart || dateFilterEnd
-            ? <>{dateFilterStart || '...'}<span className="mx-0.5 text-coral/60">～</span>{dateFilterEnd || '...'}</>
+          {dateFilterStart && dateFilterEnd
+            ? <>{dateFilterStart} <span className="mx-0.5 text-coral/60">～</span> {dateFilterEnd}</>
             : '日期'}
           {(dateFilterStart || dateFilterEnd) && (
             <span
@@ -861,29 +860,18 @@ export default function TimelinePage() {
         />
       )}
 
-      {/* 日期选择弹窗：先选开始日期，再选结束日期 */}
+      {/* 日期范围选择弹窗 */}
       {showDatePicker && (
         <CalendarPicker
-          initialDate={datePickerStep === 'start'
-            ? (dateFilterStart || new Date().toISOString().slice(0, 10))
-            : (dateFilterEnd || dateFilterStart || new Date().toISOString().slice(0, 10))}
-          onConfirm={(date) => {
-            if (datePickerStep === 'start') {
-              setDateFilterStart(date);
-              setDatePickerStep('end');
-            } else {
-              if (date < (dateFilterStart || '')) {
-                setDateFilterEnd(dateFilterStart);
-                setDateFilterStart(date);
-              } else {
-                setDateFilterEnd(date);
-              }
-              setShowDatePicker(false);
-            }
+          initialDate={dateFilterStart || new Date().toISOString().slice(0, 10)}
+          onConfirm={(d1, d2) => {
+            setDateFilterStart(d1);
+            setDateFilterEnd(d2);
+            setShowDatePicker(false);
           }}
           onClose={() => setShowDatePicker(false)}
-          title={datePickerStep === 'start' ? '选择开始日期' : '选择结束日期'}
-          rangeStart={datePickerStep === 'end' ? dateFilterStart || undefined : undefined}
+          title="选择日期范围"
+          mode="range"
         />
       )}
     </div>

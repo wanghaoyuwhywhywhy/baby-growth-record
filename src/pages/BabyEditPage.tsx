@@ -196,7 +196,7 @@ export default function BabyEditPage() {
           initialDate={birthDate || new Date().toISOString().split('T')[0]}
           title="选择出生日期"
           maxDate={new Date().toISOString().split('T')[0]}
-          onConfirm={(date) => { setBirthDate(date); setShowBirthPicker(false); }}
+          onConfirm={(date1) => { setBirthDate(date1); setShowBirthPicker(false); }}
           onClose={() => setShowBirthPicker(false)}
         />
       )}
