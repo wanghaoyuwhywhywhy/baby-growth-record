@@ -218,7 +218,7 @@ async function ensureAccountTable(token, env) {
     { field_name: '账号名', type: 1 },
     { field_name: '加密密码', type: 1 },
     { field_name: '权限', type: 3, property: { options: [{ name: 'view' }, { name: 'edit' }, { name: 'admin' }, { name: 'superadmin' }] } },
-    { field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }] } },
+    { field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }, { name: '审批未通过' }] } },
     { field_name: '最后修改时间', type: 5 },
   ];
   for (const field of accountFields) {
@@ -356,6 +356,13 @@ async function getAccountBabyIds(accountName, env) {
     console.error('[getAccountBabyIds] Error:', e.message);
     return [];
   }
+}
+
+// 检查账号对某宝宝是否有写权限
+async function canWriteBaby(accountName, babyId, env) {
+  const links = await getAccountBabyIds(accountName, env);
+  const link = links.find(l => l.babyId === babyId);
+  return link && (link.role === 'owner' || link.role === 'editor');
 }
 
 // 将账号关联到宝宝
@@ -614,7 +621,6 @@ async function handleAuth(request, env) {
         fields: {
           '账号名': account.trim(),
           '加密密码': encryptedPassword,
-          '权限': 'edit',
           '状态': '待审批',
           '最后修改时间': Date.now(),
         },
@@ -640,7 +646,7 @@ async function handleAuth(request, env) {
       return { ok: false, error: '账号已不存在' };
     }
     if (accountInfo.status !== '正常') {
-      return { ok: false, error: '账号状态异常', code: accountInfo.status === '待审批' ? 'pending' : accountInfo.status === '冻结' ? 'frozen' : 'deleted' };
+      return { ok: false, error: '账号状态异常', code: accountInfo.status === '待审批' ? 'pending' : accountInfo.status === '冻结' ? 'frozen' : accountInfo.status === '审批未通过' ? 'rejected' : 'deleted' };
     }
     // 获取关联的宝宝列表
     const links = await getAccountBabyIds(auth.accountName, env);
@@ -687,6 +693,9 @@ async function handleAuth(request, env) {
     }
     if (status === '冻结') {
       return { error: '账号已被冻结，请联系管理员', code: 'frozen' };
+    }
+    if (status === '审批未通过') {
+      return { error: '账号审批未通过，请联系管理员', code: 'rejected' };
     }
     if (status === '删除') {
       return { error: '账号已删除', code: 'deleted' };
@@ -772,7 +781,7 @@ async function handleAccounts(request, env, token, auth) {
       return {
         record_id: item.record_id,
         账号名: fields['账号名'] || '',
-        权限: fields['权限'] || 'view',
+        权限: fields['权限'] || '',
         状态: fields['状态'] || '正常',
         最后修改时间: fields['最后修改时间'] || null,
         hasPassword,
@@ -808,7 +817,6 @@ async function handleAccounts(request, env, token, auth) {
         fields: {
           '账号名': accountName,
           '加密密码': encryptedPassword,
-          '权限': role,
           '状态': '正常',
           '最后修改时间': Date.now(),
         },
@@ -829,7 +837,6 @@ async function handleAccounts(request, env, token, auth) {
       if (!recordId) return { code: -1, msg: 'record_id is required' };
       const updateFields = {
         '状态': '正常',
-        '权限': body.role || 'edit',
         '最后修改时间': Date.now(),
       };
       const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
@@ -848,7 +855,7 @@ async function handleAccounts(request, env, token, auth) {
     if (body.action === 'reject') {
       if (!recordId) return { code: -1, msg: 'record_id is required' };
       const updateFields = {
-        '状态': '冻结',
+        '状态': '审批未通过',
         '最后修改时间': Date.now(),
       };
       const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
@@ -1083,14 +1090,8 @@ export default {
         });
       }
 
-      // 写操作需要编辑或管理员权限
-      const isWriteOp = request.method !== 'GET';
-      if (isWriteOp && auth.role !== 'edit' && auth.role !== 'admin' && auth.role !== 'superadmin') {
-        return new Response(JSON.stringify({ error: '只有编辑权限才能执行此操作', code: 403 }), {
-          status: 403,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
-      }
+      // 写操作权限检查在各个 handler 内部根据宝宝关联角色判断
+      // superadmin 账号管理权限在 handleAccounts 内部检查
 
       let result;
       let binaryResponse = null;
@@ -1233,6 +1234,11 @@ async function handleBabies(request, env, token, auth) {
     const body = await request.json();
     const recordId = body.record_id;
     if (!recordId) return { error: 'record_id is required' };
+    // Check write permission for this baby
+    const canWrite = await canWriteBaby(auth.accountName, recordId, env);
+    if (!canWrite) {
+      return { error: '只有owner或editor才能编辑宝宝信息', code: 403 };
+    }
     return await bitableRequest(env, token, 'PUT', tableId, { fields: body.fields }, recordId);
   }
   if (request.method === 'DELETE') {
@@ -1275,6 +1281,14 @@ async function handleRecords(request, env, token, auth) {
     if (!body.fields['上传时间']) {
       body.fields['上传时间'] = Date.now();
     }
+    // Check write permission for the associated baby
+    const linkedBabyIds = extractLinkedIds(body.fields['关联宝宝']);
+    if (linkedBabyIds.length > 0) {
+      const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+      if (!canWrite) {
+        return { error: '只有owner或editor才能添加记录', code: 403 };
+      }
+    }
     const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
     return result;
   }
@@ -1282,12 +1296,38 @@ async function handleRecords(request, env, token, auth) {
     const body = await request.json();
     const recordId = body.record_id;
     if (!recordId) return { error: 'record_id is required' };
+    // Get existing record to check baby permission
+    const existingUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const existingResp = await fetch(existingUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const existingData = await existingResp.json();
+    if (existingData.code === 0 && existingData.data?.record) {
+      const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
+      if (linkedBabyIds.length > 0) {
+        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        if (!canWrite) {
+          return { error: '只有owner或editor才能编辑记录', code: 403 };
+        }
+      }
+    }
     return await bitableRequest(env, token, 'PUT', tableId, { fields: body.fields }, recordId);
   }
   if (request.method === 'DELETE') {
     const url = new URL(request.url);
     const recordId = url.searchParams.get('record_id');
     if (!recordId) return { error: 'record_id is required' };
+    // Get existing record to check baby permission
+    const existingUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const existingResp = await fetch(existingUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const existingData = await existingResp.json();
+    if (existingData.code === 0 && existingData.data?.record) {
+      const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
+      if (linkedBabyIds.length > 0) {
+        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        if (!canWrite) {
+          return { error: '只有owner或editor才能删除记录', code: 403 };
+        }
+      }
+    }
     return await bitableRequest(env, token, 'DELETE', tableId, {}, recordId);
   }
   return { error: 'Method not allowed' };
@@ -1372,18 +1412,52 @@ async function handleGrowth(request, env, token, auth) {
   }
   if (request.method === 'POST') {
     const body = await request.json();
+    // Check write permission for the associated baby
+    const linkedBabyIds = extractLinkedIds(body.fields?.['关联宝宝']);
+    if (linkedBabyIds.length > 0) {
+      const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+      if (!canWrite) {
+        return { error: '只有owner或editor才能添加成长记录', code: 403 };
+      }
+    }
     return await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
   }
   if (request.method === 'PUT') {
     const body = await request.json();
     const recordId = body.record_id;
     if (!recordId) return { error: 'record_id is required' };
+    // Get existing record to check baby permission
+    const existingUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const existingResp = await fetch(existingUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const existingData = await existingResp.json();
+    if (existingData.code === 0 && existingData.data?.record) {
+      const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
+      if (linkedBabyIds.length > 0) {
+        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        if (!canWrite) {
+          return { error: '只有owner或editor才能编辑成长记录', code: 403 };
+        }
+      }
+    }
     return await bitableRequest(env, token, 'PUT', tableId, { fields: body.fields }, recordId);
   }
   if (request.method === 'DELETE') {
     const url = new URL(request.url);
     const recordId = url.searchParams.get('record_id');
     if (!recordId) return { error: 'record_id is required' };
+    // Get existing record to check baby permission
+    const existingUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const existingResp = await fetch(existingUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const existingData = await existingResp.json();
+    if (existingData.code === 0 && existingData.data?.record) {
+      const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
+      if (linkedBabyIds.length > 0) {
+        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        if (!canWrite) {
+          return { error: '只有owner或editor才能删除成长记录', code: 403 };
+        }
+      }
+    }
     return await bitableRequest(env, token, 'DELETE', tableId, {}, recordId);
   }
   return { error: 'Method not allowed' };
@@ -1530,6 +1604,14 @@ async function handleVaccines(request, env, token, auth) {
 
   if (request.method === 'POST') {
     const body = await request.json();
+    // Check write permission for the associated baby
+    const linkedBabyIds = extractLinkedIds(body.fields?.['关联宝宝']);
+    if (linkedBabyIds.length > 0) {
+      const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+      if (!canWrite) {
+        return { code: -1, msg: '只有owner或editor才能添加疫苗记录' };
+      }
+    }
     // 去重：同名同剂次不重复创建
     const name = body.fields?.['疫苗名称'];
     const dose = body.fields?.['剂次'];
@@ -1556,6 +1638,19 @@ async function handleVaccines(request, env, token, auth) {
     const body = await request.json();
     const recordId = body.record_id;
     if (!recordId) return { code: -1, msg: 'record_id is required' };
+    // Get existing record to check baby permission
+    const existingUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const existingResp = await fetch(existingUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const existingData = await existingResp.json();
+    if (existingData.code === 0 && existingData.data?.record) {
+      const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
+      if (linkedBabyIds.length > 0) {
+        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        if (!canWrite) {
+          return { code: -1, msg: '只有owner或editor才能编辑疫苗记录' };
+        }
+      }
+    }
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
     const resp = await fetch(url, {
       method: 'PUT',
@@ -1571,6 +1666,19 @@ async function handleVaccines(request, env, token, auth) {
     const body = await request.json();
     const recordId = body.record_id;
     if (!recordId) return { code: -1, msg: 'record_id is required' };
+    // Get existing record to check baby permission
+    const existingUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const existingResp = await fetch(existingUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const existingData = await existingResp.json();
+    if (existingData.code === 0 && existingData.data?.record) {
+      const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
+      if (linkedBabyIds.length > 0) {
+        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        if (!canWrite) {
+          return { code: -1, msg: '只有owner或editor才能删除疫苗记录' };
+        }
+      }
+    }
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
     const resp = await fetch(url, {
       method: 'DELETE',

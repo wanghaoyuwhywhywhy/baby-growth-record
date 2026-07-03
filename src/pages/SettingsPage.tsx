@@ -128,6 +128,7 @@ export default function SettingsPage() {
     if (s === '待审批') return '待审批';
     if (s === '冻结') return '冻结';
     if (s === '删除') return '删除';
+    if (s === '审批未通过') return '审批未通过';
     return '正常';
   };
 
@@ -135,6 +136,7 @@ export default function SettingsPage() {
     if (s === '待审批') return 'bg-amber-100 text-amber-700';
     if (s === '冻结') return 'bg-red-100 text-red-700';
     if (s === '删除') return 'bg-gray-100 text-gray-500';
+    if (s === '审批未通过') return 'bg-orange-100 text-orange-700';
     return 'bg-green-100 text-green-700';
   };
 

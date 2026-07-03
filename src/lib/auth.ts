@@ -167,6 +167,10 @@ export async function login(account: string, password?: string): Promise<{ ok: b
     if (data.code === 'frozen') {
       return { ok: false, error: data.error || '账号已被冻结', code: 'frozen' };
     }
+    // 账号审批未通过
+    if (data.code === 'rejected') {
+      return { ok: false, error: data.error || '账号审批未通过', code: 'rejected' };
+    }
     // 账号已删除
     if (data.code === 'deleted') {
       return { ok: false, error: data.error || '账号已删除', code: 'deleted' };

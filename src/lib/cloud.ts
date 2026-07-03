@@ -501,7 +501,7 @@ export interface AccountRecord {
   record_id: string;
   账号名: string;
   权限: 'view' | 'edit' | 'admin';
-  状态: '正常' | '冻结' | '删除' | '待审批';
+  状态: '正常' | '冻结' | '删除' | '待审批' | '审批未通过';
   hasPassword: boolean;
   最后修改时间: number | null;
 }
