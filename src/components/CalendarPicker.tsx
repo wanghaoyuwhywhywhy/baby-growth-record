@@ -27,44 +27,71 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
   const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
   const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
 
-  const calendarCells: { day: number; current: boolean }[] = [];
-  for (let i = firstDayOfWeek - 1; i >= 0; i--) calendarCells.push({ day: daysInPrevMonth - i, current: false });
-  for (let d = 1; d <= daysInMonth; d++) calendarCells.push({ day: d, current: true });
+  // 计算每个格子的实际日期字符串（包含非当月日期）
+  const calendarCells: { day: number; dateStr: string }[] = [];
+  // 上月日期
+  for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+    const d = daysInPrevMonth - i;
+    const pm = viewMonth === 0 ? 11 : viewMonth - 1;
+    const py = viewMonth === 0 ? viewYear - 1 : viewYear;
+    calendarCells.push({ day: d, dateStr: toDateStr(py, pm, d) });
+  }
+  // 当月日期
+  for (let d = 1; d <= daysInMonth; d++) {
+    calendarCells.push({ day: d, dateStr: toDateStr(viewYear, viewMonth, d) });
+  }
+  // 下月日期
   const rows = 6;
   const remaining = rows * 7 - calendarCells.length;
-  for (let d = 1; d <= remaining; d++) calendarCells.push({ day: d, current: false });
+  const nm = viewMonth === 11 ? 0 : viewMonth + 1;
+  const ny = viewMonth === 11 ? viewYear + 1 : viewYear;
+  for (let d = 1; d <= remaining; d++) {
+    calendarCells.push({ day: d, dateStr: toDateStr(ny, nm, d) });
+  }
 
   function prevMonth() { if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); } else setViewMonth(viewMonth - 1); }
   function nextMonth() { if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); } else setViewMonth(viewMonth + 1); }
   function prevYear() { setViewYear(viewYear - 1); }
   function nextYear() { setViewYear(viewYear + 1); }
-  const isToday = (d: number) => viewYear === today.getFullYear() && viewMonth === today.getMonth() && d === today.getDate();
+  const isToday = (dateStr: string) => {
+    const now = new Date();
+    return dateStr === toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+  };
 
-  function isAfterMax(d: number): boolean {
+  function isAfterMax(dateStr: string): boolean {
     if (!maxDate) return false;
-    const max = new Date(maxDate);
-    const date = new Date(viewYear, viewMonth, d);
-    return date > max;
+    return dateStr > maxDate;
   }
 
-  function handleDateClick(d: number) {
-    if (isAfterMax(d)) return;
-    const clicked = toDateStr(viewYear, viewMonth, d);
+  // 判断是否是当月日期
+  const isCurrentMonth = (dateStr: string) => {
+    return dateStr.startsWith(`${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-`);
+  };
+
+  function handleDateClick(dateStr: string) {
+    if (isAfterMax(dateStr)) return;
+
+    // 如果点击的是非当月日期，先跳转到对应月份
+    if (!isCurrentMonth(dateStr)) {
+      const [y, m] = dateStr.split('-').map(Number);
+      setViewYear(y);
+      setViewMonth(m - 1);
+    }
 
     if (mode === 'single') {
-      onConfirm(clicked, clicked);
+      onConfirm(dateStr, dateStr);
       return;
     }
 
     if (!date1 || date2) {
-      setDate1(clicked);
+      setDate1(dateStr);
       setDate2(null);
     } else {
-      if (clicked === date1) {
+      if (dateStr === date1) {
         setDate1(null);
         setDate2(null);
       } else {
-        setDate2(clicked);
+        setDate2(dateStr);
       }
     }
   }
@@ -78,7 +105,6 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
         onConfirm(date1, date1);
       }
     } else {
-      // single mode 不会到这里，但保险起见
       if (date1) onConfirm(date1, date1);
     }
   }
@@ -87,17 +113,24 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
     const now = new Date();
     setViewYear(now.getFullYear());
     setViewMonth(now.getMonth());
-    handleDateClick(now.getDate());
+    const dateStr = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+    handleDateClick(dateStr);
   }
 
   // 获取范围高亮条样式
-  function getRangeBarClass(cellDateStr: string): string {
+  function getRangeBarClass(cellDateStr: string, isCurrent: boolean): string {
     if (mode !== 'range' || !date1 || !date2) return '';
     const sorted = [date1, date2].sort();
     if (cellDateStr < sorted[0] || cellDateStr > sorted[1]) return '';
 
     const isStart = cellDateStr === sorted[0];
     const isEnd = cellDateStr === sorted[1];
+
+    // 非当月日期也要高亮条
+    if (!isCurrent) {
+      return 'before:content-[""] before:absolute before:inset-0 before:bg-coral/15';
+    }
+
     if (isStart && !isEnd) {
       return 'after:content-[""] after:absolute after:top-0 after:right-0 after:w-1/2 after:h-full after:bg-coral/15';
     }
@@ -107,7 +140,6 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
     if (!isStart && !isEnd) {
       return 'before:content-[""] before:absolute before:inset-0 before:bg-coral/15';
     }
-    // 同一天既开始又结束（不会到这里因为上面已排除）
     return '';
   }
 
@@ -147,36 +179,36 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
           </div>
           <div className="grid grid-cols-7">
             {calendarCells.map((c, i) => {
-              const todayMark = c.current && isToday(c.day);
-              const disabled = !c.current || isAfterMax(c.day);
-              const cellDateStr = c.current ? toDateStr(viewYear, viewMonth, c.day) : '';
+              const currentMonth = isCurrentMonth(c.dateStr);
+              const todayMark = isToday(c.dateStr);
+              const afterMax = isAfterMax(c.dateStr);
 
               let isEndpoint = false;
               let isInRange = false;
               let rangeBarClass = '';
 
-              if (mode === 'range' && c.current) {
+              if (mode === 'range') {
                 if (date1 && date2) {
                   const sorted = [date1, date2].sort();
-                  if (cellDateStr === sorted[0] || cellDateStr === sorted[1]) {
+                  if (c.dateStr === sorted[0] || c.dateStr === sorted[1]) {
                     isEndpoint = true;
-                  } else if (cellDateStr > sorted[0] && cellDateStr < sorted[1]) {
+                  } else if (c.dateStr > sorted[0] && c.dateStr < sorted[1]) {
                     isInRange = true;
                   }
-                  rangeBarClass = getRangeBarClass(cellDateStr);
+                  rangeBarClass = getRangeBarClass(c.dateStr, currentMonth);
                 } else if (date1 && !date2) {
-                  if (cellDateStr === date1) isEndpoint = true;
+                  if (c.dateStr === date1) isEndpoint = true;
                 }
               }
 
               return (
-                <button key={i} disabled={disabled}
-                  onClick={() => c.current && !isAfterMax(c.day) && handleDateClick(c.day)}
+                <button key={i} disabled={afterMax}
+                  onClick={() => !afterMax && handleDateClick(c.dateStr)}
                   className={`relative w-8 h-8 mx-auto flex items-center justify-center text-xs transition-all overflow-visible
-                    ${disabled ? 'text-muted/30 cursor-default' : 'text-ink hover:bg-coral/10 active:scale-95'}
+                    ${afterMax ? 'text-muted/30 cursor-default' : !currentMonth ? 'text-muted/50 hover:bg-coral/10 active:scale-95' : 'text-ink hover:bg-coral/10 active:scale-95'}
                     ${isEndpoint ? 'bg-coral text-white hover:bg-coral-dark font-semibold rounded-full z-10' : ''}
                     ${isInRange ? 'text-coral font-medium' : ''}
-                    ${!isEndpoint && !disabled ? 'rounded-full' : ''}
+                    ${!isEndpoint && !afterMax ? 'rounded-full' : ''}
                     ${rangeBarClass}`}
                 >
                   {c.day}
