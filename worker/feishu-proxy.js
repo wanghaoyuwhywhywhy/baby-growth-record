@@ -141,7 +141,7 @@ async function verifyAccountExists(accountName, env) {
   try {
     const accountInfo = await getAccountInfo(accountName, env);
     if (!accountInfo) return false;
-    if (accountInfo.status !== 'approved') return false;
+    if (accountInfo.status !== '正常') return false;
     await refreshValidAccountsCache(env);
     return true;
   } catch (e) {
@@ -218,7 +218,7 @@ async function ensureAccountTable(token, env) {
     { field_name: '账号名', type: 1 },
     { field_name: '加密密码', type: 1 },
     { field_name: '权限', type: 3, property: { options: [{ name: 'view' }, { name: 'edit' }, { name: 'admin' }] } },
-    { field_name: '状态', type: 3, property: { options: [{ name: 'pending' }, { name: 'approved' }, { name: 'rejected' }] } },
+    { field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }] } },
     { field_name: '最后修改时间', type: 5 },
   ];
   for (const field of accountFields) {
@@ -259,7 +259,7 @@ async function ensureDefaultAdmin(token, env, tableId) {
         '账号名': 'admin',
         '加密密码': '',
         '权限': 'admin',
-        '状态': 'approved',
+        '状态': '正常',
         '最后修改时间': Date.now(),
       },
     }),
@@ -416,7 +416,7 @@ async function getAccountInfo(accountName, env) {
       record_id: listData.data.items[0].record_id,
       accountName: fields['账号名'],
       role: fields['权限'] || 'view',
-      status: fields['状态'] || 'approved',
+      status: fields['状态'] || '正常',
     };
   } catch (e) {
     console.error('[getAccountInfo] Error:', e.message);
@@ -485,7 +485,7 @@ async function handleAuth(request, env) {
           '账号名': account.trim(),
           '加密密码': encryptedPassword,
           '权限': 'edit',
-          '状态': 'pending',
+          '状态': '待审批',
           '最后修改时间': Date.now(),
         },
       }),
@@ -509,7 +509,7 @@ async function handleAuth(request, env) {
     if (!accountInfo) {
       return { ok: false, error: '账号已不存在' };
     }
-    if (accountInfo.status !== 'approved') {
+    if (accountInfo.status !== '正常') {
       return { ok: false, error: '账号未通过审核', code: accountInfo.status };
     }
     // 获取关联的宝宝列表
@@ -542,15 +542,18 @@ async function handleAuth(request, env) {
     const storedEncryptedPassword = fields['加密密码'] || fields['密码哈希'] || '';
     const role = fields['权限'] || 'view';
     const accountName = fields['账号名'] || account;
-    const status = fields['状态'] || 'approved'; // 旧账号没有状态字段，默认approved
+    const status = fields['状态'] || '正常'; // 旧账号没有状态字段，默认正常
     const recordId = accountRecord.record_id;
 
     // 检查账号状态
-    if (status === 'pending') {
-      return { error: '账号待审核，请等待管理员批准', code: 'pending' };
+    if (status === '待审批') {
+      return { error: '账号待审批，请等待管理员审核', code: 'pending' };
     }
-    if (status === 'rejected') {
-      return { error: '账号已被拒绝，请联系管理员', code: 'rejected' };
+    if (status === '冻结') {
+      return { error: '账号已被冻结，请联系管理员', code: 'frozen' };
+    }
+    if (status === '删除') {
+      return { error: '账号已删除', code: 'deleted' };
     }
 
     // admin首次登录，密码字段为空
@@ -563,12 +566,12 @@ async function handleAuth(request, env) {
       await fetch(updateUrl, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: { '加密密码': encryptedPassword, '状态': 'approved', '最后修改时间': Date.now() } }),
+        body: JSON.stringify({ fields: { '加密密码': encryptedPassword, '状态': '正常', '最后修改时间': Date.now() } }),
       });
       const token = await deriveToken(await sha256(password), role, accountName);
       const babyIds = await getAccountBabyIds(accountName, env);
       const babies = await getBabiesByIds(babyIds, env);
-      return { ok: true, token, role, accountName, status: 'approved', babies };
+      return { ok: true, token, role, accountName, status: '正常', babies };
     }
 
     if (!storedEncryptedPassword) {
@@ -624,7 +627,7 @@ async function handleAccounts(request, env, token, auth) {
         record_id: item.record_id,
         账号名: fields['账号名'] || '',
         权限: fields['权限'] || 'view',
-        状态: fields['状态'] || 'approved',
+        状态: fields['状态'] || '正常',
         最后修改时间: fields['最后修改时间'] || null,
         hasPassword,
       };
@@ -660,7 +663,7 @@ async function handleAccounts(request, env, token, auth) {
           '账号名': accountName,
           '加密密码': encryptedPassword,
           '权限': role,
-          '状态': 'approved',
+          '状态': '正常',
           '最后修改时间': Date.now(),
         },
       }),
@@ -679,7 +682,7 @@ async function handleAccounts(request, env, token, auth) {
     if (body.action === 'approve') {
       if (!recordId) return { code: -1, msg: 'record_id is required' };
       const updateFields = {
-        '状态': 'approved',
+        '状态': '正常',
         '权限': body.role || 'edit',
         '最后修改时间': Date.now(),
       };
@@ -699,7 +702,7 @@ async function handleAccounts(request, env, token, auth) {
     if (body.action === 'reject') {
       if (!recordId) return { code: -1, msg: 'record_id is required' };
       const updateFields = {
-        '状态': 'rejected',
+        '状态': '冻结',
         '最后修改时间': Date.now(),
       };
       const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
@@ -786,9 +789,18 @@ export default {
         });
       }
 
-      // 健康检查（不需要 token）
+      // /api/health 无需认证
       if (path === '/api/health') {
         return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
+      // /api/migrate GET 免认证（方便直接浏览器访问执行迁移）
+      if (path === '/api/migrate' && request.method === 'GET') {
+        const token = await getTenantToken(env);
+        const result = await handleMigrate(env, token);
+        return new Response(JSON.stringify(result), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
       }
@@ -851,15 +863,6 @@ export default {
         // 从请求中获取真实 IP
         const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '';
         const result = await handleLog(request, env, token, ip, auth);
-        return new Response(JSON.stringify(result), {
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
-      }
-
-      // /api/migrate 仅需认证（迁移：创建字段 + 回填数据 + 创建日志表）
-      if (path === '/api/migrate') {
-        const token = await getTenantToken(env);
-        const result = await handleMigrate(env, token);
         return new Response(JSON.stringify(result), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -1633,7 +1636,7 @@ async function handleMigrate(env, token) {
       await fetch(accFieldsUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field_name: '状态', type: 3, property: { options: [{ name: 'pending' }, { name: 'approved' }, { name: 'rejected' }] } }),
+        body: JSON.stringify({ field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }] } }),
       });
       results.statusFieldCreated = true;
     } else {
@@ -1671,7 +1674,7 @@ async function handleMigrate(env, token) {
           await fetch(updateUrl, {
             method: 'PUT',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields: { '状态': 'approved' } }),
+            body: JSON.stringify({ fields: { '状态': '正常' } }),
           });
         }
 

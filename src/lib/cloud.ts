@@ -501,7 +501,7 @@ export interface AccountRecord {
   record_id: string;
   账号名: string;
   权限: 'view' | 'edit' | 'admin';
-  状态: 'pending' | 'approved' | 'rejected';
+  状态: '正常' | '冻结' | '删除' | '待审批';
   hasPassword: boolean;
   最后修改时间: number | null;
 }
@@ -514,7 +514,7 @@ export async function cloudGetAccounts(): Promise<AccountRecord[]> {
       record_id: item.record_id,
       账号名: item.账号名 || '',
       权限: item.权限 || 'view',
-      状态: item.状态 || 'approved',
+      状态: item.状态 || '正常',
       hasPassword: !!item.hasPassword,
       最后修改时间: item.最后修改时间 || null,
     }));

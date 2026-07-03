@@ -87,13 +87,17 @@ export async function login(account: string, password?: string): Promise<{ ok: b
       if (data.babies) setAuthBabies(data.babies);
       return { ok: true, token: data.token, role, accountName, status: data.status, babies: data.babies };
     }
-    // 账号待审核
+    // 账号待审批
     if (data.code === 'pending') {
-      return { ok: false, error: data.error || '账号待审核', code: 'pending' };
+      return { ok: false, error: data.error || '账号待审批', code: 'pending' };
     }
-    // 账号被拒绝
-    if (data.code === 'rejected') {
-      return { ok: false, error: data.error || '账号已被拒绝', code: 'rejected' };
+    // 账号被冻结
+    if (data.code === 'frozen') {
+      return { ok: false, error: data.error || '账号已被冻结', code: 'frozen' };
+    }
+    // 账号已删除
+    if (data.code === 'deleted') {
+      return { ok: false, error: data.error || '账号已删除', code: 'deleted' };
     }
     // 账号不存在时自动登出
     if (data.code === 'account_not_found' || (data.error && data.error.includes('账号不存在'))) {

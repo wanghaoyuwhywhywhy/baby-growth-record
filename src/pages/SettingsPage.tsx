@@ -138,19 +138,21 @@ export default function SettingsPage() {
   };
 
   const statusLabel = (s: string) => {
-    if (s === 'pending') return '待审核';
-    if (s === 'rejected') return '已拒绝';
-    return '已通过';
+    if (s === '待审批') return '待审批';
+    if (s === '冻结') return '冻结';
+    if (s === '删除') return '删除';
+    return '正常';
   };
 
   const statusColor = (s: string) => {
-    if (s === 'pending') return 'bg-amber-100 text-amber-700';
-    if (s === 'rejected') return 'bg-red-100 text-red-700';
+    if (s === '待审批') return 'bg-amber-100 text-amber-700';
+    if (s === '冻结') return 'bg-red-100 text-red-700';
+    if (s === '删除') return 'bg-gray-100 text-gray-500';
     return 'bg-green-100 text-green-700';
   };
 
-  const pendingAccounts = accounts.filter(a => a.状态 === 'pending');
-  const approvedAccounts = accounts.filter(a => a.状态 !== 'pending');
+  const pendingAccounts = accounts.filter(a => a.状态 === '待审批');
+  const approvedAccounts = accounts.filter(a => a.状态 !== '待审批');
 
   return (
     <div className="page-container">
@@ -243,7 +245,7 @@ export default function SettingsPage() {
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${roleColor(acc.权限)}`}>
                       {roleLabel(acc.权限)}
                     </span>
-                    {acc.状态 === 'rejected' && (
+                    {acc.状态 !== '正常' && (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor(acc.状态)}`}>
                         {statusLabel(acc.状态)}
                       </span>

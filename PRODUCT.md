@@ -175,7 +175,7 @@
 | 账号名 | 文本 | 登录账号名（唯一） |
 | 加密密码 | 文本 | AES-256-GCM 加密后的密码（不可明文） |
 | 权限 | 单选 | view / edit / admin |
-| 状态 | 单选 | pending / approved / rejected |
+| 状态 | 单选 | 正常 / 冻结 / 删除 / 待审批 |
 | 最后修改时间 | 日期 | 最后修改时间戳 |
 
 **账号宝宝关联表 (AccountBaby)** — Worker 自动创建
@@ -728,11 +728,11 @@ baby-growth-record/
 - **管理员审核**：设置页账号管理区域新增待审核账号列表
   - 管理员可选择"通过（编辑/查看/管理员权限）"或"拒绝"
   - Worker /api/accounts PUT 新增 action=approve/reject
-- **账号状态字段**：账号表新增"状态"字段（pending/approved/rejected）
-  - 登录时检查状态：pending 提示"待审核"，rejected 提示"已被拒绝"
-  - verify 时检查状态：非 approved 的账号自动登出
-  - 管理员创建的账号默认 approved，自助注册默认 pending
-- **数据迁移**：/api/migrate 新增步骤将现有账号设为 approved 并关联到所有现有宝宝
+- **账号状态字段**：账号表新增"状态"字段（正常/冻结/删除/待审批）
+  - 登录时检查状态：待审批提示"等待审核"，冻结提示"已被冻结"，删除提示"已删除"
+  - verify 时检查状态：非"正常"的账号自动登出
+  - 管理员创建的账号默认"正常"，自助注册默认"待审批"
+- **数据迁移**：/api/migrate GET 免认证，新增步骤将现有账号设为"正常"并关联到所有现有宝宝
 - **前端 auth.ts**：新增 register()、verifyAuth() 函数，login 返回 babies 列表
 - **前端 cloud.ts**：新增 cloudRegister()、cloudApproveAccount()、cloudRejectAccount() API
 - **登录页**：支持登录/注册模式切换，注册成功显示等待审核提示
