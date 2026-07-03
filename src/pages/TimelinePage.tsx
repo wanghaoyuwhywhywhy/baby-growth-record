@@ -652,6 +652,40 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
   );
 }
 
+// 年龄标签转日期范围
+function ageLabelToDateRange(label: string, birthDate: string): { start: string; end: string } | null {
+  const birth = new Date(birthDate);
+  let years = 0, months = 0;
+
+  const yearMatch = label.match(/(\d+)岁/);
+  const monthMatch = label.match(/(\d+)个月/);
+  if (yearMatch) years = parseInt(yearMatch[1]);
+  if (monthMatch) months = parseInt(monthMatch[1]);
+
+  if (!yearMatch && !monthMatch) return null;
+
+  // 开始日期：出生日期 + years年 + months个月
+  const start = new Date(birth);
+  start.setFullYear(start.getFullYear() + years);
+  start.setMonth(start.getMonth() + months);
+
+  // 结束日期：开始日期 + 1个月 - 1天
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + 1);
+  end.setDate(end.getDate() - 1);
+
+  const now = new Date();
+  if (end > now) end.setTime(now.getTime());
+
+  const fmt = (d: Date) => {
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${m}-${day}`;
+  };
+
+  return { start: fmt(start), end: fmt(end) };
+}
+
 export default function TimelinePage() {
   const { records, fetchRecords, fetchBabies, currentBaby } = useAppStore();
   const currentBabyId = currentBaby()?.record_id;
@@ -793,7 +827,12 @@ export default function TimelinePage() {
 
       {(dateFilterStart || dateFilterEnd || ageFilterLabel) && (
         <div className="text-xs text-muted mt-1">
-          {ageFilterLabel ? `筛选: ${ageFilterLabel}` : (dateFilterStart && dateFilterEnd) ? `筛选: ${dateFilterStart} ～ ${dateFilterEnd}` : dateFilterStart ? `筛选: ${dateFilterStart} 起` : ''}
+          {ageFilterLabel && babyDob ? (
+            (() => {
+              const range = ageLabelToDateRange(ageFilterLabel, babyDob);
+              return range ? `${range.start} ～ ${range.end}` : ageFilterLabel;
+            })()
+          ) : (dateFilterStart && dateFilterEnd) ? `${dateFilterStart} ～ ${dateFilterEnd}` : dateFilterStart ? `${dateFilterStart} ～` : ''}
           <button onClick={clearFilters} className="ml-2 text-coral hover:underline">清除</button>
         </div>
       )}

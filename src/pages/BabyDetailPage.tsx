@@ -305,17 +305,6 @@ export default function BabyDetailPage() {
             </div>
           )}
         </div>
-
-        {/* 输入邀请码 */}
-        <div className="card-shadow mb-5 overflow-hidden">
-          <div className="px-4 py-3 border-b border-rule/40 bg-cream-dark/30">
-            <h3 className="text-sm font-outfit font-bold text-ink">使用邀请码</h3>
-          </div>
-          <div className="px-4 py-3">
-            <p className="text-xs text-muted mb-2">输入收到的邀请码，关联到新的宝宝</p>
-            <InviteCodeInput onRedeem={() => { loadContacts(); }} />
-          </div>
-        </div>
       </div>
 
       {/* 编辑联系人弹窗 */}
@@ -386,53 +375,6 @@ export default function BabyDetailPage() {
           onConfirm={() => handleRemoveContact(removeTarget)}
           onClose={() => setRemoveTarget(null)}
         />
-      )}
-    </div>
-  );
-}
-
-function InviteCodeInput({ onRedeem }: { onRedeem: () => void }) {
-  const [code, setCode] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-
-  async function handleRedeem() {
-    if (!code.trim()) return;
-    setSubmitting(true);
-    setResult(null);
-    const { cloudRedeemInvite } = await import('@/lib/cloud');
-    const res = await cloudRedeemInvite(code.trim());
-    setSubmitting(false);
-    if (res.ok) {
-      setResult({ ok: true, msg: '关联成功！' });
-      setCode('');
-      onRedeem();
-    } else {
-      setResult({ ok: false, msg: res.error || '关联失败' });
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={code}
-          onChange={e => { setCode(e.target.value.toUpperCase()); setResult(null); }}
-          placeholder="输入邀请码，如 INV-A3B5C7"
-          maxLength={10}
-          className="flex-1 bg-white border border-rule rounded-xl px-3 py-2 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50"
-        />
-        <button
-          onClick={handleRedeem}
-          disabled={!code.trim() || submitting}
-          className="btn-primary px-4 py-2 text-sm disabled:opacity-50"
-        >
-          {submitting ? '...' : '关联'}
-        </button>
-      </div>
-      {result && (
-        <p className={`text-xs mt-1.5 ${result.ok ? 'text-green-600' : 'text-red-500'}`}>{result.msg}</p>
       )}
     </div>
   );

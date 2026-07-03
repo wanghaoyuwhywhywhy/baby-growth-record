@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock, Users } from 'lucide-react';
+import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock } from 'lucide-react';
 import { clearAuthInfo, getAuthAccount, isSuperAdmin } from '@/lib/auth';
 import { cloudLogAccess } from '@/lib/cloud';
 import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, cloudApproveAccount, cloudRejectAccount, type AccountRecord } from '@/lib/cloud';
@@ -182,20 +182,6 @@ export default function SettingsPage() {
             <LogOut size={16} />
             退出登录
           </button>
-        </div>
-
-        {/* 使用邀请码 */}
-        <div className="card-shadow p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sky to-mint flex items-center justify-center text-white shadow-soft">
-              <Users size={22} strokeWidth={2.5} />
-            </div>
-            <div>
-              <h3 className="text-sm font-outfit font-bold text-ink">加入宝宝</h3>
-              <p className="text-xs text-muted">输入邀请码关联到新的宝宝</p>
-            </div>
-          </div>
-          <SettingsInviteCodeInput />
         </div>
 
         {/* 账号管理（仅superadmin可见） */}
@@ -382,52 +368,6 @@ export default function SettingsPage() {
           onConfirm={() => handleDeleteAccount(deleteTarget)}
           onClose={() => setDeleteTarget(null)}
         />
-      )}
-    </div>
-  );
-}
-
-function SettingsInviteCodeInput() {
-  const [code, setCode] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-
-  async function handleRedeem() {
-    if (!code.trim()) return;
-    setSubmitting(true);
-    setResult(null);
-    const { cloudRedeemInvite } = await import('@/lib/cloud');
-    const res = await cloudRedeemInvite(code.trim());
-    setSubmitting(false);
-    if (res.ok) {
-      setResult({ ok: true, msg: '关联成功！刷新页面后即可看到新宝宝' });
-      setCode('');
-    } else {
-      setResult({ ok: false, msg: res.error || '关联失败' });
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={code}
-          onChange={e => { setCode(e.target.value.toUpperCase()); setResult(null); }}
-          placeholder="输入邀请码，如 INV-A3B5C7"
-          maxLength={10}
-          className="flex-1 bg-white border border-rule rounded-xl px-3 py-2 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50"
-        />
-        <button
-          onClick={handleRedeem}
-          disabled={!code.trim() || submitting}
-          className="btn-primary px-4 py-2 text-sm disabled:opacity-50"
-        >
-          {submitting ? '...' : '关联'}
-        </button>
-      </div>
-      {result && (
-        <p className={`text-xs mt-1.5 ${result.ok ? 'text-green-600' : 'text-red-500'}`}>{result.msg}</p>
       )}
     </div>
   );

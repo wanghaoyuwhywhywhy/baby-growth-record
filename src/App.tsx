@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { isAuthenticated, clearAuthInfo, verifyAuth, type AuthRole, isEditMode, setAuthBabyRelations } from '@/lib/auth';
+import { isAuthenticated, clearAuthInfo, verifyAuth, type AuthRole, isEditMode, setAuthBabyRelations, setAuthBabyLinkRoles, setAuthBabies } from '@/lib/auth';
 import LoginPage from '@/pages/LoginPage';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
@@ -97,20 +97,31 @@ export default function App() {
       console.log('[verifyAccount] API返回:', result);
       if (result.ok) {
         setAuthed(true);
-        // Store baby relations from verify result
+        // Store baby relations and link roles from verify result
         if (result.babies) {
           const relations: Record<string, string> = {};
+          const linkRoles: Record<string, string> = {};
           for (const baby of result.babies) {
             if (baby.record_id && baby.relation) {
               relations[baby.record_id] = baby.relation;
             }
+            if (baby.record_id && baby.linkRole) {
+              linkRoles[baby.record_id] = baby.linkRole;
+            }
           }
           setAuthBabyRelations(relations);
+          setAuthBabyLinkRoles(linkRoles);
+          setAuthBabies(result.babies);
         }
       } else {
-        console.log('[verifyAccount] 验证失败，执行登出');
-        clearAuthInfo();
-        setAuthed(false);
+        console.log('[verifyAccount] 验证失败:', result.error, result.code);
+        // 仅在明确的账号状态异常时登出，其他错误保持登录避免临时网络问题导致登出
+        const shouldLogout = ['pending', 'frozen', 'deleted', 'rejected', 'account_not_found'].includes(result.code || '');
+        if (shouldLogout) {
+          clearAuthInfo();
+          setAuthed(false);
+        }
+        // 非明确错误时保持登录
       }
     } catch (e) {
       console.log('[verifyAccount] 请求异常:', e);

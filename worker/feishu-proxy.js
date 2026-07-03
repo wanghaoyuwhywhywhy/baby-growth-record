@@ -748,6 +748,13 @@ async function handleAuth(request, env) {
     if (!passwordMatch) return { error: '密码错误' };
 
     const token = await deriveToken(await sha256(password), role, accountName);
+    // 更新最后登录时间
+    const loginUpdateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    await fetch(loginUpdateUrl, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { '最后修改时间': Date.now() } }),
+    }).catch(() => {}); // 静默失败，不影响登录
     const links = await getAccountBabyIds(accountName, env);
     const babyIds = links.map(l => l.babyId);
     const babies = await getBabiesByIds(babyIds, env);
@@ -904,6 +911,27 @@ async function handleAccounts(request, env, token, auth) {
     const recordId = body.record_id;
     if (!recordId) return { code: -1, msg: 'record_id is required' };
 
+    // 先获取账号名，用于清理关联记录
+    const getUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const getResp = await fetch(getUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const getData = await getResp.json();
+    if (getData.code === 0 && getData.data?.record?.fields?.['账号名']) {
+      const accountName = getData.data.record.fields['账号名'];
+      // 清理该账号在关联表中的所有记录
+      const linkTableId = await ensureAccountBabyTable(feishuToken, env);
+      const filterStr = `CurrentValue.[账号名]="${accountName}"`;
+      const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+      const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+      const listData = await listResp.json();
+      if (listData.code === 0 && listData.data?.items) {
+        for (const item of listData.data.items) {
+          const delUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
+          await fetch(delUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${feishuToken}` } });
+        }
+      }
+      accountBabyCache = { data: new Map(), expires: 0 };
+    }
+
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
     const resp = await fetch(url, {
       method: 'DELETE',
@@ -911,6 +939,7 @@ async function handleAccounts(request, env, token, auth) {
     });
     const data = await resp.json();
     if (data.code !== 0) return { code: -1, msg: data.msg };
+    validAccountsCache = { accounts: new Set(), expires: 0 };
     return { code: 0 };
   }
 

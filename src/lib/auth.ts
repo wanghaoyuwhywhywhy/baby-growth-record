@@ -207,7 +207,7 @@ export async function register(account: string, password: string): Promise<{ ok:
 }
 
 // 验证 token 是否仍有效（含状态检查）
-export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; accountName?: string; status?: string; babies?: any[] }> {
+export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; accountName?: string; status?: string; babies?: any[]; error?: string; code?: string }> {
   const token = getAuthToken();
   if (!token) return { ok: false };
   try {
@@ -237,8 +237,8 @@ export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; acco
       return { ok: true, role: data.role, accountName: data.accountName, status: data.status, babies: data.babies };
     }
     clearAuthInfo();
-    return { ok: false };
+    return { ok: false, error: data.error, code: data.code };
   } catch (e) {
-    return { ok: false };
+    return { ok: false, error: '网络错误', code: 'network_error' };
   }
 }
