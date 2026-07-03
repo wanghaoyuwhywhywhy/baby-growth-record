@@ -290,9 +290,9 @@ export default function AIChatPage() {
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky to-mint flex items-center justify-center text-white shadow-soft mb-4">
               <Sparkles size={24} strokeWidth={2.5} />
             </div>
-            <h2 className="text-base font-outfit font-bold text-ink mb-2">小嘻顾问</h2>
+            <h2 className="text-base font-outfit font-bold text-ink mb-2">小嘻助手</h2>
             <p className="text-sm text-muted leading-relaxed max-w-[260px]">
-              你好！我是小嘻，宝宝的专属成长顾问。你可以问我关于育儿、健康、营养、教育等方面的问题，我会结合宝宝的实际数据给出个性化建议。
+              你好！我是小嘻，宝宝的专属成长助手。你可以问我关于育儿、健康、营养、教育等方面的问题，我会结合宝宝的实际数据给出个性化建议。
             </p>
             {/* 快捷问题 */}
             <div className="mt-5 space-y-2 w-full max-w-[280px]">
