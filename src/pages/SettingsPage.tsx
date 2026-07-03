@@ -24,6 +24,7 @@ export default function SettingsPage() {
   const [formError, setFormError] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [showFormPassword, setShowFormPassword] = useState(false);
+  const [formStatus, setFormStatus] = useState('正常');
 
   function handleLogout() {
     clearAuthInfo();
@@ -74,17 +75,17 @@ export default function SettingsPage() {
   async function handleEditAccount() {
     if (!editingAccount) return;
     if (!formName.trim()) { setFormError('请输入账号名'); return; }
-    if (!formPassword) { setFormError('请输入新密码'); return; }
     setFormSubmitting(true);
     setFormError('');
-    const updates: { accountName?: string; password?: string } = {};
+    const updates: { accountName?: string; password?: string; status?: string } = {};
     if (formName.trim() !== editingAccount.账号名) updates.accountName = formName.trim();
     if (formPassword) updates.password = formPassword;
+    if (formStatus !== editingAccount.状态) updates.status = formStatus;
     const ok = await cloudUpdateAccount(editingAccount.record_id, updates);
     setFormSubmitting(false);
     if (ok) {
       setEditingAccount(null);
-      setFormName(''); setFormPassword(''); setFormError('');
+      setFormName(''); setFormPassword(''); setFormStatus('正常'); setFormError('');
       loadAccounts();
     } else {
       setFormError('更新失败');
@@ -114,6 +115,7 @@ export default function SettingsPage() {
     setEditingAccount(account);
     setFormName(account.账号名);
     setFormPassword('');
+    setFormStatus(account.状态);
     setFormError('');
   }
 
@@ -121,7 +123,7 @@ export default function SettingsPage() {
   function cancelForm() {
     setShowAddForm(false);
     setEditingAccount(null);
-    setFormName(''); setFormPassword(''); setFormError('');
+    setFormName(''); setFormPassword(''); setFormStatus('正常'); setFormError('');
   }
 
   const statusLabel = (s: string) => {
@@ -249,11 +251,9 @@ export default function SettingsPage() {
                 <div key={acc.record_id} className="flex items-center justify-between bg-cream-light/50 rounded-xl px-3 py-2.5">
                   <div className="flex items-center gap-2.5">
                     <span className="text-sm font-medium text-ink">{acc.账号名}</span>
-                    {acc.状态 !== '正常' && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor(acc.状态)}`}>
-                        {statusLabel(acc.状态)}
-                      </span>
-                    )}
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor(acc.状态)}`}>
+                      {statusLabel(acc.状态)}
+                    </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -307,53 +307,6 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* 新增/编辑表单 */}
-            {(showAddForm || editingAccount) && (
-              <div className="mt-3 p-4 bg-cream-light/30 rounded-xl border border-rule/40 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-outfit font-bold text-ink">
-                    {editingAccount ? '编辑账号' : '新增账号'}
-                  </h4>
-                  <button onClick={cancelForm} className="p-1 rounded-lg hover:bg-cream-dark/50 text-muted">
-                    <X size={16} />
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={e => { setFormName(e.target.value); setFormError(''); }}
-                  placeholder="账号名"
-                  className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5"
-                  disabled={formSubmitting}
-                />
-                <div className="relative">
-                  <input
-                    type={showFormPassword ? 'text' : 'password'}
-                    value={formPassword}
-                    onChange={e => { setFormPassword(e.target.value); setFormError(''); }}
-                    placeholder={editingAccount ? '新密码' : '密码'}
-                    required={!editingAccount}
-                    className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 pr-10 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5"
-                    disabled={formSubmitting}
-                  />
-                  <button
-                    type="button"
-                    onMouseDown={(e) => { e.preventDefault(); setShowFormPassword(!showFormPassword); }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors"
-                  >
-                    {showFormPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-                {formError && <p className="text-xs text-red-500">{formError}</p>}
-                <button
-                  onClick={editingAccount ? handleEditAccount : handleAddAccount}
-                  disabled={formSubmitting}
-                  className="btn-primary w-full py-2.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {formSubmitting ? <Loader2 size={14} className="animate-spin" /> : (editingAccount ? '保存' : '创建')}
-                </button>
-              </div>
-            )}
           </div>
         )}
 
@@ -363,11 +316,69 @@ export default function SettingsPage() {
       {deleteTarget && (
         <ConfirmDialog
           title="删除账号"
-          message={`确定删除账号 "${deleteTarget.账号名}" 吗？删除后无法恢复。`}
+          message={`确定删除账号 "${deleteTarget.账号名}" 吗？该账号将被标记为已删除。`}
           confirmText="删除"
           onConfirm={() => handleDeleteAccount(deleteTarget)}
           onClose={() => setDeleteTarget(null)}
         />
+      )}
+
+      {/* 新增账号弹框 */}
+      {showAddForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={cancelForm}>
+          <div className="w-full max-w-sm bg-cream-light rounded-2xl p-5 mx-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-outfit font-bold text-ink">新增账号</h3>
+              <button onClick={cancelForm} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark">
+                <X size={18} className="text-muted" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input type="text" value={formName} onChange={e => { setFormName(e.target.value); setFormError(''); }} placeholder="账号名" className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50" disabled={formSubmitting} />
+              <div className="relative">
+                <input type={showFormPassword ? 'text' : 'password'} value={formPassword} onChange={e => { setFormPassword(e.target.value); setFormError(''); }} placeholder="密码" className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 pr-10 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50" disabled={formSubmitting} />
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); setShowFormPassword(!showFormPassword); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors">
+                  {showFormPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              {formError && <p className="text-xs text-red-500">{formError}</p>}
+              <button onClick={handleAddAccount} disabled={formSubmitting} className="btn-primary w-full py-2.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                {formSubmitting ? <Loader2 size={14} className="animate-spin" /> : '创建'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 编辑账号弹框 */}
+      {editingAccount && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={cancelForm}>
+          <div className="w-full max-w-sm bg-cream-light rounded-2xl p-5 mx-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-outfit font-bold text-ink">编辑账号</h3>
+              <button onClick={cancelForm} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark">
+                <X size={18} className="text-muted" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input type="text" value={formName} onChange={e => { setFormName(e.target.value); setFormError(''); }} placeholder="账号名" className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50" disabled={formSubmitting} />
+              <div className="relative">
+                <input type={showFormPassword ? 'text' : 'password'} value={formPassword} onChange={e => { setFormPassword(e.target.value); setFormError(''); }} placeholder="新密码（留空则不修改）" className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 pr-10 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50" disabled={formSubmitting} />
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); setShowFormPassword(!showFormPassword); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors">
+                  {showFormPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <select value={formStatus} onChange={e => setFormStatus(e.target.value)} className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-coral/50" disabled={formSubmitting}>
+                <option value="正常">正常</option>
+                <option value="冻结">冻结</option>
+              </select>
+              {formError && <p className="text-xs text-red-500">{formError}</p>}
+              <button onClick={handleEditAccount} disabled={formSubmitting} className="btn-primary w-full py-2.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                {formSubmitting ? <Loader2 size={14} className="animate-spin" /> : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

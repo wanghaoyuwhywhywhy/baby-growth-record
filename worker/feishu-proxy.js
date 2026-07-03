@@ -217,7 +217,7 @@ async function ensureAccountTable(token, env) {
   const accountFields = [
     { field_name: '账号名', type: 1 },
     { field_name: '加密密码', type: 1 },
-    { field_name: '权限', type: 3, property: { options: [{ name: 'view' }, { name: 'edit' }, { name: 'admin' }, { name: 'superadmin' }] } },
+    { field_name: '权限', type: 3, property: { options: [{ name: 'superadmin' }] } },
     { field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }, { name: '审批未通过' }] } },
     { field_name: '最后修改时间', type: 5 },
   ];
@@ -302,16 +302,21 @@ async function ensureAccountBabyTable(token, env) {
   const abFields = [
     { field_name: '账号名', type: 1 },
     { field_name: '宝宝ID', type: 1 },
+    { field_name: '关联宝宝', type: 17, property: { table_id: env.FEISHU_TABLE_BABY } },
     { field_name: '角色', type: 3, property: { options: [{ name: 'owner' }, { name: 'editor' }, { name: 'viewer' }] } },
     { field_name: '关系', type: 3, property: { options: [{ name: '爸爸' }, { name: '妈妈' }, { name: '爷爷' }, { name: '奶奶' }, { name: '外公' }, { name: '外婆' }, { name: '姑姑' }, { name: '叔叔' }, { name: '舅舅' }, { name: '阿姨' }, { name: '其他' }] } },
     { field_name: '邀请码', type: 1 },
   ];
   for (const field of abFields) {
-    await fetch(fieldsUrl, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(field),
-    });
+    try {
+      await fetch(fieldsUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(field),
+      });
+    } catch (e) {
+      // 关联字段创建可能因权限不足失败，静默忽略
+    }
   }
 
   accountBabyTableIdCache = tableId;
@@ -684,7 +689,7 @@ async function handleAuth(request, env) {
     const accountRecord = listData.data.items[0];
     const fields = accountRecord.fields || {};
     const storedEncryptedPassword = fields['加密密码'] || fields['密码哈希'] || '';
-    const role = (fields['权限'] === 'admin' || fields['权限'] === 'superadmin') ? 'superadmin' : 'view';
+    const role = fields['权限'] === 'superadmin' ? 'superadmin' : 'view';
     const accountName = fields['账号名'] || account;
     const status = fields['状态'] || '正常'; // 旧账号没有状态字段，默认正常
     const recordId = accountRecord.record_id;
@@ -893,6 +898,10 @@ async function handleAccounts(request, env, token, auth) {
       if (!body.password) return { code: -1, msg: '密码不能为空' };
       updateFields['加密密码'] = await encryptPassword(body.password, env);
     }
+    if (body.status !== undefined) {
+      if (!['正常', '冻结', '删除'].includes(body.status)) return { code: -1, msg: '状态值无效' };
+      updateFields['状态'] = body.status;
+    }
     updateFields['最后修改时间'] = Date.now();
 
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
@@ -911,31 +920,12 @@ async function handleAccounts(request, env, token, auth) {
     const recordId = body.record_id;
     if (!recordId) return { code: -1, msg: 'record_id is required' };
 
-    // 先获取账号名，用于清理关联记录
-    const getUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
-    const getResp = await fetch(getUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-    const getData = await getResp.json();
-    if (getData.code === 0 && getData.data?.record?.fields?.['账号名']) {
-      const accountName = getData.data.record.fields['账号名'];
-      // 清理该账号在关联表中的所有记录
-      const linkTableId = await ensureAccountBabyTable(feishuToken, env);
-      const filterStr = `CurrentValue.[账号名]="${accountName}"`;
-      const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
-      const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-      const listData = await listResp.json();
-      if (listData.code === 0 && listData.data?.items) {
-        for (const item of listData.data.items) {
-          const delUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
-          await fetch(delUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${feishuToken}` } });
-        }
-      }
-      accountBabyCache = { data: new Map(), expires: 0 };
-    }
-
-    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
-    const resp = await fetch(url, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${feishuToken}` },
+    // 逻辑删除：设置状态为"删除"，不物理删除
+    const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const resp = await fetch(updateUrl, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { '状态': '删除', '最后修改时间': Date.now() } }),
     });
     const data = await resp.json();
     if (data.code !== 0) return { code: -1, msg: data.msg };
@@ -1055,13 +1045,20 @@ export default {
                 const accountData = await accountResp.json();
                 if (accountData.code === 0 && accountData.data?.items) {
                   const lastLoginMap = {};
+                  const accountStatusMap = {};
                   for (const aItem of accountData.data.items) {
                     const name = aItem.fields?.['账号名'];
-                    if (name) lastLoginMap[name] = aItem.fields?.['最后修改时间'] || null;
+                    if (name) {
+                      lastLoginMap[name] = aItem.fields?.['最后修改时间'] || null;
+                      accountStatusMap[name] = aItem.fields?.['状态'] || '正常';
+                    }
                   }
                   for (const item of contacts) {
                     if (item.accountName && lastLoginMap[item.accountName]) {
                       item.lastLoginTime = lastLoginMap[item.accountName];
+                    }
+                    if (item.accountName) {
+                      item.accountStatus = accountStatusMap[item.accountName] || '正常';
                     }
                   }
                 }
@@ -1069,7 +1066,9 @@ export default {
                 // 查询最后登录时间失败不影响主流程
               }
             }
-            return new Response(JSON.stringify({ ok: true, contacts }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            // 过滤掉状态非正常的已关联联系人（保留待领取邀请码）
+            const filteredContacts = contacts.filter(c => !c.accountName || c.accountStatus === '正常');
+            return new Response(JSON.stringify({ ok: true, contacts: filteredContacts }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
           if (body.action === 'updateRole') {
             if (!body.record_id || !body.role) return new Response(JSON.stringify({ ok: false, error: '参数不完整' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -2163,6 +2162,26 @@ async function handleMigrate(env, token) {
   } catch (e) {
     results.accountMigrationError = e.message;
   }
+
+  // 12. 刷数据：把admin权限改为superadmin
+  try {
+    const feishuToken = await getTenantToken(env);
+    const tableId = await ensureAccountTable(feishuToken, env);
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent('CurrentValue.[权限]="admin"')}&page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
+    if (listData.code === 0 && listData.data?.items) {
+      for (const item of listData.data.items) {
+        const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${item.record_id}`;
+        await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { '权限': 'superadmin' } }),
+        });
+      }
+    }
+  } catch (e) {}
 
   return { ok: true, ...results };
 }

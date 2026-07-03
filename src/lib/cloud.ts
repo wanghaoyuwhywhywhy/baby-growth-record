@@ -500,7 +500,7 @@ export async function cloudLogAccess(action: 'login' | 'logout'): Promise<void> 
 export interface AccountRecord {
   record_id: string;
   账号名: string;
-  权限: 'view' | 'edit' | 'admin';
+  权限: string;
   状态: '正常' | '冻结' | '删除' | '待审批' | '审批未通过';
   hasPassword: boolean;
   最后修改时间: number | null;
@@ -541,7 +541,7 @@ export async function cloudCreateAccount(accountName: string, password: string):
   }
 }
 
-export async function cloudUpdateAccount(record_id: string, updates: { accountName?: string; password?: string }): Promise<boolean> {
+export async function cloudUpdateAccount(record_id: string, updates: { accountName?: string; password?: string; status?: string }): Promise<boolean> {
   try {
     const resp = await fetch(`${WORKER_URL}/api/accounts`, {
       method: 'PUT',
