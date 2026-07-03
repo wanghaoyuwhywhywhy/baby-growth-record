@@ -189,7 +189,7 @@ export default function GrowthPage() {
         {/* 添加按钮 */}
         {canEdit && (
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => { setEditingRecord(null); setMeasureDate(new Date().toISOString().split('T')[0]); setHeight(''); setWeight(''); setHeadCircumference(''); setRemark(''); setShowForm(true); }}
           className="btn-primary w-full mb-5 flex items-center justify-center gap-2"
         >
           <Plus size={18} strokeWidth={2.5} />
@@ -197,10 +197,77 @@ export default function GrowthPage() {
         </button>
         )}
 
-        {/* 添加表单 */}
-        {showForm && (
-          <div className="card-shadow p-4 mb-5 animate-fade-up">
-            <h3 className="text-sm font-outfit font-bold text-ink mb-3">{editingRecord ? '编辑测量数据' : '新增测量数据'}</h3>
+        {/* 历史记录 */}
+        <div className="card-shadow overflow-hidden">
+          <div className="px-4 py-3 border-b border-rule/40 bg-cream-dark/30">
+            <h3 className="text-sm font-outfit font-bold text-ink">历史记录</h3>
+          </div>
+          {growthRecords.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="text-4xl mb-2">📏</p>
+              <p className="text-sm text-muted">还没有测量数据</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-rule/30">
+              {[...sorted].reverse().map((r) => {
+                const d = new Date(r.测量日期);
+                return (
+                <div key={r.record_id} className="px-4 py-3 flex items-center gap-3 group">
+                  <div className="w-[52px] flex-shrink-0 text-center">
+                    <div className="text-[10px] text-muted">{d.getFullYear()}</div>
+                    <div className="text-sm font-bold text-mint-dark">{d.getMonth() + 1}.{d.getDate()}</div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                      {r.身高 && (
+                        <span className="text-sm text-ink">
+                          <span className="text-muted text-xs">身高</span> {r.身高}cm
+                        </span>
+                      )}
+                      {r.体重 && (
+                        <span className="text-sm text-ink">
+                          <span className="text-muted text-xs">体重</span> {r.体重}kg
+                        </span>
+                      )}
+                      {r.头围 && (
+                        <span className="text-sm text-ink">
+                          <span className="text-muted text-xs">头围</span> {r.头围}cm
+                        </span>
+                      )}
+                    </div>
+                    {r.备注 && <p className="text-xs text-muted/70 mt-0.5">{r.备注}</p>}
+                  </div>
+                  {canEdit && (
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => startEdit(r)}
+                      className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-mint/10 text-muted hover:text-mint-dark transition-all"
+                      aria-label="编辑"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => setDeleteTarget(r.record_id)}
+                      className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-coral/10 text-muted hover:text-coral transition-all"
+                      aria-label="删除"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  )}
+                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 添加/编辑弹框 */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6" onClick={resetForm}>
+          <div className="w-full max-w-sm bg-cream-light rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-outfit font-bold text-ink mb-4">{editingRecord ? '编辑测量数据' : '新增测量数据'}</h3>
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-muted mb-1.5">测量日期</label>
@@ -277,73 +344,8 @@ export default function GrowthPage() {
               </div>
             </div>
           </div>
-        )}
-
-        {/* 历史记录 */}
-        <div className="card-shadow overflow-hidden">
-          <div className="px-4 py-3 border-b border-rule/40 bg-cream-dark/30">
-            <h3 className="text-sm font-outfit font-bold text-ink">历史记录</h3>
-          </div>
-          {growthRecords.length === 0 ? (
-            <div className="py-10 text-center">
-              <p className="text-4xl mb-2">📏</p>
-              <p className="text-sm text-muted">还没有测量数据</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-rule/30">
-              {[...sorted].reverse().map((r) => {
-                const d = new Date(r.测量日期);
-                return (
-                <div key={r.record_id} className="px-4 py-3 flex items-center gap-3 group">
-                  <div className="w-[52px] flex-shrink-0 text-center">
-                    <div className="text-[10px] text-muted">{d.getFullYear()}</div>
-                    <div className="text-sm font-bold text-mint-dark">{d.getMonth() + 1}.{d.getDate()}</div>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                      {r.身高 && (
-                        <span className="text-sm text-ink">
-                          <span className="text-muted text-xs">身高</span> {r.身高}cm
-                        </span>
-                      )}
-                      {r.体重 && (
-                        <span className="text-sm text-ink">
-                          <span className="text-muted text-xs">体重</span> {r.体重}kg
-                        </span>
-                      )}
-                      {r.头围 && (
-                        <span className="text-sm text-ink">
-                          <span className="text-muted text-xs">头围</span> {r.头围}cm
-                        </span>
-                      )}
-                    </div>
-                    {r.备注 && <p className="text-xs text-muted/70 mt-0.5">{r.备注}</p>}
-                  </div>
-                  {canEdit && (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => startEdit(r)}
-                      className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-mint/10 text-muted hover:text-mint-dark transition-all"
-                      aria-label="编辑"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      onClick={() => setDeleteTarget(r.record_id)}
-                      className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-coral/10 text-muted hover:text-coral transition-all"
-                      aria-label="删除"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                  )}
-                </div>
-                );
-              })}
-            </div>
-          )}
         </div>
-      </div>
+      )}
 
       {/* 日历选择器 */}
       {calendarTarget && (
