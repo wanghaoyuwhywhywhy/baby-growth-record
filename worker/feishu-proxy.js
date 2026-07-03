@@ -684,7 +684,7 @@ async function handleAuth(request, env) {
     const accountRecord = listData.data.items[0];
     const fields = accountRecord.fields || {};
     const storedEncryptedPassword = fields['加密密码'] || fields['密码哈希'] || '';
-    const role = fields['权限'] || 'view';
+    const role = (fields['权限'] === 'admin' || fields['权限'] === 'superadmin') ? 'superadmin' : 'view';
     const accountName = fields['账号名'] || account;
     const status = fields['状态'] || '正常'; // 旧账号没有状态字段，默认正常
     const recordId = accountRecord.record_id;
@@ -763,7 +763,7 @@ async function handleAuth(request, env) {
 
 // 处理账号管理请求（仅 superadmin 可操作）
 async function handleAccounts(request, env, token, auth) {
-  if (auth.role !== 'superadmin') {
+  if (auth.role !== 'superadmin' && auth.role !== 'admin') {
     return { error: '只有超级管理员才能管理账号', code: 403 };
   }
 
@@ -796,11 +796,9 @@ async function handleAccounts(request, env, token, auth) {
     const body = await request.json();
     const accountName = body.accountName;
     const password = body.password;
-    const role = body.role || 'view';
 
     if (!accountName) return { code: -1, msg: '账号名不能为空' };
     if (!password) return { code: -1, msg: '密码不能为空' };
-    if (!['view', 'edit', 'admin', 'superadmin'].includes(role)) return { code: -1, msg: '权限值无效' };
 
     const filterStr = `CurrentValue.[账号名]="${accountName}"`;
     const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
@@ -811,8 +809,7 @@ async function handleAccounts(request, env, token, auth) {
     }
 
     const encryptedPassword = await encryptPassword(password, env);
-    const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
-    const resp = await fetch(recordUrl, {
+    const resp = await fetch(`${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -888,10 +885,6 @@ async function handleAccounts(request, env, token, auth) {
     if (body.password !== undefined) {
       if (!body.password) return { code: -1, msg: '密码不能为空' };
       updateFields['加密密码'] = await encryptPassword(body.password, env);
-    }
-    if (body.role !== undefined) {
-      if (!['view', 'edit', 'admin', 'superadmin'].includes(body.role)) return { code: -1, msg: '权限值无效' };
-      updateFields['权限'] = body.role;
     }
     updateFields['最后修改时间'] = Date.now();
 
@@ -1020,6 +1013,33 @@ export default {
             const { babyId } = body;
             if (!babyId) return new Response(JSON.stringify({ error: 'babyId is required' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             const contacts = await getBabyInviteCodes(babyId, env);
+            // 批量查询每个联系人的最后登录时间（从账号表获取最后修改时间）
+            const accountNames = contacts.filter(c => c.accountName).map(c => c.accountName);
+            if (accountNames.length > 0) {
+              try {
+                const feishuToken = await getTenantToken(env);
+                const accountTableId = await ensureAccountTable(feishuToken, env);
+                const appToken = env.FEISHU_BASE_TOKEN;
+                const filterStr = accountNames.map(n => `CurrentValue.[账号名]="${n}"`).join(' OR ');
+                const accountUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+                const accountResp = await fetch(accountUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+                const accountData = await accountResp.json();
+                if (accountData.code === 0 && accountData.data?.items) {
+                  const lastLoginMap = {};
+                  for (const aItem of accountData.data.items) {
+                    const name = aItem.fields?.['账号名'];
+                    if (name) lastLoginMap[name] = aItem.fields?.['最后修改时间'] || null;
+                  }
+                  for (const item of contacts) {
+                    if (item.accountName && lastLoginMap[item.accountName]) {
+                      item.lastLoginTime = lastLoginMap[item.accountName];
+                    }
+                  }
+                }
+              } catch (e) {
+                // 查询最后登录时间失败不影响主流程
+              }
+            }
             return new Response(JSON.stringify({ ok: true, contacts }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
           if (body.action === 'updateRole') {
@@ -1033,6 +1053,26 @@ export default {
               method: 'PUT',
               headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({ fields: { '角色': body.role } }),
+            });
+            const data = await resp.json();
+            if (data.code !== 0) return new Response(JSON.stringify({ ok: false, error: data.msg }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            accountBabyCache = { data: new Map(), expires: 0 };
+            return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+          }
+          if (body.action === 'updateContact') {
+            if (!body.record_id) return new Response(JSON.stringify({ ok: false, error: '参数不完整' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            const updates = {};
+            if (body.relation) updates['关系'] = body.relation;
+            if (body.role && ['editor', 'viewer'].includes(body.role)) updates['角色'] = body.role;
+            if (Object.keys(updates).length === 0) return new Response(JSON.stringify({ ok: false, error: '无更新内容' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            const feishuToken = await getTenantToken(env);
+            const linkTableId = await ensureAccountBabyTable(feishuToken, env);
+            const appToken = env.FEISHU_BASE_TOKEN;
+            const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${body.record_id}`;
+            const resp = await fetch(updateUrl, {
+              method: 'PUT',
+              headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fields: updates }),
             });
             const data = await resp.json();
             if (data.code !== 0) return new Response(JSON.stringify({ ok: false, error: data.msg }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });

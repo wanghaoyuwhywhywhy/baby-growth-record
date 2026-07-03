@@ -5,9 +5,7 @@ import NavHeader from '@/components/NavHeader';
 import CalendarPicker from '@/components/CalendarPicker';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { Check, Calendar, Trash2 } from 'lucide-react';
-import { getAuthBabyRelations, getAuthBabyLinkRoles } from '@/lib/auth';
-
-const RELATION_OPTIONS = ['爸爸', '妈妈', '爷爷', '奶奶', '外公', '外婆', '姑姑', '叔叔', '舅舅', '阿姨', '其他'];
+import { getAuthBabyLinkRoles } from '@/lib/auth';
 
 export default function BabyEditPage() {
   const navigate = useNavigate();
@@ -21,7 +19,6 @@ export default function BabyEditPage() {
   const [name, setName] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [gender, setGender] = useState<'男' | '女'>('男');
-  const [relation, setRelation] = useState('其他');
   const [remark, setRemark] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -38,11 +35,6 @@ export default function BabyEditPage() {
       setBirthDate(editingBaby.出生日期);
       setGender(editingBaby.性别 as '男' | '女');
       setRemark(editingBaby.备注 || '');
-      // 从 auth 中获取关系
-      const relations = getAuthBabyRelations();
-      if (editingBaby.record_id && relations[editingBaby.record_id]) {
-        setRelation(relations[editingBaby.record_id]);
-      }
     }
   }, [editingBaby]);
 
@@ -56,7 +48,6 @@ export default function BabyEditPage() {
         宝宝姓名: name.trim(),
         出生日期: birthDate,
         性别: gender,
-        关系: relation,
         备注: remark.trim() || undefined,
       };
       if (isEdit && editId) {
@@ -157,25 +148,6 @@ export default function BabyEditPage() {
             >
               <span className="text-xl mr-1">👧</span> 女孩
             </button>
-          </div>
-        </Field>
-
-        <Field label="关系">
-          <div className="flex flex-wrap gap-2">
-            {RELATION_OPTIONS.map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => setRelation(opt)}
-                className={`px-3 py-2 rounded-btn border-2 text-sm transition-all ${
-                  relation === opt
-                    ? 'border-coral bg-coral/10 text-coral font-medium'
-                    : 'border-rule bg-cream-light text-muted'
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
           </div>
         </Field>
 

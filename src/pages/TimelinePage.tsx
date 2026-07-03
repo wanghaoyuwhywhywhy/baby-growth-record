@@ -678,6 +678,13 @@ export default function TimelinePage() {
   // 切换筛选时重置显示数量
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [mediaFilter, categoryFilter, dateFilterStart, dateFilterEnd, ageFilterLabel]);
 
+  // 清除所有筛选条件
+  function clearFilters() {
+    setDateFilterStart(null);
+    setDateFilterEnd(null);
+    setAgeFilterLabel(null);
+  }
+
   const filtered = records.filter(r => {
     const mediaTypes = r.媒体类型 || ['text'];
     let matchMedia = true;
@@ -698,12 +705,13 @@ export default function TimelinePage() {
       const recordDate = new Date(r.记录时间);
       let ageAtRecordYear = recordDate.getFullYear() - birth.getFullYear();
       let ageAtRecordMonth = recordDate.getMonth() - birth.getMonth();
-      if (ageAtRecordMonth < 0 || (ageAtRecordMonth === 0 && recordDate.getDate() < birth.getDate())) {
+      if (recordDate.getDate() < birth.getDate()) {
+        ageAtRecordMonth--;
+      }
+      if (ageAtRecordMonth < 0) {
         ageAtRecordYear--;
         ageAtRecordMonth += 12;
       }
-      if (recordDate.getDate() < birth.getDate()) ageAtRecordMonth--;
-      if (ageAtRecordMonth < 0) ageAtRecordMonth += 12;
       // 解析年龄标签
       const yearMatch = ageFilterLabel.match(/^(\d+)岁$/);
       const monthMatch = ageFilterLabel.match(/^(\d+)岁(\d+)个月$/);
@@ -782,6 +790,13 @@ export default function TimelinePage() {
         )}
         </div>
       } />
+
+      {(dateFilterStart || dateFilterEnd || ageFilterLabel) && (
+        <div className="text-xs text-muted mt-1">
+          {ageFilterLabel ? `筛选: ${ageFilterLabel}` : (dateFilterStart && dateFilterEnd) ? `筛选: ${dateFilterStart} ～ ${dateFilterEnd}` : dateFilterStart ? `筛选: ${dateFilterStart} 起` : ''}
+          <button onClick={clearFilters} className="ml-2 text-coral hover:underline">清除</button>
+        </div>
+      )}
 
       <div className="mt-4">
         {/* 分类筛选 */}
@@ -956,7 +971,10 @@ function AgePickerModal({ birthDate, onSelect, onClose }: { birthDate: string; o
   // 计算宝宝当前年龄
   let currentYears = now.getFullYear() - birth.getFullYear();
   let currentMonths = now.getMonth() - birth.getMonth();
-  if (currentMonths < 0 || (currentMonths === 0 && now.getDate() < birth.getDate())) {
+  if (now.getDate() < birth.getDate()) {
+    currentMonths--;
+  }
+  if (currentMonths < 0) {
     currentYears--;
     currentMonths += 12;
   }
@@ -967,11 +985,11 @@ function AgePickerModal({ birthDate, onSelect, onClose }: { birthDate: string; o
     yearOptions.push(y);
   }
 
-  // 右侧：所有月份选项，从0岁0个月到当前年龄
+  // 右侧：所有月份选项，从当前年龄倒序到0岁0个月（最近时间在上方）
   const allMonthOptions: { label: string; value: string; year: number }[] = [];
-  for (let y = 0; y <= currentYears; y++) {
+  for (let y = currentYears; y >= 0; y--) {
     const maxM = y === currentYears ? currentMonths : 11;
-    for (let m = 0; m <= maxM; m++) {
+    for (let m = maxM; m >= 0; m--) {
       if (m === 0 && y > 0) {
         allMonthOptions.push({ label: `${y}岁🎂`, value: `${y}岁`, year: y });
       } else if (y === 0) {

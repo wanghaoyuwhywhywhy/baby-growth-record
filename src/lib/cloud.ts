@@ -688,3 +688,17 @@ export async function cloudUpdateContactRole(record_id: string, role: string): P
     return { ok: false, error: '网络错误' };
   }
 }
+
+// 更新联系人信息（关系+权限）
+export async function cloudUpdateContact(record_id: string, updates: { relation?: string; role?: string }): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'updateContact', record_id, ...updates }),
+    });
+    return await resp.json();
+  } catch (e) {
+    return { ok: false, error: '网络错误' };
+  }
+}

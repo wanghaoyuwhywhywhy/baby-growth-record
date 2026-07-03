@@ -121,7 +121,8 @@ export function setAuthBabyLinkRoles(roles: Record<string, string>): void {
 
 // 判断是否为超级管理员
 export function isSuperAdmin(): boolean {
-  return localStorage.getItem(AUTH_ROLE_KEY) === 'superadmin';
+  const role = localStorage.getItem(AUTH_ROLE_KEY);
+  return role === 'superadmin' || role === 'admin';
 }
 
 // 是否已认证

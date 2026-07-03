@@ -6,7 +6,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import { calcAge } from '@/utils/date';
 import { Edit3, User, Calendar, Heart, Plus, Trash2, Copy, Users } from 'lucide-react';
 import { getAuthBabyRelations, getAuthBabyLinkRoles } from '@/lib/auth';
-import { cloudGetBabyContacts, cloudCreateInvite, cloudRemoveContact } from '@/lib/cloud';
+import { cloudGetBabyContacts, cloudCreateInvite, cloudRemoveContact, cloudUpdateContact } from '@/lib/cloud';
 
 interface Contact {
   record_id: string;
@@ -16,6 +16,7 @@ interface Contact {
   relation: string;
   inviteCode: string;
   isPending: boolean;
+  lastLoginTime?: number | null;
 }
 
 export default function BabyDetailPage() {
@@ -31,6 +32,9 @@ export default function BabyDetailPage() {
   const [inviteRole, setInviteRole] = useState('editor');
   const [inviteCode, setInviteCode] = useState('');
   const [removeTarget, setRemoveTarget] = useState<Contact | null>(null);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const [editRelation, setEditRelation] = useState('');
+  const [editRole, setEditRole] = useState('');
 
   const isOwner = baby ? babyLinkRoles[baby.record_id] === 'owner' : false;
 
@@ -71,6 +75,20 @@ export default function BabyDetailPage() {
     if (result.ok) {
       loadContacts();
     }
+  }
+
+  async function handleSaveEditContact() {
+    if (!editingContact) return;
+    const updates: { relation?: string; role?: string } = {};
+    if (editRelation !== editingContact.relation) updates.relation = editRelation;
+    if (editRole !== editingContact.role) updates.role = editRole;
+    if (Object.keys(updates).length > 0) {
+      const result = await cloudUpdateContact(editingContact.record_id, updates);
+      if (result.ok) {
+        loadContacts();
+      }
+    }
+    setEditingContact(null);
   }
 
   function copyCode(code: string) {
@@ -188,14 +206,27 @@ export default function BabyDetailPage() {
                       </button>
                     </div>
                   )}
+                  {c.lastLoginTime && (
+                    <div className="text-[10px] text-muted/50 mt-0.5">
+                      最后登录: {new Date(c.lastLoginTime).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                    </div>
+                  )}
                 </div>
                 {isOwner && c.role !== 'owner' && (
-                  <button
-                    onClick={() => setRemoveTarget(c)}
-                    className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <>
+                    <button
+                      onClick={() => { setEditingContact(c); setEditRelation(c.relation); setEditRole(c.role); }}
+                      className="p-1.5 rounded-lg hover:bg-coral/10 text-muted hover:text-coral transition-colors"
+                    >
+                      <Edit3 size={14} />
+                    </button>
+                    <button
+                      onClick={() => setRemoveTarget(c)}
+                      className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </>
                 )}
               </div>
             )) : (
@@ -286,6 +317,65 @@ export default function BabyDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* 编辑联系人弹窗 */}
+      {editingContact && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setEditingContact(null)}>
+          <div className="w-full max-w-sm bg-cream-light rounded-2xl p-5 mx-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-outfit font-bold text-ink">编辑联系人</h3>
+              <button onClick={() => setEditingContact(null)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-cream-dark">
+                <span className="text-muted text-lg">×</span>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs text-muted mb-1">与宝宝的关系</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {RELATION_OPTIONS.map(r => (
+                    <button
+                      key={r}
+                      onClick={() => setEditRelation(r)}
+                      className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
+                        editRelation === r ? 'bg-coral text-white' : 'bg-cream-dark text-muted hover:text-ink'
+                      }`}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-muted mb-1">权限</label>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setEditRole('editor')}
+                    className={`text-xs px-3 py-1 rounded-full transition-colors ${
+                      editRole === 'editor' ? 'bg-coral text-white' : 'bg-cream-dark text-muted'
+                    }`}
+                  >
+                    可编辑
+                  </button>
+                  <button
+                    onClick={() => setEditRole('viewer')}
+                    className={`text-xs px-3 py-1 rounded-full transition-colors ${
+                      editRole === 'viewer' ? 'bg-coral text-white' : 'bg-cream-dark text-muted'
+                    }`}
+                  >
+                    仅浏览
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={handleSaveEditContact}
+                className="btn-primary w-full py-2 text-sm"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 删除联系人确认 */}
       {removeTarget && (
