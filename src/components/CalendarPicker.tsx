@@ -89,8 +89,8 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
       setDate2(null);
     } else {
       if (dateStr === date1) {
-        setDate1(null);
-        setDate2(null);
+        // 点击同一日期，视为选择单天（开始=结束）
+        setDate2(dateStr);
       } else {
         setDate2(dateStr);
       }
