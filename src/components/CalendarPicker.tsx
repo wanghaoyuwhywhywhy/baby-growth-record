@@ -7,9 +7,10 @@ interface CalendarPickerProps {
   onClose: () => void;
   title: string;
   maxDate?: string; // 最大可选日期（如今天）
+  rangeLabel?: string; // 左下角显示的范围文本（如"06-15 ~ 07-02"）
 }
 
-export default function CalendarPicker({ initialDate, onConfirm, onClose, title, maxDate }: CalendarPickerProps) {
+export default function CalendarPicker({ initialDate, onConfirm, onClose, title, maxDate, rangeLabel }: CalendarPickerProps) {
   const d0 = new Date(initialDate);
   const [year, setYear] = useState(d0.getFullYear());
   const [month, setMonth] = useState(d0.getMonth());
@@ -111,7 +112,11 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted">已选：</span>
-            <span className="text-sm font-outfit font-bold text-ink">{year}-{String(month + 1).padStart(2, '0')}-{String(day).padStart(2, '0')}</span>
+            <span className="text-sm font-outfit font-bold text-ink">
+              {rangeLabel
+                ? rangeLabel
+                : `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">今天</button>
