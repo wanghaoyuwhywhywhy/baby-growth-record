@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock } from 'lucide-react';
+import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock, Users } from 'lucide-react';
 import { clearAuthInfo, getAuthRole, getAuthAccount, isAdmin, isSuperAdmin } from '@/lib/auth';
 import { cloudLogAccess } from '@/lib/cloud';
 import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, cloudApproveAccount, cloudRejectAccount, type AccountRecord } from '@/lib/cloud';
@@ -15,6 +15,9 @@ export default function SettingsPage() {
 
   // 账号管理状态
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [accountPage, setAccountPage] = useState(1);
+  const ACCOUNTS_PER_PAGE = 10;
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingAccount, setEditingAccount] = useState<AccountRecord | null>(null);
@@ -154,8 +157,20 @@ export default function SettingsPage() {
     return 'bg-green-100 text-green-700';
   };
 
-  const pendingAccounts = accounts.filter(a => a.状态 === '待审批');
-  const approvedAccounts = accounts.filter(a => a.状态 !== '待审批');
+  const filteredAccounts = accounts.filter(a =>
+    !searchQuery || a.账号名.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const totalPages = Math.ceil(filteredAccounts.length / ACCOUNTS_PER_PAGE);
+  const paginatedAccounts = filteredAccounts.slice(
+    (accountPage - 1) * ACCOUNTS_PER_PAGE,
+    accountPage * ACCOUNTS_PER_PAGE
+  );
+
+  const pendingAccounts = filteredAccounts.filter(a => a.状态 === '待审批');
+  const approvedAccounts = paginatedAccounts.filter(a => a.状态 !== '待审批');
+
+  useEffect(() => { setAccountPage(1); }, [searchQuery]);
 
   return (
     <div className="page-container">
@@ -186,6 +201,20 @@ export default function SettingsPage() {
           </button>
         </div>
 
+        {/* 使用邀请码 */}
+        <div className="card-shadow p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sky to-mint flex items-center justify-center text-white shadow-soft">
+              <Users size={22} strokeWidth={2.5} />
+            </div>
+            <div>
+              <h3 className="text-sm font-outfit font-bold text-ink">加入宝宝</h3>
+              <p className="text-xs text-muted">输入邀请码关联到新的宝宝</p>
+            </div>
+          </div>
+          <SettingsInviteCodeInput />
+        </div>
+
         {/* 账号管理（仅superadmin可见） */}
         {isSuperAdminUser && (
           <div className="card-shadow p-5">
@@ -198,6 +227,14 @@ export default function SettingsPage() {
                 <p className="text-xs text-muted">管理系统中的所有账号</p>
               </div>
             </div>
+
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="搜索账号..."
+              className="w-full bg-white border border-rule rounded-xl px-3 py-2 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50 focus:ring-2 focus:ring-coral/5 mb-3"
+            />
 
             {/* 待审核账号 */}
             {pendingAccounts.length > 0 && (
@@ -286,6 +323,27 @@ export default function SettingsPage() {
               </button>
             )}
 
+            {/* 分页 */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-3">
+                <button
+                  onClick={() => setAccountPage(p => Math.max(1, p - 1))}
+                  disabled={accountPage <= 1}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-cream-dark text-muted disabled:opacity-30"
+                >
+                  上一页
+                </button>
+                <span className="text-xs text-muted">{accountPage}/{totalPages}</span>
+                <button
+                  onClick={() => setAccountPage(p => Math.min(totalPages, p + 1))}
+                  disabled={accountPage >= totalPages}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-cream-dark text-muted disabled:opacity-30"
+                >
+                  下一页
+                </button>
+              </div>
+            )}
+
             {/* 新增/编辑表单 */}
             {(showAddForm || editingAccount) && (
               <div className="mt-3 p-4 bg-cream-light/30 rounded-xl border border-rule/40 space-y-3">
@@ -358,6 +416,52 @@ export default function SettingsPage() {
           onConfirm={() => handleDeleteAccount(deleteTarget)}
           onClose={() => setDeleteTarget(null)}
         />
+      )}
+    </div>
+  );
+}
+
+function SettingsInviteCodeInput() {
+  const [code, setCode] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function handleRedeem() {
+    if (!code.trim()) return;
+    setSubmitting(true);
+    setResult(null);
+    const { cloudRedeemInvite } = await import('@/lib/cloud');
+    const res = await cloudRedeemInvite(code.trim());
+    setSubmitting(false);
+    if (res.ok) {
+      setResult({ ok: true, msg: '关联成功！刷新页面后即可看到新宝宝' });
+      setCode('');
+    } else {
+      setResult({ ok: false, msg: res.error || '关联失败' });
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={code}
+          onChange={e => { setCode(e.target.value.toUpperCase()); setResult(null); }}
+          placeholder="输入邀请码，如 INV-A3B5C7"
+          maxLength={10}
+          className="flex-1 bg-white border border-rule rounded-xl px-3 py-2 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50"
+        />
+        <button
+          onClick={handleRedeem}
+          disabled={!code.trim() || submitting}
+          className="btn-primary px-4 py-2 text-sm disabled:opacity-50"
+        >
+          {submitting ? '...' : '关联'}
+        </button>
+      </div>
+      {result && (
+        <p className={`text-xs mt-1.5 ${result.ok ? 'text-green-600' : 'text-red-500'}`}>{result.msg}</p>
       )}
     </div>
   );

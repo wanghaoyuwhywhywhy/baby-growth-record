@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import NavHeader from '@/components/NavHeader';
 import { chatStream } from '@/lib/ai';
+import { getAuthBabyRelations } from '@/lib/auth';
 import { Send, Mic, MicOff, Loader2, Sparkles, Trash2 } from 'lucide-react';
 
 interface ChatMessage {
@@ -33,9 +34,11 @@ function saveHistory(messages: ChatMessage[]) {
 
 export default function AIChatPage() {
   const baby = useAppStore((s) => s.currentBaby)();
+  const babies = useAppStore((s) => s.babies);
   const growthRecords = useAppStore((s) => s.growthRecords);
   const records = useAppStore((s) => s.records);
   const vaccines = useAppStore((s) => s.vaccines);
+  const babyRelations = getAuthBabyRelations();
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadHistory());
   const [input, setInput] = useState('');
@@ -74,14 +77,13 @@ export default function AIChatPage() {
 
   // 提取宝宝数据（发送给AI的上下文）
   function getBabyContext() {
-    const babyData: Record<string, any> = {};
-    if (baby) {
-      babyData.宝宝姓名 = baby.宝宝姓名;
-      babyData.性别 = baby.性别;
-      babyData.出生日期 = baby.出生日期;
-      babyData.备注 = baby.备注;
-    }
-    return babyData;
+    return babies.map(b => ({
+      宝宝姓名: b.宝宝姓名,
+      性别: b.性别,
+      出生日期: b.出生日期,
+      备注: b.备注,
+      关系: babyRelations[b.record_id] || '其他',
+    }));
   }
 
   function getGrowthContext() {
@@ -292,7 +294,7 @@ export default function AIChatPage() {
             </div>
             <h2 className="text-base font-outfit font-bold text-ink mb-2">小嘻助手</h2>
             <p className="text-sm text-muted leading-relaxed max-w-[260px]">
-              你好！我是小嘻，宝宝的专属成长助手。你可以问我关于育儿、健康、营养、教育等方面的问题，我会结合宝宝的实际数据给出个性化建议。
+              你好！我是小嘻，{babies.map(b => b.宝宝姓名).join('、') || '宝宝'}的专属成长助手。你可以问我关于育儿、健康、营养、教育等方面的问题，我会结合宝宝的实际数据给出个性化建议。
             </p>
             {/* 快捷问题 */}
             <div className="mt-5 space-y-2 w-full max-w-[280px]">
