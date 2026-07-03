@@ -22,8 +22,6 @@ export default function BabyEditPage() {
   const [birthDate, setBirthDate] = useState('');
   const [gender, setGender] = useState<'男' | '女'>('男');
   const [relation, setRelation] = useState('其他');
-  const [momName, setMomName] = useState('');
-  const [dadName, setDadName] = useState('');
   const [remark, setRemark] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -39,8 +37,6 @@ export default function BabyEditPage() {
       setName(editingBaby.宝宝姓名);
       setBirthDate(editingBaby.出生日期);
       setGender(editingBaby.性别 as '男' | '女');
-      setMomName(editingBaby.妈妈名字 || '');
-      setDadName(editingBaby.爸爸名字 || '');
       setRemark(editingBaby.备注 || '');
       // 从 auth 中获取关系
       const relations = getAuthBabyRelations();
@@ -61,8 +57,6 @@ export default function BabyEditPage() {
         出生日期: birthDate,
         性别: gender,
         关系: relation,
-        妈妈名字: momName.trim() || undefined,
-        爸爸名字: dadName.trim() || undefined,
         备注: remark.trim() || undefined,
       };
       if (isEdit && editId) {
@@ -184,30 +178,6 @@ export default function BabyEditPage() {
             ))}
           </div>
         </Field>
-
-        <div className="card-shadow p-4 space-y-4">
-          <p className="text-xs font-medium text-muted">爸爸妈妈（选填）</p>
-          <Field label="👩 妈妈名字" small>
-            <input
-              type="text"
-              value={momName}
-              onChange={(e) => setMomName(e.target.value)}
-              placeholder="妈妈的名字"
-              maxLength={20}
-              className="input-field"
-            />
-          </Field>
-          <Field label="👨 爸爸名字" small>
-            <input
-              type="text"
-              value={dadName}
-              onChange={(e) => setDadName(e.target.value)}
-              placeholder="爸爸的名字"
-              maxLength={20}
-              className="input-field"
-            />
-          </Field>
-        </div>
 
         <Field label="备注（选填）">
           <textarea

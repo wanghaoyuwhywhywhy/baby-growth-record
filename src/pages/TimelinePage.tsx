@@ -756,17 +756,8 @@ export default function TimelinePage() {
           }`}
         >
           <Calendar size={12} />
-          {dateFilterStart && dateFilterEnd
-            ? <>{dateFilterStart} <span className="mx-0.5 text-coral/60">～</span> {dateFilterEnd}</>
-            : '日期'}
-          {(dateFilterStart || dateFilterEnd) && (
-            <span
-              onClick={(e) => { e.stopPropagation(); setDateFilterStart(null); setDateFilterEnd(null); }}
-              className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-coral/20 active:scale-95"
-            >
-              <X size={10} />
-            </span>
-          )}
+          日期
+          {(dateFilterStart || dateFilterEnd) && <span className="w-1.5 h-1.5 rounded-full bg-coral" />}
         </button>
         {babyDob && (
         <button
@@ -956,6 +947,9 @@ export default function TimelinePage() {
 // 年龄筛选弹窗
 function AgePickerModal({ birthDate, onSelect, onClose }: { birthDate: string; onSelect: (label: string) => void; onClose: () => void }) {
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const lastClickYear = useRef<number | null>(null);
+  const lastClickTime = useRef(0);
+  const rightRef = useRef<HTMLDivElement>(null);
   const birth = new Date(birthDate);
   const now = new Date();
 
@@ -973,29 +967,36 @@ function AgePickerModal({ birthDate, onSelect, onClose }: { birthDate: string; o
     yearOptions.push(y);
   }
 
-  // 右侧：选中某岁后，显示该岁的月份列表
-  const monthOptions: { label: string; value: string }[] = [];
-  if (selectedYear !== null) {
-    if (selectedYear === 0) {
-      const maxMonth = currentYears === 0 ? currentMonths : 11;
-      for (let m = maxMonth; m >= 0; m--) {
-        monthOptions.push({ label: `${m}个月`, value: `0岁${m}个月` });
+  // 右侧：所有月份选项，从0岁0个月到当前年龄
+  const allMonthOptions: { label: string; value: string; year: number }[] = [];
+  for (let y = 0; y <= currentYears; y++) {
+    const maxM = y === currentYears ? currentMonths : 11;
+    for (let m = 0; m <= maxM; m++) {
+      if (m === 0 && y > 0) {
+        allMonthOptions.push({ label: `${y}岁🎂`, value: `${y}岁`, year: y });
+      } else if (y === 0) {
+        allMonthOptions.push({ label: `${m}个月`, value: `0岁${m}个月`, year: y });
+      } else {
+        allMonthOptions.push({ label: `${y}岁${m}个月`, value: `${y}岁${m}个月`, year: y });
       }
-    } else if (selectedYear === currentYears) {
-      for (let m = currentMonths; m >= 0; m--) {
-        if (m === 0) {
-          monthOptions.push({ label: `${selectedYear}岁`, value: `${selectedYear}岁` });
-        } else {
-          monthOptions.push({ label: `${selectedYear}岁${m}个月`, value: `${selectedYear}岁${m}个月` });
-        }
-      }
-    } else {
-      for (let m = 12; m >= 0; m--) {
-        if (m === 0) {
-          monthOptions.push({ label: `${selectedYear}岁`, value: `${selectedYear}岁` });
-        } else {
-          monthOptions.push({ label: `${selectedYear}岁${m}个月`, value: `${selectedYear}岁${m}个月` });
-        }
+    }
+  }
+
+  // 左侧点击：双击直接筛选
+  function handleYearClick(y: number) {
+    const now = Date.now();
+    if (lastClickYear.current === y && now - lastClickTime.current < 400) {
+      onSelect(`${y}岁`);
+      return;
+    }
+    lastClickYear.current = y;
+    lastClickTime.current = now;
+    setSelectedYear(y);
+    // 滚动右侧到对应岁数
+    if (rightRef.current) {
+      const targetEl = rightRef.current.querySelector(`[data-year="${y}"]`);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }
   }
@@ -1016,47 +1017,34 @@ function AgePickerModal({ birthDate, onSelect, onClose }: { birthDate: string; o
             {yearOptions.map(y => (
               <button
                 key={y}
-                onClick={() => setSelectedYear(y)}
+                onClick={() => handleYearClick(y)}
                 className={`w-full px-3 py-2.5 text-sm text-center transition-colors ${
                   selectedYear === y
                     ? 'bg-coral/10 text-coral font-medium'
                     : 'text-ink hover:bg-cream-dark/50'
                 }`}
               >
-                {y === 0 ? '出生' : `${y}岁`}
+                {y === 0 ? '0岁' : `${y}岁`}
               </button>
             ))}
           </div>
 
-          {/* 右侧：月份列表 */}
-          <div className="flex-1 overflow-y-auto border border-rule/50 rounded-xl bg-white">
-            {selectedYear === null ? (
-              <div className="flex items-center justify-center h-full text-sm text-muted">
-                请先选择岁数
-              </div>
-            ) : (
-              monthOptions.map(m => (
-                <button
-                  key={m.value}
-                  onClick={() => onSelect(m.value)}
-                  className="w-full px-3 py-2.5 text-sm text-left text-ink hover:bg-coral/10 hover:text-coral transition-colors"
-                >
-                  {m.label}
-                </button>
-              ))
-            )}
+          {/* 右侧：所有月份选项 */}
+          <div ref={rightRef} className="flex-1 overflow-y-auto border border-rule/50 rounded-xl bg-white">
+            {allMonthOptions.map(m => (
+              <button
+                key={m.value}
+                data-year={m.year}
+                onClick={() => onSelect(m.value)}
+                className={`w-full px-3 py-2.5 text-sm text-left text-ink hover:bg-coral/10 hover:text-coral transition-colors ${
+                  selectedYear !== null && m.year === selectedYear ? 'bg-coral/5' : ''
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
         </div>
-
-        {/* 快捷：整个岁数 */}
-        {selectedYear !== null && selectedYear > 0 && (
-          <button
-            onClick={() => onSelect(`${selectedYear}岁`)}
-            className="w-full mt-3 py-2.5 rounded-xl border border-coral/30 text-coral text-sm font-medium hover:bg-coral/5 transition-colors"
-          >
-            筛选整个 {selectedYear}岁
-          </button>
-        )}
       </div>
     </div>
   );

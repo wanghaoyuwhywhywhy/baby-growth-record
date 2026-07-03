@@ -568,16 +568,18 @@ async function getBabiesByIds(babyIds, env) {
     const feishuToken = await getTenantToken(env);
     const tableId = env.FEISHU_TABLE_BABY;
     const appToken = env.FEISHU_BASE_TOKEN;
-    const babies = [];
+    let items = [];
     for (const babyId of babyIds) {
       const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${babyId}`;
       const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
       const data = await resp.json();
       if (data.code === 0 && data.data?.record) {
-        babies.push(data.data.record);
+        items.push(data.data.record);
       }
     }
-    return babies;
+    // 过滤掉状态为"删除"的宝宝
+    items = items.filter(item => item.fields?.['状态'] !== '删除');
+    return items;
   } catch (e) {
     console.error('[getBabiesByIds] Error:', e.message);
     return [];
@@ -1020,6 +1022,23 @@ export default {
             const contacts = await getBabyInviteCodes(babyId, env);
             return new Response(JSON.stringify({ ok: true, contacts }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
+          if (body.action === 'updateRole') {
+            if (!body.record_id || !body.role) return new Response(JSON.stringify({ ok: false, error: '参数不完整' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            if (!['editor', 'viewer'].includes(body.role)) return new Response(JSON.stringify({ ok: false, error: '角色值无效' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            const feishuToken = await getTenantToken(env);
+            const linkTableId = await ensureAccountBabyTable(feishuToken, env);
+            const appToken = env.FEISHU_BASE_TOKEN;
+            const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${body.record_id}`;
+            const resp = await fetch(updateUrl, {
+              method: 'PUT',
+              headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fields: { '角色': body.role } }),
+            });
+            const data = await resp.json();
+            if (data.code !== 0) return new Response(JSON.stringify({ ok: false, error: data.msg }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            accountBabyCache = { data: new Map(), expires: 0 };
+            return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+          }
           if (body.action === 'remove') {
             // 移除联系人或取消邀请
             const { record_id } = body;
@@ -1251,7 +1270,21 @@ async function handleBabies(request, env, token, auth) {
     if (!myLink || myLink.role !== 'owner') {
       return { error: '只有宝宝的创建者才能删除' };
     }
-    return await bitableRequest(env, token, 'DELETE', tableId, {}, recordId);
+    // 逻辑删除：设置状态为"删除"
+    const feishuToken = await getTenantToken(env);
+    const babyTableId = env.FEISHU_TABLE_BABY;
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${babyTableId}/records/${recordId}`;
+    const resp = await fetch(updateUrl, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { '状态': '删除' } }),
+    });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: -1, msg: data.msg };
+    // 同时删除该宝宝的所有关联记录
+    await deleteBabyAssociations(recordId, env);
+    return { code: 0, data: { record: data.data?.record } };
   }
   return { error: 'Method not allowed' };
 }
@@ -1991,6 +2024,29 @@ async function handleMigrate(env, token) {
     results.statusFieldError = e.message;
   }
 
+  // 10.5 确保宝宝表有"状态"字段
+  try {
+    const babyTableId = env.FEISHU_TABLE_BABY;
+    if (babyTableId) {
+      const babyFieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${babyTableId}/fields`;
+      const babyFieldsResp = await fetch(babyFieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const babyFieldsData = await babyFieldsResp.json();
+      const babyExistingFields = (babyFieldsData.data?.items || []).map(f => f.field_name);
+      if (!babyExistingFields.includes('状态')) {
+        await fetch(babyFieldsUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '删除' }] } }),
+        });
+        results.babyStatusFieldCreated = true;
+      } else {
+        results.babyStatusFieldCreated = false;
+      }
+    }
+  } catch (e) {
+    results.babyStatusFieldError = e.message;
+  }
+
   // 11. 将所有现有账号状态设为approved，并关联到现有宝宝
   try {
     const accountTableId = await ensureAccountTable(token, env);
@@ -2375,4 +2431,23 @@ async function handleAsset(request, env, token) {
       headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
     });
   }
+}
+
+// 删除宝宝的所有关联记录
+async function deleteBabyAssociations(babyId, env) {
+  const feishuToken = await getTenantToken(env);
+  const linkTableId = await ensureAccountBabyTable(feishuToken, env);
+  const appToken = env.FEISHU_BASE_TOKEN;
+  // 获取该宝宝的所有关联记录
+  const filterStr = `CurrentValue.[宝宝ID]="${babyId}"`;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+  const listData = await listResp.json();
+  if (listData.code === 0 && listData.data?.items) {
+    for (const item of listData.data.items) {
+      const delUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
+      await fetch(delUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    }
+  }
+  accountBabyCache = { data: new Map(), expires: 0 };
 }

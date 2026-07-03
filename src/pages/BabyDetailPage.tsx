@@ -63,6 +63,16 @@ export default function BabyDetailPage() {
     loadContacts();
   }
 
+  async function handleUpdateContactRole(contact: Contact) {
+    if (!baby?.record_id) return;
+    const newRole = contact.role === 'editor' ? 'viewer' : 'editor';
+    const { cloudUpdateContactRole } = await import('@/lib/cloud');
+    const result = await cloudUpdateContactRole(contact.record_id, newRole);
+    if (result.ok) {
+      loadContacts();
+    }
+  }
+
   function copyCode(code: string) {
     navigator.clipboard.writeText(code).then(() => {
       alert('邀请码已复制：' + code);
@@ -155,7 +165,20 @@ export default function BabyDetailPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-ink">{c.accountName || '待领取'}</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral/10 text-coral">{c.relation}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cream-dark text-muted">{c.role === 'owner' ? '创建者' : c.role === 'editor' ? '可编辑' : '仅浏览'}</span>
+                    {c.role === 'owner' ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">创建者</span>
+                    ) : isOwner ? (
+                      <button
+                        onClick={() => handleUpdateContactRole(c)}
+                        className={`text-[10px] px-1.5 py-0.5 rounded-full transition-colors ${
+                          c.role === 'editor' ? 'bg-coral/10 text-coral hover:bg-coral/20' : 'bg-cream-dark text-muted hover:bg-rule/50'
+                        }`}
+                      >
+                        {c.role === 'editor' ? '可编辑' : '仅浏览'} ✎
+                      </button>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cream-dark text-muted">{c.role === 'editor' ? '可编辑' : '仅浏览'}</span>
+                    )}
                   </div>
                   {c.isPending && c.inviteCode && (
                     <div className="flex items-center gap-1.5 mt-1">

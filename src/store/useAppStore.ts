@@ -75,6 +75,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       currentBabyId: stillExists ? currentBabyId : babies[0]?.record_id ?? null,
       initialized: true,
     });
+    // 保存当前宝宝ID到localStorage供权限判断
+    const newId = stillExists ? currentBabyId : babies[0]?.record_id ?? null;
+    if (newId) localStorage.setItem('current_baby_id', newId);
     // 后台同步云端数据（不阻塞页面渲染）
     feishuAPI.syncFromCloud().then(async () => {
       const updatedBabies = await feishuAPI.getBabies();
@@ -108,6 +111,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   switchBaby: (id: string) => {
     set({ currentBabyId: id });
+    localStorage.setItem('current_baby_id', id);
     // 切换宝宝后刷新相关数据
     get().fetchRecords();
     get().fetchGrowthRecords();

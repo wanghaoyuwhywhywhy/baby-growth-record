@@ -674,3 +674,17 @@ export async function cloudRemoveContact(record_id: string): Promise<{ ok: boole
     return { ok: false, error: '网络错误' };
   }
 }
+
+// 更新联系人角色
+export async function cloudUpdateContactRole(record_id: string, role: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const resp = await fetch(`${WORKER_URL}/api/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ action: 'updateRole', record_id, role }),
+    });
+    return await resp.json();
+  } catch (e) {
+    return { ok: false, error: '网络错误' };
+  }
+}
