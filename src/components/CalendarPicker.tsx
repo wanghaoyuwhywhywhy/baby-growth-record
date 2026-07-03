@@ -7,10 +7,10 @@ interface CalendarPickerProps {
   onClose: () => void;
   title: string;
   maxDate?: string; // 最大可选日期（如今天）
-  rangeLabel?: string; // 左下角显示的范围文本（如"06-15 ~ 07-02"）
+  rangeStart?: string; // 范围开始日期 YYYY-MM-DD（用于范围高亮）
 }
 
-export default function CalendarPicker({ initialDate, onConfirm, onClose, title, maxDate, rangeLabel }: CalendarPickerProps) {
+export default function CalendarPicker({ initialDate, onConfirm, onClose, title, maxDate, rangeStart }: CalendarPickerProps) {
   const d0 = new Date(initialDate);
   const [year, setYear] = useState(d0.getFullYear());
   const [month, setMonth] = useState(d0.getMonth());
@@ -44,6 +44,25 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
     const max = new Date(maxDate);
     const date = new Date(viewYear, viewMonth, d);
     return date > max;
+  }
+
+  // 判断日期是否在范围内（开始日期～当前选中日期之间）
+  function isInRange(d: number): boolean {
+    if (!rangeStart) return false;
+    const cellDate = new Date(viewYear, viewMonth, d);
+    const start = new Date(rangeStart + 'T00:00:00');
+    const end = new Date(year, month, day);
+    const minDate = start < end ? start : end;
+    const maxDate = start < end ? end : start;
+    // 不包含端点（端点用选中样式）
+    return cellDate > minDate && cellDate < maxDate;
+  }
+
+  // 判断是否为范围开始日期
+  function isRangeStart(d: number): boolean {
+    if (!rangeStart) return false;
+    const start = new Date(rangeStart + 'T00:00:00');
+    return viewYear === start.getFullYear() && viewMonth === start.getMonth() && d === start.getDate();
   }
 
   function handleConfirm() {
@@ -96,32 +115,26 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
               const selected = cell.current && isSelected(cell.day);
               const todayMark = cell.current && isToday(cell.day);
               const disabled = !cell.current || isAfterMax(cell.day);
+              const inRange = cell.current && isInRange(cell.day);
+              const isStart = cell.current && isRangeStart(cell.day);
               return (
                 <button key={i} disabled={disabled} onClick={() => cell.current && !isAfterMax(cell.day) && selectDate(cell.day)}
                   className={`relative w-8 h-8 mx-auto flex items-center justify-center text-xs rounded-full transition-all
                     ${disabled ? 'text-muted/30 cursor-default' : 'text-ink hover:bg-coral/10 active:scale-95'}
-                    ${selected ? 'bg-coral text-white hover:bg-coral-dark font-semibold' : ''}`}
+                    ${selected ? 'bg-coral text-white hover:bg-coral-dark font-semibold' : ''}
+                    ${isStart && !selected ? 'bg-coral text-white hover:bg-coral-dark font-semibold' : ''}
+                    ${inRange ? 'bg-coral/15 text-coral font-medium rounded-lg' : ''}`}
                 >
                   {cell.day}
-                  {todayMark && !selected && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-coral" />}
+                  {todayMark && !selected && !isStart && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-coral" />}
                 </button>
               );
             })}
           </div>
         </div>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted">已选：</span>
-            <span className="text-sm font-outfit font-bold text-ink">
-              {rangeLabel
-                ? rangeLabel
-                : `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">今天</button>
-            <button onClick={handleConfirm} className="btn-primary py-1.5 px-4 text-xs rounded-btn">确认</button>
-          </div>
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">今天</button>
+          <button onClick={handleConfirm} className="btn-primary py-1.5 px-4 text-xs rounded-btn">确认</button>
         </div>
       </div>
     </div>
