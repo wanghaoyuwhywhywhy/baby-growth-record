@@ -5,9 +5,10 @@ import { feishuAPI } from '@/api/feishu';
 import { CATEGORIES, CATEGORY_MAP } from '@/utils/constants';
 import { getCloudAssetUrl } from '@/lib/cloud';
 import { isEditMode } from '@/lib/auth';
+import CalendarPicker from '@/components/CalendarPicker';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
-import { FileText, Mic, Video, Camera, Play, Pause, Pencil, X } from 'lucide-react';
+import { FileText, Mic, Video, Camera, Play, Pause, Pencil, X, Calendar } from 'lucide-react';
 
 const MEDIA_TYPES = [
   { key: '全部', label: '全部', icon: null },
@@ -639,6 +640,8 @@ export default function TimelinePage() {
   const currentBabyId = currentBaby()?.record_id;
   const [mediaFilter, setMediaFilter] = useState('全部');
   const [categoryFilter, setCategoryFilter] = useState('全部');
+  const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [editingRecord, setEditingRecord] = useState<DailyRecord | null>(null);
   const editMode = isEditMode();
 
@@ -651,7 +654,7 @@ export default function TimelinePage() {
   useEffect(() => { fetchRecords(); }, [fetchRecords, currentBabyId]);
 
   // 切换筛选时重置显示数量
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [mediaFilter, categoryFilter]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [mediaFilter, categoryFilter, dateFilter]);
 
   const filtered = records.filter(r => {
     const mediaTypes = r.媒体类型 || ['text'];
@@ -666,7 +669,14 @@ export default function TimelinePage() {
       matchMedia = mediaTypes.includes('video');
     }
     const matchCategory = categoryFilter === '全部' || r.分类 === categoryFilter;
-    return matchMedia && matchCategory;
+    let matchDate = true;
+    if (dateFilter) {
+      const recordDate = new Date(r.记录时间);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const recordDateStr = `${recordDate.getFullYear()}-${pad(recordDate.getMonth() + 1)}-${pad(recordDate.getDate())}`;
+      matchDate = recordDateStr === dateFilter;
+    }
+    return matchMedia && matchCategory && matchDate;
   });
 
   const visibleRecords = filtered.slice(0, visibleCount);
@@ -714,8 +724,8 @@ export default function TimelinePage() {
           })}
         </div>
 
-        {/* 媒体类型筛选 */}
-        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-5 px-5 mb-3">
+        {/* 媒体类型筛选 + 日期选择器 */}
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-5 px-5 mb-3 items-center">
           {MEDIA_TYPES.map(mt => {
             const isActive = mediaFilter === mt.key;
             return (
@@ -733,6 +743,26 @@ export default function TimelinePage() {
               </button>
             );
           })}
+          {/* 日期筛选按钮 */}
+          <button
+            onClick={() => setShowDatePicker(true)}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm whitespace-nowrap transition-all flex-shrink-0 ${
+              dateFilter
+                ? 'bg-coral text-white shadow-soft font-medium'
+                : 'bg-cream-dark text-muted hover:bg-rule/50'
+            }`}
+          >
+            <Calendar size={14} />
+            {dateFilter ? `${dateFilter.slice(5)}` : '日期'}
+            {dateFilter && (
+              <span
+                onClick={(e) => { e.stopPropagation(); setDateFilter(null); }}
+                className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-white/30 active:scale-95"
+              >
+                <X size={10} />
+              </span>
+            )}
+          </button>
         </div>
 
         {filtered.length === 0 ? (
@@ -823,6 +853,16 @@ export default function TimelinePage() {
           record={editingRecord}
           onClose={() => setEditingRecord(null)}
           onSave={() => { fetchRecords(); }}
+        />
+      )}
+
+      {/* 日期选择弹窗 */}
+      {showDatePicker && (
+        <CalendarPicker
+          initialDate={dateFilter || new Date().toISOString().slice(0, 10)}
+          onConfirm={(date) => { setDateFilter(date); setShowDatePicker(false); }}
+          onClose={() => setShowDatePicker(false)}
+          title="选择日期"
         />
       )}
     </div>
