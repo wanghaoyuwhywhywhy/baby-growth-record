@@ -1,6 +1,6 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-03 15:00 (北京时间)
+> 最后更新：2026-07-03 15:04 (北京时间)
 
 ---
 
@@ -448,13 +448,13 @@
 
 ### 8.3 飞书多维表格
 
-| 表名 | Table ID |
-|------|----------|
-| 宝宝表 | REDACTED_TABLE_BABY |
-| 记录表 | REDACTED_TABLE_RECORD |
-| 成长表 | REDACTED_TABLE_GROWTH |
-| 登录日志表 | REDACTED_TABLE_LOG |
-| 疫苗接种表 | REDACTED_TABLE_VACCINE |
+| 表名 | 说明 |
+|------|------|
+| 宝宝表 | Worker 环境变量配置 |
+| 记录表 | Worker 环境变量配置 |
+| 成长表 | Worker 环境变量配置 |
+| 登录日志表 | Worker 自动创建 |
+| 疫苗接种表 | Worker 自动创建 |
 | 账号表 | Worker 自动创建 |
 
 ---

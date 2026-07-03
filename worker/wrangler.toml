@@ -1,4 +1,4 @@
 name = "baby-growth-api"
 main = "feishu-proxy.js"
 compatibility_date = "2024-01-01"
-account_id = "REDACTED_ACCOUNT_ID"
+# account_id 已移除，通过 CLOUDFLARE_API_TOKEN 环境变量认证

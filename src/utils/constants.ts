@@ -19,10 +19,3 @@ export const CATEGORIES: Category[] = [
 export const CATEGORY_MAP: Record<string, Category> = Object.fromEntries(
   CATEGORIES.map((c) => [c.key, c])
 );
-
-export const BASE_TOKEN = 'REDACTED_BASE_TOKEN';
-export const TABLE_IDS = {
-  baby: 'REDACTED_TABLE_BABY',
-  dailyRecord: 'REDACTED_TABLE_RECORD',
-  milestone: 'REDACTED_TABLE_GROWTH',
-};
