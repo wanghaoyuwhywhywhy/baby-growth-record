@@ -45,6 +45,8 @@ export default function AIChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [listening, setListening] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  // 宝宝范围选择：'current' = 仅当前宝宝，'all' = 全部宝宝
+  const [babyScope, setBabyScope] = useState<'current' | 'all'>('current');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -77,7 +79,10 @@ export default function AIChatPage() {
 
   // 提取宝宝数据（发送给AI的上下文）
   function getBabyContext() {
-    return babies.map(b => ({
+    const scopeBabies = babyScope === 'current' && baby
+      ? babies.filter(b => b.record_id === baby.record_id)
+      : babies;
+    return scopeBabies.map(b => ({
       宝宝姓名: b.宝宝姓名,
       性别: b.性别,
       出生日期: b.出生日期,
@@ -260,6 +265,34 @@ export default function AIChatPage() {
           </button>
         }
       />
+
+      {/* 宝宝范围切换：当前宝宝 / 全部宝宝 */}
+      {babies.length > 1 && (
+        <div className="px-4 pt-2 pb-1 shrink-0">
+          <div className="inline-flex p-0.5 rounded-full bg-cream-dark/60 text-xs">
+            <button
+              onClick={() => setBabyScope('current')}
+              className={`px-3 py-1 rounded-full font-medium transition-all ${
+                babyScope === 'current'
+                  ? 'bg-coral text-white shadow-soft'
+                  : 'text-muted hover:text-ink'
+              }`}
+            >
+              当前宝宝{baby ? `·${baby.宝宝姓名}` : ''}
+            </button>
+            <button
+              onClick={() => setBabyScope('all')}
+              className={`px-3 py-1 rounded-full font-medium transition-all ${
+                babyScope === 'all'
+                  ? 'bg-coral text-white shadow-soft'
+                  : 'text-muted hover:text-ink'
+              }`}
+            >
+              全部宝宝
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 清空确认弹窗 */}
       {showClearConfirm && (

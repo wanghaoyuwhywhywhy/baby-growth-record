@@ -220,6 +220,7 @@ async function ensureAccountTable(token, env) {
     { field_name: '权限', type: 3, property: { options: [{ name: 'superadmin' }] } },
     { field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }, { name: '审批未通过' }] } },
     { field_name: '最后修改时间', type: 5 },
+    { field_name: '创建时间', type: 2 },
   ];
   for (const field of accountFields) {
     await fetch(fieldsUrl, {
@@ -249,7 +250,8 @@ async function ensureDefaultAdmin(token, env, tableId) {
     return;
   }
 
-  // 创建默认 admin 账号（密码为空，首次登录时需设置密码）
+  // 创建默认 admin 账号（默认密码 admin123）
+  const encryptedPassword = await encryptPassword('admin123', env);
   const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
   await fetch(recordUrl, {
     method: 'POST',
@@ -257,10 +259,11 @@ async function ensureDefaultAdmin(token, env, tableId) {
     body: JSON.stringify({
       fields: {
         '账号名': 'admin',
-        '加密密码': '',
+        '加密密码': encryptedPassword,
         '权限': 'superadmin',
         '状态': '正常',
         '最后修改时间': Date.now(),
+        '创建时间': Date.now(),
       },
     }),
   });
@@ -302,7 +305,7 @@ async function ensureAccountBabyTable(token, env) {
   const abFields = [
     { field_name: '账号名', type: 1 },
     { field_name: '宝宝ID', type: 1 },
-    { field_name: '关联宝宝', type: 17, property: { table_id: env.FEISHU_TABLE_BABY } },
+    { field_name: '关联宝宝', type: 21, property: { table_id: env.FEISHU_TABLE_BABY, multiple: true } },
     { field_name: '角色', type: 3, property: { options: [{ name: 'owner' }, { name: 'editor' }, { name: 'viewer' }] } },
     { field_name: '关系', type: 3, property: { options: [{ name: '爸爸' }, { name: '妈妈' }, { name: '爷爷' }, { name: '奶奶' }, { name: '外公' }, { name: '外婆' }, { name: '姑姑' }, { name: '叔叔' }, { name: '舅舅' }, { name: '阿姨' }, { name: '其他' }] } },
     { field_name: '邀请码', type: 1 },
@@ -830,6 +833,7 @@ async function handleAccounts(request, env, token, auth) {
           '加密密码': encryptedPassword,
           '状态': '正常',
           '最后修改时间': Date.now(),
+          '创建时间': Date.now(),
         },
       }),
     });
@@ -955,7 +959,19 @@ export default {
       // /api/migrate GET 免认证（方便直接浏览器访问执行迁移）
       if (path === '/api/migrate' && request.method === 'GET') {
         const token = await getTenantToken(env);
-        const result = await handleMigrate(env, token);
+        const step = url.searchParams.get('step');
+        let result;
+        if (step === 'admin-password') {
+          result = await migrateAdminPassword(env, token);
+        } else if (step === 'audit-fields') {
+          result = await migrateAuditFields(env, token);
+        } else if (step === 'create-time') {
+          result = await migrateCreateTimeField(env, token);
+        } else if (step === 'link-baby') {
+          result = await migrateLinkBabyField(env, token);
+        } else {
+          result = await handleMigrate(env, token);
+        }
         return new Response(JSON.stringify(result), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -1055,8 +1071,8 @@ export default {
                 // 查询最后登录时间失败不影响主流程
               }
             }
-            // 过滤掉状态非正常的已关联联系人（保留待领取邀请码）
-            const filteredContacts = contacts.filter(c => !c.accountName || c.accountStatus === '正常');
+            // 过滤掉明确非正常的已关联联系人（保留待领取邀请码，以及账号查询失败时accountStatus为undefined的联系人）
+            const filteredContacts = contacts.filter(c => !c.accountName || !c.accountStatus || c.accountStatus === '正常');
             return new Response(JSON.stringify({ ok: true, contacts: filteredContacts }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
           if (body.action === 'updateRole') {
@@ -1299,6 +1315,11 @@ async function handleBabies(request, env, token, auth) {
   }
   if (request.method === 'POST') {
     const body = await request.json();
+    // 审计字段
+    body.fields['创建人账号'] = auth.accountName;
+    body.fields['创建时间'] = Date.now();
+    body.fields['修改人账号'] = auth.accountName;
+    body.fields['修改时间'] = Date.now();
     const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
     // 自动关联新宝宝到创建者
     if (result.data?.record?.record_id) {
@@ -1315,6 +1336,9 @@ async function handleBabies(request, env, token, auth) {
     if (!canWrite) {
       return { error: '只有owner或editor才能编辑宝宝信息', code: 403 };
     }
+    // 审计字段
+    body.fields['修改人账号'] = auth.accountName;
+    body.fields['修改时间'] = Date.now();
     return await bitableRequest(env, token, 'PUT', tableId, { fields: body.fields }, recordId);
   }
   if (request.method === 'DELETE') {
@@ -1379,6 +1403,11 @@ async function handleRecords(request, env, token, auth) {
         return { error: '只有owner或editor才能添加记录', code: 403 };
       }
     }
+    // 审计字段
+    body.fields['创建人账号'] = auth.accountName;
+    body.fields['创建时间'] = Date.now();
+    body.fields['修改人账号'] = auth.accountName;
+    body.fields['修改时间'] = Date.now();
     const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
     return result;
   }
@@ -1399,6 +1428,9 @@ async function handleRecords(request, env, token, auth) {
         }
       }
     }
+    // 审计字段
+    body.fields['修改人账号'] = auth.accountName;
+    body.fields['修改时间'] = Date.now();
     return await bitableRequest(env, token, 'PUT', tableId, { fields: body.fields }, recordId);
   }
   if (request.method === 'DELETE') {
@@ -1510,6 +1542,11 @@ async function handleGrowth(request, env, token, auth) {
         return { error: '只有owner或editor才能添加成长记录', code: 403 };
       }
     }
+    // 审计字段
+    body.fields['创建人账号'] = auth.accountName;
+    body.fields['创建时间'] = Date.now();
+    body.fields['修改人账号'] = auth.accountName;
+    body.fields['修改时间'] = Date.now();
     return await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
   }
   if (request.method === 'PUT') {
@@ -1529,6 +1566,9 @@ async function handleGrowth(request, env, token, auth) {
         }
       }
     }
+    // 审计字段
+    body.fields['修改人账号'] = auth.accountName;
+    body.fields['修改时间'] = Date.now();
     return await bitableRequest(env, token, 'PUT', tableId, { fields: body.fields }, recordId);
   }
   if (request.method === 'DELETE') {
@@ -1713,6 +1753,11 @@ async function handleVaccines(request, env, token, auth) {
         return { code: 0, data: { record: listData.data.items[0], duplicate: true } };
       }
     }
+    // 审计字段
+    body.fields['创建人账号'] = auth.accountName;
+    body.fields['创建时间'] = Date.now();
+    body.fields['修改人账号'] = auth.accountName;
+    body.fields['修改时间'] = Date.now();
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
     const resp = await fetch(url, {
       method: 'POST',
@@ -1741,6 +1786,9 @@ async function handleVaccines(request, env, token, auth) {
         }
       }
     }
+    // 审计字段
+    body.fields['修改人账号'] = auth.accountName;
+    body.fields['修改时间'] = Date.now();
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
     const resp = await fetch(url, {
       method: 'PUT',
@@ -2060,7 +2108,7 @@ async function handleMigrate(env, token) {
         await fetch(abFieldsUrl, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ field_name: '关联宝宝', type: 17, property: { table_id: env.FEISHU_TABLE_BABY } }),
+          body: JSON.stringify({ field_name: '关联宝宝', type: 21, property: { table_id: env.FEISHU_TABLE_BABY, multiple: true } }),
         });
       } catch (e2) {
         // 关联字段创建可能因权限不足失败，静默忽略
@@ -2092,7 +2140,7 @@ async function handleMigrate(env, token) {
     results.accountBabyTableError = e.message;
   }
 
-  // 10. 确保账号表有"状态"字段
+  // 10. 确保账号表有"状态"字段和"创建时间"字段
   try {
     const accountTableId = await ensureAccountTable(token, env);
     const accFieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/fields`;
@@ -2108,6 +2156,16 @@ async function handleMigrate(env, token) {
       results.statusFieldCreated = true;
     } else {
       results.statusFieldCreated = false;
+    }
+    if (!accExistingFields.includes('创建时间')) {
+      await fetch(accFieldsUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_name: '创建时间', type: 2 }),
+      });
+      results.createTimeFieldCreated = true;
+    } else {
+      results.createTimeFieldCreated = false;
     }
   } catch (e) {
     results.statusFieldError = e.message;
@@ -2204,6 +2262,240 @@ async function handleMigrate(env, token) {
     }
   } catch (e) {}
 
+  // 13. 检查admin账号密码为空时设置默认密码 admin123
+  try {
+    const feishuToken13 = await getTenantToken(env);
+    const tableId13 = await ensureAccountTable(feishuToken13, env);
+    const appToken13 = env.FEISHU_BASE_TOKEN;
+    const filterStr13 = 'CurrentValue.[账号名]="admin"';
+    const listUrl13 = `${FEISHU_API}/bitable/v1/apps/${appToken13}/tables/${tableId13}/records?filter=${encodeURIComponent(filterStr13)}&page_size=1`;
+    const listResp13 = await fetch(listUrl13, { headers: { 'Authorization': `Bearer ${feishuToken13}` } });
+    const listData13 = await listResp13.json();
+    if (listData13.code === 0 && listData13.data?.items?.length > 0) {
+      const adminRecord = listData13.data.items[0];
+      const encryptedPwd = adminRecord.fields?.['加密密码'];
+      if (!encryptedPwd || encryptedPwd === '') {
+        const defaultPwd = await encryptPassword('admin123', env);
+        const updateUrl13 = `${FEISHU_API}/bitable/v1/apps/${appToken13}/tables/${tableId13}/records/${adminRecord.record_id}`;
+        await fetch(updateUrl13, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${feishuToken13}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { '加密密码': defaultPwd } }),
+        });
+        results.adminPasswordSet = true;
+      } else {
+        results.adminPasswordSet = false;
+      }
+    }
+  } catch (e) {
+    results.adminPasswordError = e.message;
+  }
+
+  // 14. 为所有数据表补充审计字段（创建人账号、创建时间、修改人账号、修改时间）
+  try {
+    const auditFields = [
+      { field_name: '创建人账号', type: 1 },
+      { field_name: '创建时间', type: 2 },
+      { field_name: '修改人账号', type: 1 },
+      { field_name: '修改时间', type: 2 },
+    ];
+    const tablesToCheck = [
+      { name: '成长记录', id: env.FEISHU_TABLE_GROWTH },
+      { name: '时间线记录', id: env.FEISHU_TABLE_RECORD },
+      { name: '疫苗接种', id: env.FEISHU_TABLE_VACCINE },
+      { name: '宝宝档案', id: env.FEISHU_TABLE_BABY },
+    ];
+    for (const t of tablesToCheck) {
+      if (!t.id) continue;
+      const tFieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${t.id}/fields`;
+      const tFieldsResp = await fetch(tFieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const tFieldsData = await tFieldsResp.json();
+      const tExisting = (tFieldsData.data?.items || []).map(f => f.field_name);
+      for (const f of auditFields) {
+        if (!tExisting.includes(f.field_name)) {
+          await fetch(tFieldsUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(f),
+          });
+        }
+      }
+    }
+    results.auditFieldsAdded = true;
+  } catch (e) {
+    results.auditFieldsError = e.message;
+  }
+
+  return { ok: true, ...results };
+}
+
+// 独立迁移步骤：设置admin默认密码（避免单次Worker子请求超限）
+async function migrateAdminPassword(env, token) {
+  const results = { step: 'admin-password' };
+  try {
+    const tableId = await ensureAccountTable(token, env);
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const filterStr = 'CurrentValue.[账号名]="admin"';
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const listData = await listResp.json();
+    if (listData.code === 0 && listData.data?.items?.length > 0) {
+      const adminRecord = listData.data.items[0];
+      const encryptedPwd = adminRecord.fields?.['加密密码'];
+      if (!encryptedPwd || encryptedPwd === '') {
+        const defaultPwd = await encryptPassword('admin123', env);
+        const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${adminRecord.record_id}`;
+        const updateResp = await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { '加密密码': defaultPwd } }),
+        });
+        const updateData = await updateResp.json();
+        results.adminPasswordSet = updateData.code === 0;
+        results.updateMsg = updateData.msg;
+      } else {
+        results.adminPasswordSet = false;
+        results.reason = 'admin密码已存在，无需设置';
+      }
+      // 同时确保admin的权限字段为superadmin
+      const currentRole = adminRecord.fields?.['权限'];
+      if (currentRole !== 'superadmin') {
+        const updateUrl2 = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${adminRecord.record_id}`;
+        await fetch(updateUrl2, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { '权限': 'superadmin' } }),
+        });
+        results.roleFixed = true;
+      }
+    } else {
+      results.adminPasswordSet = false;
+      results.reason = '未找到admin账号';
+    }
+  } catch (e) {
+    results.adminPasswordError = e.message;
+  }
+  return { ok: true, ...results };
+}
+
+// 独立迁移步骤：为所有数据表补充审计字段
+async function migrateAuditFields(env, token) {
+  const results = { step: 'audit-fields' };
+  try {
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const auditFields = [
+      { field_name: '创建人账号', type: 1 },
+      { field_name: '创建时间', type: 2 },
+      { field_name: '修改人账号', type: 1 },
+      { field_name: '修改时间', type: 2 },
+    ];
+    const tablesToCheck = [
+      { name: '成长记录', id: env.FEISHU_TABLE_GROWTH },
+      { name: '时间线记录', id: env.FEISHU_TABLE_RECORD },
+      { name: '疫苗接种', id: env.FEISHU_TABLE_VACCINE },
+      { name: '宝宝档案', id: env.FEISHU_TABLE_BABY },
+    ];
+    results.tables = {};
+    for (const t of tablesToCheck) {
+      if (!t.id) continue;
+      const tFieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${t.id}/fields`;
+      const tFieldsResp = await fetch(tFieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const tFieldsData = await tFieldsResp.json();
+      const tExisting = (tFieldsData.data?.items || []).map(f => f.field_name);
+      const added = [];
+      for (const f of auditFields) {
+        if (!tExisting.includes(f.field_name)) {
+          await fetch(tFieldsUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(f),
+          });
+          added.push(f.field_name);
+        }
+      }
+      results.tables[t.name] = { added, existing: tExisting };
+    }
+    results.auditFieldsAdded = true;
+  } catch (e) {
+    results.auditFieldsError = e.message;
+  }
+  return { ok: true, ...results };
+}
+
+// 独立迁移步骤：账号表补充创建时间字段并回填
+async function migrateCreateTimeField(env, token) {
+  const results = { step: 'create-time' };
+  try {
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const tableId = await ensureAccountTable(token, env);
+    const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+    const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const fieldsData = await fieldsResp.json();
+    const existing = (fieldsData.data?.items || []).map(f => f.field_name);
+    if (!existing.includes('创建时间')) {
+      await fetch(fieldsUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_name: '创建时间', type: 2 }),
+      });
+      results.createTimeFieldCreated = true;
+    } else {
+      results.createTimeFieldCreated = false;
+      results.reason = '创建时间字段已存在';
+    }
+    // 回填所有空创建时间记录
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const listData = await listResp.json();
+    let backfilled = 0;
+    if (listData.code === 0 && listData.data?.items) {
+      for (const item of listData.data.items) {
+        if (!item.fields?.['创建时间']) {
+          const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${item.record_id}`;
+          await fetch(updateUrl, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { '创建时间': Date.now() } }),
+          });
+          backfilled++;
+        }
+      }
+    }
+    results.backfilled = backfilled;
+  } catch (e) {
+    results.createTimeError = e.message;
+  }
+  return { ok: true, ...results };
+}
+
+// 独立迁移步骤：账号宝宝关联表补充"关联宝宝"双向关联字段
+async function migrateLinkBabyField(env, token) {
+  const results = { step: 'link-baby' };
+  try {
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const tableId = await ensureAccountBabyTable(token, env);
+    const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+    const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const fieldsData = await fieldsResp.json();
+    const existing = (fieldsData.data?.items || []).map(f => f.field_name);
+    if (!existing.includes('关联宝宝')) {
+      // type 21 = 双向关联字段（注意：type 17 是附件，不是关联字段）
+      const createResp = await fetch(fieldsUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_name: '关联宝宝', type: 21, property: { table_id: env.FEISHU_TABLE_BABY, multiple: true } }),
+      });
+      const createData = await createResp.json();
+      results.linkBabyFieldCreated = createData.code === 0;
+      results.createMsg = createData.msg;
+    } else {
+      results.linkBabyFieldCreated = false;
+      results.reason = '关联宝宝字段已存在';
+    }
+    results.existingFields = existing;
+  } catch (e) {
+    results.linkBabyError = e.message;
+  }
   return { ok: true, ...results };
 }
 

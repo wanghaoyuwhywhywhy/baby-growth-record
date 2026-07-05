@@ -10,6 +10,37 @@ import { calcAge } from '@/utils/date';
 
 type MetricType = 'height' | 'weight' | 'head';
 
+function getAgeMarker(recordDate: string, birthDate: string): string | null {
+  if (!birthDate || !recordDate) return null;
+  const birth = new Date(birthDate);
+  const record = new Date(recordDate);
+  const diffMs = record.getTime() - birth.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  // 百天
+  if (diffDays === 100) return '百天';
+
+  // 整月（精确按日期对比）
+  const months = (record.getFullYear() - birth.getFullYear()) * 12 + (record.getMonth() - birth.getMonth());
+  // 如果记录日 == 出生日，则是整月
+  if (record.getDate() === birth.getDate() && months > 0) {
+    if (months % 12 === 0) {
+      return `${months / 12}周岁`;
+    }
+    return `${months}月龄`;
+  }
+
+  // 也检查接近整月（±1天）
+  if (months > 0 && Math.abs(record.getDate() - birth.getDate()) <= 1) {
+    if (months % 12 === 0) {
+      return `${months / 12}周岁`;
+    }
+    return `${months}月龄`;
+  }
+
+  return null;
+}
+
 export default function GrowthPage() {
   const { currentBaby, growthRecords, fetchGrowthRecords, createGrowthRecord, updateGrowthRecord, deleteGrowthRecord } = useAppStore();
   const baby = currentBaby();
@@ -211,11 +242,17 @@ export default function GrowthPage() {
             <div className="divide-y divide-rule/30">
               {[...sorted].reverse().map((r) => {
                 const d = new Date(r.测量日期);
+                const marker = baby?.出生日期 ? getAgeMarker(r.测量日期, baby.出生日期) : null;
                 return (
                 <div key={r.record_id} className="px-4 py-3 flex items-center gap-3 group">
                   <div className="w-[52px] flex-shrink-0 text-center">
                     <div className="text-[10px] text-muted">{d.getFullYear()}</div>
                     <div className="text-sm font-bold text-mint-dark">{d.getMonth() + 1}.{d.getDate()}</div>
+                    {marker && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral/10 text-coral font-medium ml-1 mt-0.5 inline-block">
+                        {marker}
+                      </span>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">

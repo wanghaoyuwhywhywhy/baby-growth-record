@@ -28,6 +28,38 @@ export default function HomePage() {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
 
+  // 左右滑动切换宝宝
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
+
+  function onTouchStart(e: React.TouchEvent) {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  }
+
+  function onTouchMove(e: React.TouchEvent) {
+    setTouchEnd(e.targetTouches[0].clientX);
+  }
+
+  function onTouchEnd() {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const minSwipeDistance = 50;
+    if (distance > minSwipeDistance) {
+      // 向左滑 → 下一个宝宝
+      const currentIndex = babies.findIndex(b => b.record_id === (baby?.record_id));
+      if (currentIndex >= 0 && currentIndex < babies.length - 1) {
+        switchBaby(babies[currentIndex + 1].record_id);
+      }
+    } else if (distance < -minSwipeDistance) {
+      // 向右滑 → 上一个宝宝
+      const currentIndex = babies.findIndex(b => b.record_id === (baby?.record_id));
+      if (currentIndex > 0) {
+        switchBaby(babies[currentIndex - 1].record_id);
+      }
+    }
+  }
+
   useEffect(() => {
     fetchRecentRecords().then(setRecentRecords);
   }, [fetchRecentRecords, baby?.record_id, records]);
@@ -148,7 +180,8 @@ export default function HomePage() {
           </div>
         )}
 
-        {baby && <BabyCard baby={baby} />}
+        <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+          {baby && <BabyCard baby={baby} />}
 
         {/* 四个快捷入口并排 */}
         <div className="grid grid-cols-4 gap-2.5 mb-3">
@@ -248,6 +281,7 @@ export default function HomePage() {
             )}
           </div>
         </section>
+        </div>
       </div>
 
       <FloatingButton />
