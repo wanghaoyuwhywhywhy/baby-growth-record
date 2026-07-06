@@ -398,9 +398,10 @@ async function ensureAccountBabyTable(token, env) {
 }
 
 // 获取账号关联的宝宝ID列表（带缓存，5分钟TTL）
-// accountId: 账号表record_id, accountName: 账号名（兼容旧数据回退查询）
+// accountId: 账号表record_id（必须）
 async function getAccountBabyIds(accountId, accountName, env) {
-  const cacheKey = accountId || accountName;
+  if (!accountId) return [];
+  const cacheKey = accountId;
   const now = Date.now();
   if (accountBabyCache.expires > now && accountBabyCache.data.has(cacheKey)) {
     return accountBabyCache.data.get(cacheKey);
@@ -410,27 +411,12 @@ async function getAccountBabyIds(accountId, accountName, env) {
     const feishuToken = await getTenantToken(env);
     const tableId = await ensureAccountBabyTable(feishuToken, env);
     const appToken = env.FEISHU_BASE_TOKEN;
-    // 优先用账号ID查询
-    let filterStr = accountId ? `CurrentValue.[账号ID]="${accountId}"` : `CurrentValue.[账号名]="${accountName}"`;
-    let listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
-    let listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-    let listData = await listResp.json();
+    // 只用账号ID查询
+    const filterStr = `CurrentValue.[账号ID]="${accountId}"`;
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const listData = await listResp.json();
 
-    // 如果按账号ID没查到且账号名存在，回退到按账号名查（兼容旧数据：只有账号ID为空的记录才匹配）
-    if (accountId && accountName && (!listData.data?.items || listData.data.items.length === 0)) {
-      // 查所有同名账号的关联记录，然后只保留账号ID为空的（旧数据兼容）
-      filterStr = `CurrentValue.[账号名]="${accountName}"`;
-      listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
-      listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-      listData = await listResp.json();
-      // 过滤：只保留账号ID为空的记录（真正属于当前账号的旧数据），跳过已有其他账号ID的记录（同名不同账号）
-      if (listData.data?.items) {
-        listData.data.items = listData.data.items.filter(item => {
-          const itemAccountId = item.fields?.['账号ID'];
-          return !itemAccountId; // 只有没有账号ID的旧记录才匹配
-        });
-      }
-    }
     const links = [];
     if (listData.code === 0 && listData.data?.items) {
       for (const item of listData.data.items) {
@@ -459,34 +445,25 @@ async function getAccountBabyIds(accountId, accountName, env) {
 
 // 检查账号对某宝宝是否有写权限
 async function canWriteBaby(accountId, accountName, babyId, env) {
+  if (!accountId) return false;
   const links = await getAccountBabyIds(accountId, accountName, env);
   const link = links.find(l => l.babyId === babyId);
   return link && (link.role === 'owner' || link.role === 'editor');
 }
 
-// 将账号关联到宝宝
+// 将账号关联到宝宝（accountId必须非空）
 async function linkAccountToBaby(accountId, accountName, babyId, role, env, relation) {
+  if (!accountId) return; // 无账号ID不关联
   const feishuToken = await getTenantToken(env);
   const tableId = await ensureAccountBabyTable(feishuToken, env);
   const appToken = env.FEISHU_BASE_TOKEN;
   const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
 
-  // 检查是否已存在关联（用账号ID+宝宝ID匹配）
-  let filterStr = accountId ? `CurrentValue.[账号ID]="${accountId}"&&CurrentValue.[宝宝ID]="${babyId}"` : `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${babyId}"`;
-  let checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
-  let checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-  let checkData = await checkResp.json();
-
-  // 回退：按账号ID没查到时，用账号名+宝宝ID查，但只匹配账号ID为空的记录（同名不同账号）
-  if (accountId && accountName && (!checkData.data?.items || checkData.data.items.length === 0)) {
-    filterStr = `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${babyId}"`;
-    checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=10`;
-    checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-    checkData = await checkResp.json();
-    if (checkData.data?.items) {
-      checkData.data.items = checkData.data.items.filter(item => !item.fields?.['账号ID']);
-    }
-  }
+  // 检查是否已存在关联（只用账号ID+宝宝ID匹配）
+  const filterStr = `CurrentValue.[账号ID]="${accountId}"&&CurrentValue.[宝宝ID]="${babyId}"`;
+  const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+  const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+  const checkData = await checkResp.json();
 
   if (checkData.code === 0 && checkData.data?.items?.length > 0) {
     // 已存在，更新关系和角色（包括从 unlinked 恢复）
@@ -2900,7 +2877,7 @@ async function migrateLoginTimeField(env, token) {
   return { ok: true, ...results };
 }
 
-// 回填关联表中已有记录的"账号ID"字段
+// 清理关联表中的孤儿记录（账号ID对应的账号已删除）和空账号ID记录
 async function migrateBackfillAccountId(env, token) {
   const results = { step: 'backfill-account-id' };
   try {
@@ -2908,45 +2885,59 @@ async function migrateBackfillAccountId(env, token) {
     const accountTableId = await ensureAccountTable(token, env);
     const abTableId = await ensureAccountBabyTable(token, env);
 
-    // 1. 获取所有账号，建立"账号名 → record_id"映射
+    // 1. 获取所有当前账号ID集合
     const accListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records?page_size=500`;
     const accListResp = await fetch(accListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
     const accListData = await accListResp.json();
-    const accountMap = {}; // 账号名 → record_id
+    const accountIdSet = new Set();
     if (accListData.code === 0 && accListData.data?.items) {
       for (const acc of accListData.data.items) {
-        const name = acc.fields?.['账号名'];
-        if (name) accountMap[name] = acc.record_id;
+        accountIdSet.add(acc.record_id);
       }
     }
-    results.accountMapSize = Object.keys(accountMap).length;
+    results.accountCount = accountIdSet.size;
 
-    // 2. 获取关联表所有记录，回填"账号ID"
+    // 2. 获取关联表所有记录
     const abListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records?page_size=500`;
     const abListResp = await fetch(abListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
     const abListData = await abListResp.json();
-    let backfilled = 0;
+    let orphaned = 0;
     let skipped = 0;
+    let noAccountId = 0;
     if (abListData.code === 0 && abListData.data?.items) {
       for (const item of abListData.data.items) {
-        const accName = item.fields?.['账号名'];
         const existingId = item.fields?.['账号ID'];
-        // 只回填没有账号ID的记录
-        if (accName && !existingId && accountMap[accName]) {
+        const role = item.fields?.['角色'];
+
+        if (existingId) {
+          // 已有账号ID，检查对应账号是否还存在
+          if (!accountIdSet.has(existingId) && role !== 'unlinked') {
+            // 账号已被删除，标记为unlinked并清空账号ID
+            const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
+            await fetch(updateUrl, {
+              method: 'PUT',
+              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fields: { '角色': 'unlinked', '账号ID': '' } }),
+            });
+            orphaned++;
+          } else {
+            skipped++;
+          }
+        } else if (role !== 'unlinked') {
+          // 没有账号ID的记录，标记为unlinked（无法按账号ID匹配，等同无效记录）
           const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
           await fetch(updateUrl, {
             method: 'PUT',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields: { '账号ID': accountMap[accName] } }),
+            body: JSON.stringify({ fields: { '角色': 'unlinked' } }),
           });
-          backfilled++;
-        } else if (existingId) {
-          skipped++;
+          noAccountId++;
         }
       }
     }
-    results.backfilled = backfilled;
     results.skipped = skipped;
+    results.orphaned = orphaned;
+    results.noAccountId = noAccountId;
   } catch (e) {
     results.error = e.message;
   }
