@@ -386,10 +386,10 @@ export default function SettingsPage() {
               {editingAccount.账号名 === accountName ? (
                 <input type="text" value={formStatus} className="w-full bg-gray-100 border border-rule rounded-xl px-3 py-2.5 text-sm text-muted outline-none cursor-not-allowed" disabled />
               ) : (
-                <select value={formStatus} onChange={e => setFormStatus(e.target.value)} className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-coral/50" disabled={formSubmitting}>
-                  <option value="正常">正常</option>
-                  <option value="冻结">冻结</option>
-                </select>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setFormStatus('正常')} className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${formStatus === '正常' ? 'bg-coral text-white' : 'bg-white border border-rule text-muted hover:border-coral/40'}`} disabled={formSubmitting}>正常</button>
+                  <button type="button" onClick={() => setFormStatus('冻结')} className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors ${formStatus === '冻结' ? 'bg-coral text-white' : 'bg-white border border-rule text-muted hover:border-coral/40'}`} disabled={formSubmitting}>冻结</button>
+                </div>
               )}
               {formError && <p className="text-xs text-red-500">{formError}</p>}
               <button onClick={handleEditAccount} disabled={formSubmitting} className="btn-primary w-full py-2.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50">
