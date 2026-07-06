@@ -21,6 +21,11 @@ function getAgeMarker(recordDate: string, birthDate: string): string | null {
   const diffMs = record.getTime() - birth.getTime();
   const dayNum = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
 
+  // 出生日
+  if (dayNum === 1) {
+    return '出生啦！';
+  }
+
   if (dayNum >= 100 && dayNum % 100 === 0) {
     return `${dayNum}天`;
   }

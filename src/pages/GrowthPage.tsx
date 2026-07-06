@@ -17,10 +17,14 @@ function getAgeMarker(recordDate: string, birthDate: string): string | null {
   const record = new Date(recordDate);
   record.setHours(0, 0, 0, 0);
   const diffMs = record.getTime() - birth.getTime();
-  // 出生当天算第1天，所以diffDays+1=天数，第100天时diffDays=99
   const dayNum = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
 
-  // 100天、200天...1000天、1100天等整百天
+  // 出生日
+  if (dayNum === 1) {
+    return '出生啦！';
+  }
+
+  // 100天、200天...等整百天
   if (dayNum >= 100 && dayNum % 100 === 0) {
     return `${dayNum}天`;
   }
