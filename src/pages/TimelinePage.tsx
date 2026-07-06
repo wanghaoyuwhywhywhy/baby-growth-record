@@ -11,6 +11,38 @@ import NavHeader from '@/components/NavHeader';
 import { FileText, Mic, Video, Camera, Play, Pause, Pencil, X, Calendar, Clock } from 'lucide-react';
 import { getAuthBabyRelations } from '@/lib/auth';
 
+// 年龄里程碑标识：100天/200天/整月/周岁
+function getAgeMarker(recordDate: string, birthDate: string): string | null {
+  if (!birthDate || !recordDate) return null;
+  const birth = new Date(birthDate);
+  birth.setHours(0, 0, 0, 0);
+  const record = new Date(recordDate);
+  record.setHours(0, 0, 0, 0);
+  const diffMs = record.getTime() - birth.getTime();
+  const dayNum = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+
+  if (dayNum >= 100 && dayNum % 100 === 0) {
+    return `${dayNum}天`;
+  }
+
+  const months = (record.getFullYear() - birth.getFullYear()) * 12 + (record.getMonth() - birth.getMonth());
+  if (record.getDate() === birth.getDate() && months > 0) {
+    if (months % 12 === 0) {
+      return `${months / 12}周岁`;
+    }
+    return `${months}月龄`;
+  }
+
+  if (months > 0 && Math.abs(record.getDate() - birth.getDate()) <= 1) {
+    if (months % 12 === 0) {
+      return `${months / 12}周岁`;
+    }
+    return `${months}月龄`;
+  }
+
+  return null;
+}
+
 const MEDIA_TYPES = [
   { key: '全部', label: '全部', icon: null },
   { key: 'text', label: '文字', icon: FileText },
@@ -901,11 +933,19 @@ export default function TimelinePage() {
                   <div key={record.record_id} className="relative pl-10 animate-fade-up" style={{ animationDelay: `${Math.min(index, 9) * 50}ms` }}>
                     <div className="absolute left-[17px] top-4 w-2 h-2 rounded-full bg-coral shadow-sm" />
                     <div className="card-shadow p-3.5">
-                      {/* 时间 + 标签 + 编辑 */}
+                      {/* 时间 + 里程碑标识 + 标签 + 编辑 */}
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className="text-xs text-muted/80 font-mono">
                           {formatTimelineTime(record.记录时间)}
                         </span>
+                        {(() => {
+                          const marker = babyDob ? getAgeMarker(record.记录时间, babyDob) : null;
+                          return marker ? (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral/10 text-coral font-medium">
+                              {marker}
+                            </span>
+                          ) : null;
+                        })()}
                         {style && (
                           <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${style.bg} ${style.text}`}>
                             {style.icon}{primaryMedia === 'text' ? '文字' : primaryMedia === 'voice' ? '语音' : primaryMedia === 'video' ? '视频' : '照片'}
