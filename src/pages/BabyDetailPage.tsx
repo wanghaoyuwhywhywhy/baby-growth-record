@@ -124,7 +124,7 @@ export default function BabyDetailPage() {
         {/* 头像和基本信息 */}
         <div className="card-shadow p-6 mb-5 text-center">
           <div className="w-24 h-24 rounded-full bg-gradient-to-br from-coral to-warm-orange flex items-center justify-center text-white text-4xl font-outfit font-bold shadow-float mx-auto mb-3">
-            {baby.宝宝姓名.charAt(0)}
+            {String(baby.宝宝姓名 || '').charAt(0)}
           </div>
           <h2 className="text-2xl font-outfit font-bold text-ink">{baby.宝宝姓名}</h2>
           <div className="flex items-center justify-center gap-2 mt-1">

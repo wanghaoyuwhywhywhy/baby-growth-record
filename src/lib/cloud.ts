@@ -30,6 +30,20 @@ function extractLinkedIds(field: any): string[] {
   return [];
 }
 
+// 解析飞书文本字段：兼容纯字符串和飞书富文本数组 [{text: "xxx", type: "text"}]
+function parseTextField(value: any): string {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map((item: any) => {
+      if (typeof item === 'string') return item;
+      if (item?.text) return item.text;
+      return '';
+    }).join('');
+  }
+  return String(value);
+}
+
 // 解析媒体类型：兼容多选数组、旧单选字符串、逗号分隔字符串
 function parseMediaTypes(value: any): ('text' | 'voice' | 'video' | 'photo')[] {
   if (Array.isArray(value)) {
@@ -49,15 +63,15 @@ function feishuToBaby(item: any): Baby {
   const fields = item.fields || {};
   return {
     record_id: item.record_id || item.id,
-    宝宝姓名: fields['宝宝姓名'] || '',
+    宝宝姓名: parseTextField(fields['宝宝姓名']),
     出生日期: typeof fields['出生日期'] === 'number'
       ? new Date(fields['出生日期']).toISOString().split('T')[0]
       : fields['出生日期'] || '',
-    性别: fields['性别'] || '',
-    妈妈名字: fields['妈妈名字'] || '',
-    爸爸名字: fields['爸爸名字'] || '',
+    性别: parseTextField(fields['性别']),
+    妈妈名字: parseTextField(fields['妈妈名字']),
+    爸爸名字: parseTextField(fields['爸爸名字']),
     头像: fields['头像'] || '',
-    备注: fields['备注'] || '',
+    备注: parseTextField(fields['备注']),
   };
 }
 

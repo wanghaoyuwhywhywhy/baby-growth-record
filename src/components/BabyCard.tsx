@@ -11,7 +11,7 @@ interface BabyCardProps {
 
 export default function BabyCard({ baby }: BabyCardProps) {
   const age = calcAge(baby.出生日期);
-  const initials = baby.宝宝姓名.charAt(0);
+  const initials = String(baby.宝宝姓名 || '').charAt(0);
   const babyRelations = getAuthBabyRelations();
   const relation = babyRelations[baby.record_id];
   const { growthRecords } = useAppStore();
