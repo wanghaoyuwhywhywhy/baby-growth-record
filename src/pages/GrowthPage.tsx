@@ -21,7 +21,7 @@ function getAgeMarker(recordDate: string, birthDate: string): string | null {
 
   // 出生日
   if (dayNum === 1) {
-    return '出生啦！';
+    return '出生啦';
   }
 
   // 100天、200天...等整百天
