@@ -58,9 +58,10 @@ function parseMediaTypes(value: any): ('text' | 'voice' | 'video' | 'photo')[] {
 }
 
 // 飞书多维表格字段 → 本地接口字段映射
+// 兼容两种输入：1) 飞书原始格式（有fields属性） 2) Worker已转换的扁平格式（无fields属性）
 
 function feishuToBaby(item: any): Baby {
-  const fields = item.fields || {};
+  const fields = item.fields || item; // 兼容已转换的扁平对象
   return {
     record_id: item.record_id || item.id,
     宝宝姓名: parseTextField(fields['宝宝姓名']),

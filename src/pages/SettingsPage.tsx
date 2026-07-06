@@ -377,7 +377,6 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-3">
               <input type="text" value={formName} className="w-full bg-gray-100 border border-rule rounded-xl px-3 py-2.5 text-sm text-muted outline-none cursor-not-allowed" disabled />
-              <p className="text-[10px] text-muted/60 -mt-2">账号名不可修改</p>
               <div className="relative">
                 <input type={showFormPassword ? 'text' : 'password'} value={formPassword} onChange={e => { setFormPassword(e.target.value); setFormError(''); }} placeholder="新密码（留空则不修改）" className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 pr-10 text-sm text-ink placeholder:text-muted/40 outline-none focus:border-coral/50" disabled={formSubmitting} />
                 <button type="button" onMouseDown={(e) => { e.preventDefault(); setShowFormPassword(!showFormPassword); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted/50 hover:text-muted transition-colors">
@@ -385,10 +384,7 @@ export default function SettingsPage() {
                 </button>
               </div>
               {editingAccount.账号名 === accountName ? (
-                <>
-                  <input type="text" value={formStatus} className="w-full bg-gray-100 border border-rule rounded-xl px-3 py-2.5 text-sm text-muted outline-none cursor-not-allowed" disabled />
-                  <p className="text-[10px] text-muted/60 -mt-2">不可修改自己的状态</p>
-                </>
+                <input type="text" value={formStatus} className="w-full bg-gray-100 border border-rule rounded-xl px-3 py-2.5 text-sm text-muted outline-none cursor-not-allowed" disabled />
               ) : (
                 <select value={formStatus} onChange={e => setFormStatus(e.target.value)} className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-coral/50" disabled={formSubmitting}>
                   <option value="正常">正常</option>
