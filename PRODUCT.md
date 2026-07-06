@@ -1,10 +1,20 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-07 12:10 (北京时间/UTC+8)
+> 最后更新：2026-07-07 16:10 (北京时间/UTC+8)
 
 ---
 
 ## 版本记录
+
+### v2.8 (2026-07-07)
+**关联表从账号名匹配改为账号ID匹配：**
+1. 账号宝宝关联表新增"账号ID"字段（文本类型，存储账号表的record_id）
+2. 所有关联查询（getAccountBabyIds/canWriteBaby/linkAccountToBaby）从"按账号名匹配"改为"优先按账号ID匹配，兼容回退按账号名查"
+3. 修复同名账号误关联历史宝宝数据的bug（如wangdan账号重新注册后关联到旧的xixi记录）
+4. login/verify接口返回accountId字段，前端auth.ts存储accountId到localStorage
+5. 新增getAuthAccountId辅助函数（带缓存），在handleBabies/handleRecords/handleGrowth/handleVaccines等函数中获取账号ID
+6. 新增迁移步骤backfill-account-id，回填4条历史关联记录的账号ID字段
+7. 迁移脚本中linkAccountToBaby调用也传入accItem.record_id作为账号ID
 
 ### v2.7 (2026-07-07)
 **关联宝宝双向关联字段修复：**

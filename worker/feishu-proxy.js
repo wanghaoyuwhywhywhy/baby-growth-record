@@ -129,6 +129,13 @@ async function parseAuth(request, env) {
   return parseAuthToken(token);
 }
 
+// 获取 auth 对应的账号ID（账号表record_id，带缓存）
+async function getAuthAccountId(auth, env) {
+  if (!auth.accountName) return null;
+  const info = await getAccountInfo(auth.accountName, env);
+  return info?.record_id || null;
+}
+
 // 账号存在性缓存（避免每次请求都查飞书）
 let validAccountsCache = { accounts: new Set(), expires: 0 };
 
@@ -311,6 +318,7 @@ async function ensureAccountBabyTable(token, env) {
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
   const abFields = [
     { field_name: '账号名', type: 1 },
+    { field_name: '账号ID', type: 1 },
     { field_name: '宝宝ID', type: 1 },
     { field_name: '关联宝宝', type: 21, property: { table_id: env.FEISHU_TABLE_BABY, multiple: true } },
     { field_name: '角色', type: 3, property: { options: [{ name: 'owner' }, { name: 'editor' }, { name: 'viewer' }, { name: 'unlinked' }] } },
@@ -336,21 +344,31 @@ async function ensureAccountBabyTable(token, env) {
 }
 
 // 获取账号关联的宝宝ID列表（带缓存，5分钟TTL）
-async function getAccountBabyIds(accountName, env) {
+// accountId: 账号表record_id, accountName: 账号名（兼容旧数据回退查询）
+async function getAccountBabyIds(accountId, accountName, env) {
+  const cacheKey = accountId || accountName;
   const now = Date.now();
-  if (accountBabyCache.expires > now && accountBabyCache.data.has(accountName)) {
-    return accountBabyCache.data.get(accountName);
+  if (accountBabyCache.expires > now && accountBabyCache.data.has(cacheKey)) {
+    return accountBabyCache.data.get(cacheKey);
   }
 
   try {
     const feishuToken = await getTenantToken(env);
     const tableId = await ensureAccountBabyTable(feishuToken, env);
     const appToken = env.FEISHU_BASE_TOKEN;
-    const filterStr = `CurrentValue.[账号名]="${accountName}"`;
-    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
-    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-    const listData = await listResp.json();
+    // 优先用账号ID查询
+    let filterStr = accountId ? `CurrentValue.[账号ID]="${accountId}"` : `CurrentValue.[账号名]="${accountName}"`;
+    let listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+    let listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    let listData = await listResp.json();
 
+    // 如果按账号ID没查到且账号名存在，回退到按账号名查（兼容旧数据）
+    if (accountId && accountName && (!listData.data?.items || listData.data.items.length === 0)) {
+      filterStr = `CurrentValue.[账号名]="${accountName}"`;
+      listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+      listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+      listData = await listResp.json();
+    }
     const links = [];
     if (listData.code === 0 && listData.data?.items) {
       for (const item of listData.data.items) {
@@ -368,7 +386,7 @@ async function getAccountBabyIds(accountName, env) {
       }
     }
 
-    accountBabyCache.data.set(accountName, links);
+    accountBabyCache.data.set(cacheKey, links);
     accountBabyCache.expires = now + 5 * 60 * 1000;
     return links;
   } catch (e) {
@@ -378,21 +396,21 @@ async function getAccountBabyIds(accountName, env) {
 }
 
 // 检查账号对某宝宝是否有写权限
-async function canWriteBaby(accountName, babyId, env) {
-  const links = await getAccountBabyIds(accountName, env);
+async function canWriteBaby(accountId, accountName, babyId, env) {
+  const links = await getAccountBabyIds(accountId, accountName, env);
   const link = links.find(l => l.babyId === babyId);
   return link && (link.role === 'owner' || link.role === 'editor');
 }
 
 // 将账号关联到宝宝
-async function linkAccountToBaby(accountName, babyId, role, env, relation) {
+async function linkAccountToBaby(accountId, accountName, babyId, role, env, relation) {
   const feishuToken = await getTenantToken(env);
   const tableId = await ensureAccountBabyTable(feishuToken, env);
   const appToken = env.FEISHU_BASE_TOKEN;
   const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
 
-  // 检查是否已存在关联
-  const filterStr = `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${babyId}"`;
+  // 检查是否已存在关联（用账号ID+宝宝ID匹配）
+  let filterStr = accountId ? `CurrentValue.[账号ID]="${accountId}"&&CurrentValue.[宝宝ID]="${babyId}"` : `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${babyId}"`;
   const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
   const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
   const checkData = await checkResp.json();
@@ -402,6 +420,7 @@ async function linkAccountToBaby(accountName, babyId, role, env, relation) {
     const updateFields = {};
     if (relation) updateFields['关系'] = relation;
     if (role) updateFields['角色'] = role;
+    if (accountId) updateFields['账号ID'] = accountId;
     updateFields['关联宝宝'] = [babyId]; // 更新双向关联字段
     updateFields['修改人账号'] = accountName;
     updateFields['修改时间'] = Date.now();
@@ -421,6 +440,7 @@ async function linkAccountToBaby(accountName, babyId, role, env, relation) {
   // 直接POST时传关联宝宝字段，飞书可能返回成功但实际未建立关联
   const fields = {
     '账号名': accountName,
+    '账号ID': accountId || '',
     '宝宝ID': babyId,
     '角色': role || 'owner',
   };
@@ -790,7 +810,7 @@ async function handleAuth(request, env, ctx) {
     // 并行：计算期望hash + 获取关联宝宝列表
     const [expectedHash, links] = await Promise.all([
       sha256(storedEncryptedPassword + ':baby-growth-auth-v3:' + currentRole + ':' + auth.accountName),
-      getAccountBabyIds(auth.accountName, env),
+      getAccountBabyIds(accountInfo.record_id, auth.accountName, env),
     ]);
     if (expectedHash !== tokenHash) {
       return { ok: false, error: '账号密码已变更，请重新登录', code: 'password_changed' };
@@ -801,7 +821,7 @@ async function handleAuth(request, env, ctx) {
       const link = links.find(l => l.babyId === baby.record_id);
       return { ...baby, relation: link?.relation || '其他', linkRole: link?.role || 'viewer' };
     });
-    return { ok: true, role: currentRole, accountName: auth.accountName, status: accountInfo.status, babies: babiesWithRelation };
+    return { ok: true, role: currentRole, accountName: auth.accountName, accountId: accountInfo.record_id, status: accountInfo.status, babies: babiesWithRelation };
   }
 
   const account = body.account;
@@ -860,14 +880,14 @@ async function handleAuth(request, env, ctx) {
       });
       // 使用存储的加密密码派生token（与verify保持一致）
       const token = await deriveToken(encryptedPassword, role, accountName);
-      const links = await getAccountBabyIds(accountName, env);
+      const links = await getAccountBabyIds(recordId, accountName, env);
       const babyIds = links.map(l => l.babyId);
       const babies = await getBabiesByIds(babyIds, env);
       const babiesWithRelation = babies.map(baby => {
         const link = links.find(l => l.babyId === baby.record_id);
         return { ...baby, relation: link?.relation || '其他', linkRole: link?.role || 'viewer' };
       });
-      return { ok: true, token, role, accountName, status: '正常', babies: babiesWithRelation };
+      return { ok: true, token, role, accountName, accountId: recordId, status: '正常', babies: babiesWithRelation };
     }
 
     if (!storedEncryptedPassword) {
@@ -901,14 +921,14 @@ async function handleAuth(request, env, ctx) {
     }
 
     // 获取关联宝宝列表
-    const links = await getAccountBabyIds(accountName, env);
+    const links = await getAccountBabyIds(recordId, accountName, env);
     const babyIds = links.map(l => l.babyId);
     const babies = await getBabiesByIds(babyIds, env);
     const babiesWithRelation = babies.map(baby => {
       const link = links.find(l => l.babyId === baby.record_id);
       return { ...baby, relation: link?.relation || '其他', linkRole: link?.role || 'viewer' };
     });
-    return { ok: true, token, role, accountName, status, babies: babiesWithRelation };
+    return { ok: true, token, role, accountName, accountId: recordId, status, babies: babiesWithRelation };
   }
 
   return { error: '请输入账号名' };
@@ -1117,6 +1137,8 @@ export default {
           result = await migrateBackfillLink(env, token);
         } else if (step === 'login-time') {
           result = await migrateLoginTimeField(env, token);
+        } else if (step === 'backfill-account-id') {
+          result = await migrateBackfillAccountId(env, token);
         } else {
           result = await handleMigrate(env, token);
         }
@@ -1165,7 +1187,8 @@ export default {
             const { babyId, role, relation } = body;
             if (!babyId) return new Response(JSON.stringify({ error: 'babyId is required' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             // 验证当前用户是该宝宝的owner
-            const links = await getAccountBabyIds(auth.accountName, env);
+            const _accountId = await getAuthAccountId(auth, env);
+            const links = await getAccountBabyIds(_accountId, auth.accountName, env);
             const myLink = links.find(l => l.babyId === babyId);
             if (!myLink || myLink.role !== 'owner') {
               return new Response(JSON.stringify({ error: '只有宝宝的创建者才能邀请' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -1255,7 +1278,8 @@ export default {
             }
             const recordAccountName = recData.data.record.fields?.['账号名'] || '';
             const recordBabyId = recData.data.record.fields?.['宝宝ID'] || '';
-            const links = await getAccountBabyIds(auth.accountName, env);
+            const _accountId = await getAuthAccountId(auth, env);
+            const links = await getAccountBabyIds(_accountId, auth.accountName, env);
             const myLink = links.find(l => l.babyId === recordBabyId);
             const isOwner = myLink && myLink.role === 'owner';
             const isSelf = recordAccountName === auth.accountName;
@@ -1293,7 +1317,8 @@ export default {
             const recData = await recResp.json();
             if (recData.code === 0 && recData.data?.record) {
               const babyId = recData.data.record.fields?.['宝宝ID'];
-              const links = await getAccountBabyIds(auth.accountName, env);
+              const _accountId = await getAuthAccountId(auth, env);
+            const links = await getAccountBabyIds(_accountId, auth.accountName, env);
               const myLink = links.find(l => l.babyId === babyId);
               if (!myLink || myLink.role !== 'owner') {
                 return new Response(JSON.stringify({ error: '只有宝宝的创建者才能移除联系人' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -1320,7 +1345,7 @@ export default {
           const body = await request.json();
           const babyId = body.babyId;
           if (!babyId) return new Response(JSON.stringify({ error: 'babyId is required' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-          await linkAccountToBaby(auth.accountName, babyId, 'owner', env, body.relation);
+          await linkAccountToBaby(await getAuthAccountId(auth, env), auth.accountName, babyId, 'owner', env, body.relation);
           return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
         }
         return new Response(JSON.stringify({ error: 'Method not allowed' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -1474,10 +1499,11 @@ async function bitableRequest(env, token, method, tableId, params = {}, recordId
 async function handleBabies(request, env, token, auth) {
   const tableId = env.FEISHU_TABLE_BABY;
   const appToken = env.FEISHU_BASE_TOKEN;
+  const _accountId = await getAuthAccountId(auth, env);
 
   if (request.method === 'GET') {
     // 只返回该账号关联的宝宝
-    const links = await getAccountBabyIds(auth.accountName, env);
+    const links = await getAccountBabyIds(_accountId, auth.accountName, env);
     const babyIds = links.map(l => l.babyId);
     if (babyIds.length === 0) {
       return { code: 0, data: { items: [], has_more: false, total: 0 } };
@@ -1496,7 +1522,7 @@ async function handleBabies(request, env, token, auth) {
     const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
     // 自动关联新宝宝到创建者
     if (result.data?.record?.record_id) {
-      await linkAccountToBaby(auth.accountName, result.data.record.record_id, 'owner', env, body.fields['关系'] || '其他');
+      await linkAccountToBaby(_accountId, auth.accountName, result.data.record.record_id, 'owner', env, body.fields['关系'] || '其他');
     }
     return result;
   }
@@ -1505,7 +1531,7 @@ async function handleBabies(request, env, token, auth) {
     const recordId = body.record_id;
     if (!recordId) return { error: 'record_id is required' };
     // Check write permission for this baby
-    const canWrite = await canWriteBaby(auth.accountName, recordId, env);
+    const canWrite = await canWriteBaby(_accountId, auth.accountName, recordId, env);
     if (!canWrite) {
       return { error: '只有owner或editor才能编辑宝宝信息', code: 403 };
     }
@@ -1519,7 +1545,7 @@ async function handleBabies(request, env, token, auth) {
     const recordId = url.searchParams.get('record_id');
     if (!recordId) return { error: 'record_id is required' };
     // Only owner can delete baby
-    const links = await getAccountBabyIds(auth.accountName, env);
+    const links = await getAccountBabyIds(_accountId, auth.accountName, env);
     const myLink = links.find(l => l.babyId === recordId);
     if (!myLink || myLink.role !== 'owner') {
       return { error: '只有宝宝的创建者才能删除' };
@@ -1546,9 +1572,10 @@ async function handleBabies(request, env, token, auth) {
 async function handleRecords(request, env, token, auth) {
   const tableId = env.FEISHU_TABLE_RECORD;
   const appToken = env.FEISHU_BASE_TOKEN;
+  const _accountId = await getAuthAccountId(auth, env);
 
   if (request.method === 'GET') {
-    const links = await getAccountBabyIds(auth.accountName, env);
+    const links = await getAccountBabyIds(_accountId, auth.accountName, env);
     const babyIds = links.map(l => l.babyId);
     const result = await bitableRequest(env, token, 'GET', tableId, { page_size: 500 });
     if (babyIds.length === 0) {
@@ -1571,7 +1598,7 @@ async function handleRecords(request, env, token, auth) {
     // Check write permission for the associated baby
     const linkedBabyIds = extractLinkedIds(body.fields['关联宝宝']);
     if (linkedBabyIds.length > 0) {
-      const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+      const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
       if (!canWrite) {
         return { error: '只有owner或editor才能添加记录', code: 403 };
       }
@@ -1595,7 +1622,7 @@ async function handleRecords(request, env, token, auth) {
     if (existingData.code === 0 && existingData.data?.record) {
       const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
       if (linkedBabyIds.length > 0) {
-        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
         if (!canWrite) {
           return { error: '只有owner或editor才能编辑记录', code: 403 };
         }
@@ -1617,7 +1644,7 @@ async function handleRecords(request, env, token, auth) {
     if (existingData.code === 0 && existingData.data?.record) {
       const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
       if (linkedBabyIds.length > 0) {
-        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
         if (!canWrite) {
           return { error: '只有owner或editor才能删除记录', code: 403 };
         }
@@ -1689,9 +1716,10 @@ async function ensureRecordFields(token, env) {
 async function handleGrowth(request, env, token, auth) {
   const tableId = env.FEISHU_TABLE_GROWTH;
   const appToken = env.FEISHU_BASE_TOKEN;
+  const _accountId = await getAuthAccountId(auth, env);
 
   if (request.method === 'GET') {
-    const links = await getAccountBabyIds(auth.accountName, env);
+    const links = await getAccountBabyIds(_accountId, auth.accountName, env);
     const babyIds = links.map(l => l.babyId);
     const result = await bitableRequest(env, token, 'GET', tableId, { page_size: 100 });
     if (babyIds.length === 0) {
@@ -1710,7 +1738,7 @@ async function handleGrowth(request, env, token, auth) {
     // Check write permission for the associated baby
     const linkedBabyIds = extractLinkedIds(body.fields?.['关联宝宝']);
     if (linkedBabyIds.length > 0) {
-      const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+      const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
       if (!canWrite) {
         return { error: '只有owner或editor才能添加成长记录', code: 403 };
       }
@@ -1733,7 +1761,7 @@ async function handleGrowth(request, env, token, auth) {
     if (existingData.code === 0 && existingData.data?.record) {
       const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
       if (linkedBabyIds.length > 0) {
-        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
         if (!canWrite) {
           return { error: '只有owner或editor才能编辑成长记录', code: 403 };
         }
@@ -1755,7 +1783,7 @@ async function handleGrowth(request, env, token, auth) {
     if (existingData.code === 0 && existingData.data?.record) {
       const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
       if (linkedBabyIds.length > 0) {
-        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
         if (!canWrite) {
           return { error: '只有owner或editor才能删除成长记录', code: 403 };
         }
@@ -1885,9 +1913,10 @@ async function ensureVaccineTable(token, env) {
 async function handleVaccines(request, env, token, auth) {
   const appToken = env.FEISHU_BASE_TOKEN;
   const tableId = await ensureVaccineTable(token, env);
+  const _accountId = await getAuthAccountId(auth, env);
 
   if (request.method === 'GET') {
-    const links = await getAccountBabyIds(auth.accountName, env);
+    const links = await getAccountBabyIds(_accountId, auth.accountName, env);
     const babyIds = links.map(l => l.babyId);
     const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=500`;
     const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -1910,7 +1939,7 @@ async function handleVaccines(request, env, token, auth) {
     // Check write permission for the associated baby
     const linkedBabyIds = extractLinkedIds(body.fields?.['关联宝宝']);
     if (linkedBabyIds.length > 0) {
-      const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+      const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
       if (!canWrite) {
         return { code: -1, msg: '只有owner或editor才能添加疫苗记录' };
       }
@@ -1953,7 +1982,7 @@ async function handleVaccines(request, env, token, auth) {
     if (existingData.code === 0 && existingData.data?.record) {
       const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
       if (linkedBabyIds.length > 0) {
-        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
         if (!canWrite) {
           return { code: -1, msg: '只有owner或editor才能编辑疫苗记录' };
         }
@@ -1984,7 +2013,7 @@ async function handleVaccines(request, env, token, auth) {
     if (existingData.code === 0 && existingData.data?.record) {
       const linkedBabyIds = extractLinkedIds(existingData.data.record.fields?.['关联宝宝']);
       if (linkedBabyIds.length > 0) {
-        const canWrite = await canWriteBaby(auth.accountName, linkedBabyIds[0], env);
+        const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
         if (!canWrite) {
           return { code: -1, msg: '只有owner或editor才能删除疫苗记录' };
         }
@@ -2406,7 +2435,7 @@ async function handleMigrate(env, token) {
 
         // 关联所有现有宝宝到该账号
         for (const baby of babyItems) {
-          await linkAccountToBaby(accName, baby.record_id, fields['权限'] === 'superadmin' || fields['权限'] === 'admin' ? 'owner' : 'editor', env, fields['权限'] === 'superadmin' || fields['权限'] === 'admin' ? '爸爸' : '其他');
+          await linkAccountToBaby(accItem.record_id, accName, baby.record_id, fields['权限'] === 'superadmin' || fields['权限'] === 'admin' ? 'owner' : 'editor', env, fields['权限'] === 'superadmin' || fields['权限'] === 'admin' ? '爸爸' : '其他');
         }
       }
       results.existingAccountsMigrated = accListData.data.items.length;
@@ -2790,6 +2819,59 @@ async function migrateLoginTimeField(env, token) {
       }
     }
     results.backfilled = backfilled;
+  } catch (e) {
+    results.error = e.message;
+  }
+  return { ok: true, ...results };
+}
+
+// 回填关联表中已有记录的"账号ID"字段
+async function migrateBackfillAccountId(env, token) {
+  const results = { step: 'backfill-account-id' };
+  try {
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const accountTableId = await ensureAccountTable(token, env);
+    const abTableId = await ensureAccountBabyTable(token, env);
+
+    // 1. 获取所有账号，建立"账号名 → record_id"映射
+    const accListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records?page_size=500`;
+    const accListResp = await fetch(accListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const accListData = await accListResp.json();
+    const accountMap = {}; // 账号名 → record_id
+    if (accListData.code === 0 && accListData.data?.items) {
+      for (const acc of accListData.data.items) {
+        const name = acc.fields?.['账号名'];
+        if (name) accountMap[name] = acc.record_id;
+      }
+    }
+    results.accountMapSize = Object.keys(accountMap).length;
+
+    // 2. 获取关联表所有记录，回填"账号ID"
+    const abListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records?page_size=500`;
+    const abListResp = await fetch(abListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const abListData = await abListResp.json();
+    let backfilled = 0;
+    let skipped = 0;
+    if (abListData.code === 0 && abListData.data?.items) {
+      for (const item of abListData.data.items) {
+        const accName = item.fields?.['账号名'];
+        const existingId = item.fields?.['账号ID'];
+        // 只回填没有账号ID的记录
+        if (accName && !existingId && accountMap[accName]) {
+          const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
+          await fetch(updateUrl, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { '账号ID': accountMap[accName] } }),
+          });
+          backfilled++;
+        } else if (existingId) {
+          skipped++;
+        }
+      }
+    }
+    results.backfilled = backfilled;
+    results.skipped = skipped;
   } catch (e) {
     results.error = e.message;
   }

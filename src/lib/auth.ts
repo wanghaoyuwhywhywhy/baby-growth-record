@@ -22,6 +22,7 @@ function sanitizeBabies(babies: any[]): any[] {
 }
 const AUTH_ROLE_KEY = 'auth_role'; // 'edit' | 'view' | 'admin'
 const AUTH_ACCOUNT_KEY = 'auth_account'; // 账号名
+const AUTH_ACCOUNT_ID_KEY = 'auth_account_id'; // 账号ID（飞书record_id）
 const AUTH_BABIES_KEY = 'auth_babies'; // 关联宝宝列表
 const AUTH_RELATIONS_KEY = 'auth_baby_relations';
 
@@ -40,6 +41,11 @@ export function getAuthRole(): AuthRole | null {
 // 获取当前账号名
 export function getAuthAccount(): string | null {
   return localStorage.getItem(AUTH_ACCOUNT_KEY);
+}
+
+// 获取当前账号ID（飞书record_id）
+export function getAuthAccountId(): string | null {
+  return localStorage.getItem(AUTH_ACCOUNT_ID_KEY);
 }
 
 // 是否为编辑权限（基于当前宝宝的关联角色）
@@ -74,13 +80,18 @@ export function isAdmin(): boolean {
 }
 
 // 保存认证信息
-export function setAuthInfo(token: string, role: AuthRole, accountName?: string): void {
+export function setAuthInfo(token: string, role: AuthRole, accountName?: string, accountId?: string): void {
   localStorage.setItem(AUTH_TOKEN_KEY, token);
   localStorage.setItem(AUTH_ROLE_KEY, role);
   if (accountName) {
     localStorage.setItem(AUTH_ACCOUNT_KEY, accountName);
   } else {
     localStorage.removeItem(AUTH_ACCOUNT_KEY);
+  }
+  if (accountId) {
+    localStorage.setItem(AUTH_ACCOUNT_ID_KEY, accountId);
+  } else {
+    localStorage.removeItem(AUTH_ACCOUNT_ID_KEY);
   }
 }
 
@@ -89,6 +100,7 @@ export function clearAuthInfo(): void {
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(AUTH_ROLE_KEY);
   localStorage.removeItem(AUTH_ACCOUNT_KEY);
+  localStorage.removeItem(AUTH_ACCOUNT_ID_KEY);
   localStorage.removeItem(AUTH_BABIES_KEY);
   localStorage.removeItem(AUTH_RELATIONS_KEY);
   localStorage.removeItem('auth_baby_link_roles');
@@ -240,7 +252,7 @@ export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; acco
     });
     const data = await resp.json();
     if (data.ok) {
-      setAuthInfo(token, data.role, data.accountName);
+      setAuthInfo(token, data.role, data.accountName, data.accountId);
       const safeBabies = sanitizeBabies(data.babies);
       if (safeBabies.length) setAuthBabies(safeBabies);
       if (safeBabies.length) {
