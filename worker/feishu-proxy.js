@@ -223,7 +223,45 @@ async function ensureAccountTable(token, env) {
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
   const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
   const fieldsData = await fieldsResp.json();
-  const existingFields = (fieldsData.data?.items || []).map(f => f.field_name);
+  const existingFieldItems = fieldsData.data?.items || [];
+  const existingFields = existingFieldItems.map(f => f.field_name);
+
+  // 创建时间字段如果是数字类型(type 2)则删除重建为日期类型(type 5)
+  const createTimeField = existingFieldItems.find(f => f.field_name === '创建时间');
+  if (createTimeField && createTimeField.type === 2) {
+    // 先保存已有数据
+    const recordsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=500`;
+    const recordsResp = await fetch(recordsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const recordsData = await recordsResp.json();
+    const createTimeMap = {};
+    if (recordsData.code === 0 && recordsData.data?.items) {
+      for (const item of recordsData.data.items) {
+        if (item.fields?.['创建时间']) {
+          createTimeMap[item.record_id] = item.fields['创建时间'];
+        }
+      }
+    }
+    // 删除旧字段
+    await fetch(`${fieldsUrl}/${createTimeField.field_id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    // 创建新的日期类型字段
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field_name: '创建时间', type: 5 }),
+    });
+    // 回填数据
+    for (const [recordId, value] of Object.entries(createTimeMap)) {
+      const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+      await fetch(updateUrl, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { '创建时间': value } }),
+      });
+    }
+  }
 
   const accountFields = [
     { field_name: '加密密码', type: 1 },
@@ -231,7 +269,7 @@ async function ensureAccountTable(token, env) {
     { field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }, { name: '审批未通过' }] } },
     { field_name: '最后修改时间', type: 5 },
     { field_name: '最后登录时间', type: 5 },
-    { field_name: '创建时间', type: 2 },
+    { field_name: '创建时间', type: 5 },
   ];
   for (const field of accountFields) {
     if (!existingFields.includes(field.field_name)) {
