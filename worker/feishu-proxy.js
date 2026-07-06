@@ -551,7 +551,16 @@ function extractLinkedIds(field) {
 }
 
 // 获取账号信息（含状态）
+// 账号信息缓存（避免每次 verify 都查飞书，2分钟TTL）
+let accountInfoCache = { data: new Map(), expires: 0 };
+const ACCOUNT_INFO_TTL = 2 * 60 * 1000; // 2分钟
+
 async function getAccountInfo(accountName, env) {
+  // 优先查缓存
+  const now = Date.now();
+  if (accountInfoCache.expires > now && accountInfoCache.data.has(accountName)) {
+    return accountInfoCache.data.get(accountName);
+  }
   try {
     const feishuToken = await getTenantToken(env);
     const tableId = await ensureAccountTable(feishuToken, env);
@@ -564,7 +573,7 @@ async function getAccountInfo(accountName, env) {
       return null;
     }
     const fields = listData.data.items[0].fields || {};
-    return {
+    const info = {
       record_id: listData.data.items[0].record_id,
       accountName: fields['账号名'],
       role: fields['权限'] || 'view',
@@ -573,6 +582,10 @@ async function getAccountInfo(accountName, env) {
       lastModifiedTime: fields['最后修改时间'] || null,
       lastLoginTime: fields['最后登录时间'] || null,
     };
+    // 写入缓存
+    accountInfoCache.data.set(accountName, info);
+    accountInfoCache.expires = now + ACCOUNT_INFO_TTL;
+    return info;
   } catch (e) {
     console.error('[getAccountInfo] Error:', e.message);
     return null;
@@ -892,6 +905,7 @@ async function handleAccounts(request, env, token, auth) {
       if (data.code !== 0) return { code: -1, msg: data.msg };
       // 清除缓存
       validAccountsCache = { accounts: new Set(), expires: 0 };
+      accountInfoCache = { data: new Map(), expires: 0 };
       return { code: 0, data: { record: data.data?.record } };
     }
 
@@ -910,6 +924,7 @@ async function handleAccounts(request, env, token, auth) {
       const data = await resp.json();
       if (data.code !== 0) return { code: -1, msg: data.msg };
       validAccountsCache = { accounts: new Set(), expires: 0 };
+      accountInfoCache = { data: new Map(), expires: 0 };
       return { code: 0, data: { record: data.data?.record } };
     }
 
@@ -933,6 +948,9 @@ async function handleAccounts(request, env, token, auth) {
     });
     const data = await resp.json();
     if (data.code !== 0) return { code: -1, msg: data.msg };
+    // 清除缓存（密码或状态可能已变更）
+    accountInfoCache = { data: new Map(), expires: 0 };
+    validAccountsCache = { accounts: new Set(), expires: 0 };
     return { code: 0, data: { record: data.data?.record } };
   }
 
@@ -951,6 +969,7 @@ async function handleAccounts(request, env, token, auth) {
     const data = await resp.json();
     if (data.code !== 0) return { code: -1, msg: data.msg };
     validAccountsCache = { accounts: new Set(), expires: 0 };
+    accountInfoCache = { data: new Map(), expires: 0 };
     return { code: 0 };
   }
 
