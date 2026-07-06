@@ -49,7 +49,23 @@ export default function BabyDetailPage() {
     if (!baby?.record_id) return;
     const result = await cloudGetBabyContacts(baby.record_id);
     if (result.ok && result.contacts) {
-      setContacts(result.contacts);
+      // 排序：1) 状态优先级(正常>冻结/其他>已解绑) 2) 角色优先级(owner>editor>viewer>unlinked)
+      const statusOrder = (c: Contact) => {
+        if (c.role === 'unlinked') return 3;
+        if (c.accountStatus === '正常' || !c.accountStatus) return 0;
+        if (c.accountStatus === '冻结') return 1;
+        return 2;
+      };
+      const roleOrder = (c: Contact) => {
+        const map: Record<string, number> = { owner: 0, editor: 1, viewer: 2, unlinked: 3 };
+        return map[c.role] ?? 4;
+      };
+      const sorted = [...result.contacts].sort((a, b) => {
+        const sd = statusOrder(a) - statusOrder(b);
+        if (sd !== 0) return sd;
+        return roleOrder(a) - roleOrder(b);
+      });
+      setContacts(sorted);
     }
   }
 
@@ -172,10 +188,12 @@ export default function BabyDetailPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-ink">{c.accountName || '待领取'}</span>
+                    <span className={`text-sm ${c.role === 'unlinked' ? 'text-muted/50 line-through' : 'text-ink'}`}>{c.accountName || '待领取'}</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral/10 text-coral">{c.relation}</span>
                     {c.role === 'owner' ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">创建者</span>
+                    ) : c.role === 'unlinked' ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500">已解绑</span>
                     ) : (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.role === 'editor' ? 'bg-coral/10 text-coral' : 'bg-cream-dark text-muted'}`}>
                         {c.role === 'editor' ? '可编辑' : '仅浏览'}
@@ -208,7 +226,7 @@ export default function BabyDetailPage() {
                     </div>
                   )}
                 </div>
-                {isOwner && c.role !== 'owner' && (
+                {isOwner && c.role !== 'owner' && c.role !== 'unlinked' && (
                   <>
                     <button
                       onClick={() => { setEditingContact(c); setEditRelation(c.relation); setEditRole(c.role); }}

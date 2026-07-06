@@ -313,9 +313,11 @@ async function ensureAccountBabyTable(token, env) {
     { field_name: '账号名', type: 1 },
     { field_name: '宝宝ID', type: 1 },
     { field_name: '关联宝宝', type: 21, property: { table_id: env.FEISHU_TABLE_BABY, multiple: true } },
-    { field_name: '角色', type: 3, property: { options: [{ name: 'owner' }, { name: 'editor' }, { name: 'viewer' }] } },
+    { field_name: '角色', type: 3, property: { options: [{ name: 'owner' }, { name: 'editor' }, { name: 'viewer' }, { name: 'unlinked' }] } },
     { field_name: '关系', type: 3, property: { options: [{ name: '爸爸' }, { name: '妈妈' }, { name: '爷爷' }, { name: '奶奶' }, { name: '外公' }, { name: '外婆' }, { name: '姑姑' }, { name: '叔叔' }, { name: '舅舅' }, { name: '阿姨' }, { name: '其他' }] } },
     { field_name: '邀请码', type: 1 },
+    { field_name: '修改人账号', type: 1 },
+    { field_name: '修改时间', type: 2 }, // 数字类型存时间戳
   ];
   for (const field of abFields) {
     try {
@@ -353,10 +355,12 @@ async function getAccountBabyIds(accountName, env) {
     if (listData.code === 0 && listData.data?.items) {
       for (const item of listData.data.items) {
         const babyId = item.fields?.['宝宝ID'];
-        if (babyId) {
+        const role = item.fields?.['角色'] || 'viewer';
+        // 跳过已解绑的记录
+        if (babyId && role !== 'unlinked') {
           links.push({
             babyId,
-            role: item.fields?.['角色'] || 'viewer',
+            role,
             relation: item.fields?.['关系'] || '其他',
             record_id: item.record_id,
           });
@@ -393,11 +397,13 @@ async function linkAccountToBaby(accountName, babyId, role, env, relation) {
   const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
   const checkData = await checkResp.json();
   if (checkData.code === 0 && checkData.data?.items?.length > 0) {
-    // 已存在，更新关系和角色
+    // 已存在，更新关系和角色（包括从 unlinked 恢复）
     const existingRecordId = checkData.data.items[0].record_id;
     const updateFields = {};
     if (relation) updateFields['关系'] = relation;
     if (role) updateFields['角色'] = role;
+    updateFields['修改人账号'] = accountName;
+    updateFields['修改时间'] = Date.now();
     if (Object.keys(updateFields).length > 0) {
       const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${existingRecordId}`;
       await fetch(updateUrl, {
@@ -519,14 +525,17 @@ async function getBabyInviteCodes(babyId, env) {
   if (listData.code === 0 && listData.data?.items) {
     for (const item of listData.data.items) {
       const fields = item.fields || {};
+      const role = fields['角色'] || 'viewer';
       results.push({
         record_id: item.record_id,
         accountName: fields['账号名'] || '',
         babyId: fields['宝宝ID'],
-        role: fields['角色'] || 'viewer',
+        role,
         relation: fields['关系'] || '其他',
         inviteCode: fields['邀请码'] || '',
         isPending: !fields['账号名'] || !fields['账号名'].trim(),
+        modifiedBy: fields['修改人账号'] || '',
+        modifiedTime: fields['修改时间'] || null,
       });
     }
   }
@@ -1202,7 +1211,7 @@ export default {
             const resp = await fetch(updateUrl, {
               method: 'PUT',
               headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fields: { '角色': body.role } }),
+              body: JSON.stringify({ fields: { '角色': body.role, '修改人账号': auth.accountName, '修改时间': Date.now() } }),
             });
             const data = await resp.json();
             if (data.code !== 0) return new Response(JSON.stringify({ ok: false, error: data.msg }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -1214,6 +1223,8 @@ export default {
             const updates = {};
             if (body.relation) updates['关系'] = body.relation;
             if (body.role && ['editor', 'viewer'].includes(body.role)) updates['角色'] = body.role;
+            updates['修改人账号'] = auth.accountName;
+            updates['修改时间'] = Date.now();
             if (Object.keys(updates).length === 0) return new Response(JSON.stringify({ ok: false, error: '无更新内容' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             const feishuToken = await getTenantToken(env);
             const linkTableId = await ensureAccountBabyTable(feishuToken, env);
@@ -1230,7 +1241,7 @@ export default {
             return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
           if (body.action === 'remove') {
-            // 移除联系人或取消邀请
+            // 移除联系人或取消邀请：标记角色为 unlinked 而非删除记录
             const { record_id } = body;
             if (!record_id) return new Response(JSON.stringify({ error: 'record_id is required' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             // 验证是owner才能移除
@@ -1248,8 +1259,13 @@ export default {
                 return new Response(JSON.stringify({ error: '只有宝宝的创建者才能移除联系人' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
               }
             }
-            const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${record_id}`;
-            await fetch(deleteUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${feishuToken}` } });
+            // 更新角色为 unlinked + 修改人/修改时间
+            const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${record_id}`;
+            await fetch(updateUrl, {
+              method: 'PUT',
+              headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fields: { '角色': 'unlinked', '修改人账号': auth.accountName, '修改时间': Date.now() } }),
+            });
             accountBabyCache = { data: new Map(), expires: 0 };
             return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
