@@ -1497,7 +1497,7 @@ async function handleBabies(request, env, token, auth) {
     const data = await resp.json();
     if (data.code !== 0) return { code: -1, msg: data.msg };
     // 同时删除该宝宝的所有关联记录
-    await deleteBabyAssociations(recordId, env);
+    await deleteBabyAssociations(recordId, env, auth.accountName);
     return { code: 0, data: { record: data.data?.record } };
   }
   return { error: 'Method not allowed' };
@@ -3091,8 +3091,8 @@ async function handleAsset(request, env, token) {
   }
 }
 
-// 删除宝宝的所有关联记录
-async function deleteBabyAssociations(babyId, env) {
+// 删除宝宝时标记所有关联记录为 unlinked（而非删除记录）
+async function deleteBabyAssociations(babyId, env, operatorAccount) {
   const feishuToken = await getTenantToken(env);
   const linkTableId = await ensureAccountBabyTable(feishuToken, env);
   const appToken = env.FEISHU_BASE_TOKEN;
@@ -3102,9 +3102,15 @@ async function deleteBabyAssociations(babyId, env) {
   const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
   const listData = await listResp.json();
   if (listData.code === 0 && listData.data?.items) {
+    const now = Date.now();
     for (const item of listData.data.items) {
-      const delUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
-      await fetch(delUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${feishuToken}` } });
+      if (item.fields?.['角色'] === 'unlinked') continue; // 已解绑的跳过
+      const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
+      await fetch(updateUrl, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { '角色': 'unlinked', '修改人账号': operatorAccount, '修改时间': now } }),
+      });
     }
   }
   accountBabyCache = { data: new Map(), expires: 0 };
