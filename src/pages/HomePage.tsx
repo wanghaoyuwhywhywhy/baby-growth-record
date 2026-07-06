@@ -29,32 +29,36 @@ export default function HomePage() {
   const aiAbortRef = useRef<AbortController | null>(null);
 
   // 左右滑动切换宝宝
-  const [touchStart, setTouchStart] = useState<number | null>(null);
-  const [touchEnd, setTouchEnd] = useState<number | null>(null);
+  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
+  const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(null);
 
   function onTouchStart(e: React.TouchEvent) {
     setTouchEnd(null);
-    setTouchStart(e.targetTouches[0].clientX);
+    setTouchStart({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
   }
 
   function onTouchMove(e: React.TouchEvent) {
-    setTouchEnd(e.targetTouches[0].clientX);
+    setTouchEnd({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
   }
 
   function onTouchEnd() {
     if (!touchStart || !touchEnd) return;
-    const distance = touchStart - touchEnd;
+    const dx = touchStart.x - touchEnd.x;
+    const dy = touchStart.y - touchEnd.y;
     const minSwipeDistance = 50;
+    // 必须水平滑动距离大于垂直距离，且超过50px才触发切换
     if (babies.length <= 1) return;
-    if (distance > minSwipeDistance) {
+    if (Math.abs(dx) < minSwipeDistance) return;
+    if (Math.abs(dx) < Math.abs(dy)) return;
+    const currentIndex = babies.findIndex(b => b.record_id === (baby?.record_id));
+    if (currentIndex < 0) return;
+    if (dx > 0) {
       // 向左滑 → 下一个宝宝（循环：最后一个→第一个）
-      const currentIndex = babies.findIndex(b => b.record_id === (baby?.record_id));
-      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % babies.length : 0;
+      const nextIndex = (currentIndex + 1) % babies.length;
       switchBaby(babies[nextIndex].record_id);
-    } else if (distance < -minSwipeDistance) {
+    } else {
       // 向右滑 → 上一个宝宝（循环：第一个→最后一个）
-      const currentIndex = babies.findIndex(b => b.record_id === (baby?.record_id));
-      const prevIndex = currentIndex >= 0 ? (currentIndex - 1 + babies.length) % babies.length : 0;
+      const prevIndex = (currentIndex - 1 + babies.length) % babies.length;
       switchBaby(babies[prevIndex].record_id);
     }
   }
@@ -179,8 +183,9 @@ export default function HomePage() {
           </div>
         )}
 
-        <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+        <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} className="mb-4">
           {baby && <BabyCard baby={baby} />}
+        </div>
 
         {/* 四个快捷入口并排 */}
         <div className="grid grid-cols-4 gap-2.5 mb-3">
@@ -280,7 +285,6 @@ export default function HomePage() {
             )}
           </div>
         </section>
-        </div>
       </div>
 
       <FloatingButton />

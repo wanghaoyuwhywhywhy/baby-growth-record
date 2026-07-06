@@ -181,8 +181,17 @@ export default function BabyDetailPage() {
                         {c.role === 'editor' ? '可编辑' : '仅浏览'}
                       </span>
                     )}
-                    {c.accountStatus && c.accountStatus !== '正常' && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-600">{c.accountStatus}</span>
+                    {/* 账号状态标签：所有状态都显示，正常状态用绿色，非正常状态用灰色 */}
+                    {c.accountStatus && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                        c.accountStatus === '正常' ? 'bg-green-100 text-green-700' :
+                        c.accountStatus === '待审批' ? 'bg-yellow-100 text-yellow-700' :
+                        c.accountStatus === '冻结' ? 'bg-blue-100 text-blue-700' :
+                        c.accountStatus === '审批未通过' ? 'bg-red-100 text-red-700' :
+                        'bg-gray-200 text-gray-600'
+                      }`}>
+                        {c.accountStatus}
+                      </span>
                     )}
                   </div>
                   {c.isPending && c.inviteCode && (
