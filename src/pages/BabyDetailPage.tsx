@@ -184,34 +184,20 @@ export default function BabyDetailPage() {
             )}
           </div>
           <div className="divide-y divide-rule/30">
-            {contacts.length > 0 ? contacts.map(c => (
+            {contacts.filter(c => c.role !== 'unlinked' && (!c.accountStatus || c.accountStatus === '正常')).length > 0 ? contacts.filter(c => c.role !== 'unlinked' && (!c.accountStatus || c.accountStatus === '正常')).map(c => (
               <div key={c.record_id} className="flex items-center gap-3 px-4 py-3">
                 <div className="w-9 h-9 rounded-full bg-cream-dark/60 flex items-center justify-center flex-shrink-0">
                   <Users size={16} className="text-muted" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm ${c.role === 'unlinked' ? 'text-muted/50 line-through' : 'text-ink'}`}>{c.accountName || '待领取'}</span>
+                    <span className="text-sm text-ink">{c.accountName || '待领取'}</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral/10 text-coral">{c.relation}</span>
                     {c.role === 'owner' ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">创建者</span>
-                    ) : c.role === 'unlinked' ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500">已解绑</span>
                     ) : (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.role === 'editor' ? 'bg-coral/10 text-coral' : 'bg-cream-dark text-muted'}`}>
                         {c.role === 'editor' ? '可编辑' : '仅浏览'}
-                      </span>
-                    )}
-                    {/* 账号状态标签：所有状态都显示，正常状态用绿色，非正常状态用灰色 */}
-                    {c.accountStatus && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                        c.accountStatus === '正常' ? 'bg-green-100 text-green-700' :
-                        c.accountStatus === '待审批' ? 'bg-yellow-100 text-yellow-700' :
-                        c.accountStatus === '冻结' ? 'bg-blue-100 text-blue-700' :
-                        c.accountStatus === '审批未通过' ? 'bg-red-100 text-red-700' :
-                        'bg-gray-200 text-gray-600'
-                      }`}>
-                        {c.accountStatus}
                       </span>
                     )}
                   </div>
@@ -229,7 +215,7 @@ export default function BabyDetailPage() {
                     </div>
                   )}
                 </div>
-                {isOwner && c.role !== 'owner' && c.role !== 'unlinked' && (
+                {isOwner && c.role !== 'owner' && (
                   <>
                     <button
                       onClick={() => { setEditingContact(c); setEditRelation(c.relation); setEditRole(c.role); }}
