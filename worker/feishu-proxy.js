@@ -402,6 +402,7 @@ async function linkAccountToBaby(accountName, babyId, role, env, relation) {
     const updateFields = {};
     if (relation) updateFields['关系'] = relation;
     if (role) updateFields['角色'] = role;
+    updateFields['关联宝宝'] = [babyId]; // 更新双向关联字段
     updateFields['修改人账号'] = accountName;
     updateFields['修改时间'] = Date.now();
     if (Object.keys(updateFields).length > 0) {
@@ -416,18 +417,34 @@ async function linkAccountToBaby(accountName, babyId, role, env, relation) {
     return;
   }
 
+  // 先创建记录（不含关联宝宝字段），再用PUT写入双向关联
+  // 直接POST时传关联宝宝字段，飞书可能返回成功但实际未建立关联
   const fields = {
     '账号名': accountName,
     '宝宝ID': babyId,
     '角色': role || 'owner',
   };
   if (relation) fields['关系'] = relation;
+  fields['修改人账号'] = accountName;
+  fields['修改时间'] = Date.now();
 
-  await fetch(recordUrl, {
+  const createResp = await fetch(recordUrl, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields }),
   });
+  const createData = await createResp.json();
+
+  // 创建成功后，单独PUT写入关联宝宝双向关联字段
+  if (createData.code === 0 && createData.data?.record?.record_id) {
+    const newRecordId = createData.data.record.record_id;
+    const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${newRecordId}`;
+    await fetch(updateUrl, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { '关联宝宝': [babyId] } }),
+    });
+  }
 
   accountBabyCache = { data: new Map(), expires: 0 };
 }
