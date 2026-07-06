@@ -13,12 +13,17 @@ type MetricType = 'height' | 'weight' | 'head';
 function getAgeMarker(recordDate: string, birthDate: string): string | null {
   if (!birthDate || !recordDate) return null;
   const birth = new Date(birthDate);
+  birth.setHours(0, 0, 0, 0);
   const record = new Date(recordDate);
+  record.setHours(0, 0, 0, 0);
   const diffMs = record.getTime() - birth.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  // 出生当天算第1天，所以diffDays+1=天数，第100天时diffDays=99
+  const dayNum = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
 
-  // 百天
-  if (diffDays === 100) return '百天';
+  // 100天、200天...1000天、1100天等整百天
+  if (dayNum >= 100 && dayNum % 100 === 0) {
+    return `${dayNum}天`;
+  }
 
   // 整月（精确按日期对比）
   const months = (record.getFullYear() - birth.getFullYear()) * 12 + (record.getMonth() - birth.getMonth());

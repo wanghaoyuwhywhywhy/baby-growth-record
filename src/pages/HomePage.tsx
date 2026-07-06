@@ -45,18 +45,17 @@ export default function HomePage() {
     if (!touchStart || !touchEnd) return;
     const distance = touchStart - touchEnd;
     const minSwipeDistance = 50;
+    if (babies.length <= 1) return;
     if (distance > minSwipeDistance) {
-      // 向左滑 → 下一个宝宝
+      // 向左滑 → 下一个宝宝（循环：最后一个→第一个）
       const currentIndex = babies.findIndex(b => b.record_id === (baby?.record_id));
-      if (currentIndex >= 0 && currentIndex < babies.length - 1) {
-        switchBaby(babies[currentIndex + 1].record_id);
-      }
+      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % babies.length : 0;
+      switchBaby(babies[nextIndex].record_id);
     } else if (distance < -minSwipeDistance) {
-      // 向右滑 → 上一个宝宝
+      // 向右滑 → 上一个宝宝（循环：第一个→最后一个）
       const currentIndex = babies.findIndex(b => b.record_id === (baby?.record_id));
-      if (currentIndex > 0) {
-        switchBaby(babies[currentIndex - 1].record_id);
-      }
+      const prevIndex = currentIndex >= 0 ? (currentIndex - 1 + babies.length) % babies.length : 0;
+      switchBaby(babies[prevIndex].record_id);
     }
   }
 

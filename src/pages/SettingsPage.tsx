@@ -384,10 +384,17 @@ export default function SettingsPage() {
                   {showFormPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
-              <select value={formStatus} onChange={e => setFormStatus(e.target.value)} className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-coral/50" disabled={formSubmitting}>
-                <option value="正常">正常</option>
-                <option value="冻结">冻结</option>
-              </select>
+              {editingAccount.账号名 === accountName ? (
+                <>
+                  <input type="text" value={formStatus} className="w-full bg-gray-100 border border-rule rounded-xl px-3 py-2.5 text-sm text-muted outline-none cursor-not-allowed" disabled />
+                  <p className="text-[10px] text-muted/60 -mt-2">不可修改自己的状态</p>
+                </>
+              ) : (
+                <select value={formStatus} onChange={e => setFormStatus(e.target.value)} className="w-full bg-white border border-rule rounded-xl px-3 py-2.5 text-sm text-ink outline-none focus:border-coral/50" disabled={formSubmitting}>
+                  <option value="正常">正常</option>
+                  <option value="冻结">冻结</option>
+                </select>
+              )}
               {formError && <p className="text-xs text-red-500">{formError}</p>}
               <button onClick={handleEditAccount} disabled={formSubmitting} className="btn-primary w-full py-2.5 text-sm flex items-center justify-center gap-2 disabled:opacity-50">
                 {formSubmitting ? <Loader2 size={14} className="animate-spin" /> : '保存'}

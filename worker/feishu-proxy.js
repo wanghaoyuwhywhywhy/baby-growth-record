@@ -562,6 +562,7 @@ async function getAccountInfo(accountName, env) {
       accountName: fields['账号名'],
       role: fields['权限'] || 'view',
       status: fields['状态'] || '正常',
+      encryptedPassword: fields['加密密码'] || fields['密码哈希'] || '',
     };
   } catch (e) {
     console.error('[getAccountInfo] Error:', e.message);
@@ -653,10 +654,24 @@ async function handleAuth(request, env) {
     // 检查账号是否仍存在且状态为approved
     const accountInfo = await getAccountInfo(auth.accountName, env);
     if (!accountInfo) {
-      return { ok: false, error: '账号已不存在' };
+      return { ok: false, error: '账号已不存在', code: 'account_not_found' };
     }
     if (accountInfo.status !== '正常') {
       return { ok: false, error: '账号状态异常', code: accountInfo.status === '待审批' ? 'pending' : accountInfo.status === '冻结' ? 'frozen' : accountInfo.status === '审批未通过' ? 'rejected' : 'deleted' };
+    }
+    // 密码校验：token中的hash部分必须与当前密码派生的hash匹配
+    // token格式：role:accountName:hash，hash = SHA256(密码哈希 + ':baby-growth-auth-v3:' + role + ':' + accountName)
+    const storedEncryptedPassword = accountInfo.encryptedPassword || '';
+    if (!storedEncryptedPassword) {
+      // 密码为空说明账号异常，强制登出
+      return { ok: false, error: '账号密码异常，请重新登录', code: 'password_invalid' };
+    }
+    const currentRole = accountInfo.role === 'superadmin' ? 'superadmin' : 'view';
+    const expectedHash = await sha256(storedEncryptedPassword + ':baby-growth-auth-v3:' + currentRole + ':' + auth.accountName);
+    const tokenHash = body.token.split(':').slice(2).join(':');
+    if (expectedHash !== tokenHash) {
+      // 密码已变更，强制登出
+      return { ok: false, error: '账号密码已变更，请重新登录', code: 'password_changed' };
     }
     // 获取关联的宝宝列表
     const links = await getAccountBabyIds(auth.accountName, env);
@@ -667,7 +682,7 @@ async function handleAuth(request, env) {
       const link = links.find(l => l.babyId === baby.record_id);
       return { ...baby, relation: link?.relation || '其他', linkRole: link?.role || 'viewer' };
     });
-    return { ok: true, role: auth.role, accountName: auth.accountName, status: accountInfo.status, babies: babiesWithRelation };
+    return { ok: true, role: currentRole, accountName: auth.accountName, status: accountInfo.status, babies: babiesWithRelation };
   }
 
   const account = body.account;
@@ -969,6 +984,8 @@ export default {
           result = await migrateCreateTimeField(env, token);
         } else if (step === 'link-baby') {
           result = await migrateLinkBabyField(env, token);
+        } else if (step === 'backfill-link') {
+          result = await migrateBackfillLink(env, token);
         } else {
           result = await handleMigrate(env, token);
         }
@@ -1036,39 +1053,41 @@ export default {
             // 获取宝宝的联系人和待领取邀请码
             const { babyId } = body;
             if (!babyId) return new Response(JSON.stringify({ error: 'babyId is required' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-            const contacts = await getBabyInviteCodes(babyId, env);
-            // 批量查询每个联系人的最后登录时间（从账号表获取最后修改时间）
-            const accountNames = contacts.filter(c => c.accountName).map(c => c.accountName);
-            if (accountNames.length > 0) {
-              try {
-                const feishuToken = await getTenantToken(env);
-                const accountTableId = await ensureAccountTable(feishuToken, env);
-                const appToken = env.FEISHU_BASE_TOKEN;
-                const filterStr = accountNames.map(n => `CurrentValue.[账号名]="${n}"`).join(' OR ');
-                const accountUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
-                const accountResp = await fetch(accountUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-                const accountData = await accountResp.json();
-                if (accountData.code === 0 && accountData.data?.items) {
-                  const lastLoginMap = {};
-                  const accountStatusMap = {};
-                  for (const aItem of accountData.data.items) {
-                    const name = aItem.fields?.['账号名'];
-                    if (name) {
-                      lastLoginMap[name] = aItem.fields?.['最后修改时间'] || null;
-                      accountStatusMap[name] = aItem.fields?.['状态'] || '正常';
+            const feishuToken = await getTenantToken(env);
+            // 并行查询：联系人列表 + 所有账号列表（一次查询用于补全状态和最后登录时间）
+            const [contacts, allAccounts] = await Promise.all([
+              getBabyInviteCodes(babyId, env),
+              (async () => {
+                try {
+                  const accountTableId = await ensureAccountTable(feishuToken, env);
+                  const appToken = env.FEISHU_BASE_TOKEN;
+                  const accountUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records?page_size=100`;
+                  const accountResp = await fetch(accountUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+                  const accountData = await accountResp.json();
+                  if (accountData.code === 0 && accountData.data?.items) {
+                    const map = {};
+                    for (const aItem of accountData.data.items) {
+                      const name = aItem.fields?.['账号名'];
+                      if (name) {
+                        map[name] = {
+                          lastLoginTime: aItem.fields?.['最后修改时间'] || null,
+                          status: aItem.fields?.['状态'] || '正常',
+                        };
+                      }
                     }
+                    return map;
                   }
-                  for (const item of contacts) {
-                    if (item.accountName && lastLoginMap[item.accountName]) {
-                      item.lastLoginTime = lastLoginMap[item.accountName];
-                    }
-                    if (item.accountName) {
-                      item.accountStatus = accountStatusMap[item.accountName] || '正常';
-                    }
-                  }
-                }
-              } catch (e) {
-                // 查询最后登录时间失败不影响主流程
+                } catch (e) {}
+                return {};
+              })(),
+            ]);
+            // 补全联系人状态和最后登录时间
+            for (const item of contacts) {
+              if (item.accountName && allAccounts[item.accountName]) {
+                item.lastLoginTime = allAccounts[item.accountName].lastLoginTime;
+                item.accountStatus = allAccounts[item.accountName].status;
+              } else if (item.accountName) {
+                item.accountStatus = 'deleted';
               }
             }
             // 过滤掉明确非正常的已关联联系人（保留待领取邀请码，以及账号查询失败时accountStatus为undefined的联系人）
@@ -2495,6 +2514,55 @@ async function migrateLinkBabyField(env, token) {
     results.existingFields = existing;
   } catch (e) {
     results.linkBabyError = e.message;
+  }
+  return { ok: true, ...results };
+}
+
+// 独立迁移步骤：回填账号宝宝关联表的"关联宝宝"双向关联字段
+async function migrateBackfillLink(env, token) {
+  const results = { step: 'backfill-link' };
+  try {
+    const appToken = env.FEISHU_BASE_TOKEN;
+    const tableId = await ensureAccountBabyTable(token, env);
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?page_size=100`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const listData = await listResp.json();
+    let backfilled = 0;
+    let skipped = 0;
+    let failed = 0;
+    if (listData.code === 0 && listData.data?.items) {
+      for (const item of listData.data.items) {
+        const babyId = item.fields?.['宝宝ID'];
+        const existingLink = item.fields?.['关联宝宝'];
+        // 已经有关联值则跳过
+        if (existingLink && Array.isArray(existingLink) && existingLink.length > 0) {
+          skipped++;
+          continue;
+        }
+        if (!babyId) {
+          failed++;
+          continue;
+        }
+        // 回填关联宝宝字段
+        const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${item.record_id}`;
+        const updateResp = await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { '关联宝宝': [babyId] } }),
+        });
+        const updateData = await updateResp.json();
+        if (updateData.code === 0) {
+          backfilled++;
+        } else {
+          failed++;
+        }
+      }
+    }
+    results.backfilled = backfilled;
+    results.skipped = skipped;
+    results.failed = failed;
+  } catch (e) {
+    results.backfillError = e.message;
   }
   return { ok: true, ...results };
 }

@@ -17,6 +17,7 @@ interface Contact {
   inviteCode: string;
   isPending: boolean;
   lastLoginTime?: number | null;
+  accountStatus?: string;
 }
 
 export default function BabyDetailPage() {
@@ -65,16 +66,6 @@ export default function BabyDetailPage() {
     await cloudRemoveContact(contact.record_id);
     setRemoveTarget(null);
     loadContacts();
-  }
-
-  async function handleUpdateContactRole(contact: Contact) {
-    if (!baby?.record_id) return;
-    const newRole = contact.role === 'editor' ? 'viewer' : 'editor';
-    const { cloudUpdateContactRole } = await import('@/lib/cloud');
-    const result = await cloudUpdateContactRole(contact.record_id, newRole);
-    if (result.ok) {
-      loadContacts();
-    }
   }
 
   async function handleSaveEditContact() {
@@ -185,17 +176,13 @@ export default function BabyDetailPage() {
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral/10 text-coral">{c.relation}</span>
                     {c.role === 'owner' ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">创建者</span>
-                    ) : isOwner ? (
-                      <button
-                        onClick={() => handleUpdateContactRole(c)}
-                        className={`text-[10px] px-1.5 py-0.5 rounded-full transition-colors ${
-                          c.role === 'editor' ? 'bg-coral/10 text-coral hover:bg-coral/20' : 'bg-cream-dark text-muted hover:bg-rule/50'
-                        }`}
-                      >
-                        {c.role === 'editor' ? '可编辑' : '仅浏览'} ✎
-                      </button>
                     ) : (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cream-dark text-muted">{c.role === 'editor' ? '可编辑' : '仅浏览'}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.role === 'editor' ? 'bg-coral/10 text-coral' : 'bg-cream-dark text-muted'}`}>
+                        {c.role === 'editor' ? '可编辑' : '仅浏览'}
+                      </span>
+                    )}
+                    {c.accountStatus && c.accountStatus !== '正常' && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-600">{c.accountStatus}</span>
                     )}
                   </div>
                   {c.isPending && c.inviteCode && (

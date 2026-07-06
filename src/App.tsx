@@ -115,8 +115,8 @@ export default function App() {
         }
       } else {
         console.log('[verifyAccount] 验证失败:', result.error, result.code);
-        // 仅在明确的账号状态异常时登出，其他错误保持登录避免临时网络问题导致登出
-        const shouldLogout = ['pending', 'frozen', 'deleted', 'rejected', 'account_not_found'].includes(result.code || '');
+        // 仅在明确的账号状态异常或密码变更时登出，其他错误保持登录避免临时网络问题导致登出
+        const shouldLogout = ['pending', 'frozen', 'deleted', 'rejected', 'account_not_found', 'password_invalid', 'password_changed'].includes(result.code || '');
         if (shouldLogout) {
           clearAuthInfo();
           setAuthed(false);
