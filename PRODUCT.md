@@ -1,6 +1,6 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-06 23:00 (北京时间/UTC+8)
+> 最后更新：2026-07-07 01:30 (北京时间/UTC+8)
 
 ---
 
@@ -20,6 +20,13 @@
 8. `getBabiesByIds`改用飞书`batch_get` API一次性获取所有宝宝记录（之前逐个串行查询，N个宝宝=N次API调用）
 9. 登录时间更新改为非阻塞`ctx.waitUntil()`（之前登录需等待PUT请求完成）
 10. 移除登录流程中的`ensureDefaultAdmin`调用（admin已存在，无需每次登录检查）
+
+**页面白屏和验证慢修复：**
+11. `verifyAuth`不再在失败时清除token（由App.tsx根据code决定是否登出，避免verify API超时导致白屏）
+12. 路由切换时verify加5分钟节流（之前每次路由切换都触发6-8秒的verify API，导致页面卡顿白屏）
+13. `getAccountInfo`添加Cache API边缘缓存+内存缓存双重缓存（2分钟TTL，避免每次verify都查飞书）
+14. 账号更新（密码/状态变更）时清除缓存，确保数据一致性
+15. 删除`.github/workflows/deploy.yml`（Worker已通过wrangler直接部署，不再需要GitHub Actions）
 
 ### v2.5 (2026-07-05)
 **修复问题：**
