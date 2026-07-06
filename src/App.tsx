@@ -62,14 +62,21 @@ function checkStaleCache() {
   }
 }
 
-// 路由切换时滚动到顶部 + 验证账号
+// 路由切换时滚动到顶部 + 验证账号（5分钟节流，避免频繁调用慢API）
+let lastVerifyTime = 0;
+const VERIFY_THROTTLE_MS = 5 * 60 * 1000; // 5分钟
 function ScrollToTop({ onVerifyAccount }: { onVerifyAccount: () => void }) {
   const { pathname } = useLocation();
   useEffect(() => {
     window.scrollTo(0, 0);
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
-    onVerifyAccount();
+    // 节流：5分钟内不重复验证（verify API 需要数秒，频繁调用会导致页面卡顿）
+    const now = Date.now();
+    if (now - lastVerifyTime > VERIFY_THROTTLE_MS) {
+      lastVerifyTime = now;
+      onVerifyAccount();
+    }
   }, [pathname, onVerifyAccount]);
   return null;
 }

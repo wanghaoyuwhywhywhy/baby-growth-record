@@ -671,10 +671,8 @@ async function handleAuth(request, env, ctx) {
       return { ok: false, error: '账号状态异常', code: accountInfo.status === '待审批' ? 'pending' : accountInfo.status === '冻结' ? 'frozen' : accountInfo.status === '审批未通过' ? 'rejected' : 'deleted' };
     }
     // 密码校验：token中的hash部分必须与当前密码派生的hash匹配
-    // token格式：role:accountName:hash，hash = SHA256(密码哈希 + ':baby-growth-auth-v3:' + role + ':' + accountName)
     const storedEncryptedPassword = accountInfo.encryptedPassword || '';
     if (!storedEncryptedPassword) {
-      // 密码为空说明账号异常，强制登出
       return { ok: false, error: '账号密码异常，请重新登录', code: 'password_invalid' };
     }
     const currentRole = accountInfo.role === 'superadmin' ? 'superadmin' : 'view';
@@ -685,12 +683,10 @@ async function handleAuth(request, env, ctx) {
       getAccountBabyIds(auth.accountName, env),
     ]);
     if (expectedHash !== tokenHash) {
-      // 密码已变更，强制登出
       return { ok: false, error: '账号密码已变更，请重新登录', code: 'password_changed' };
     }
     const babyIds = links.map(l => l.babyId);
     const babies = await getBabiesByIds(babyIds, env);
-    // Attach relation info to each baby
     const babiesWithRelation = babies.map(baby => {
       const link = links.find(l => l.babyId === baby.record_id);
       return { ...baby, relation: link?.relation || '其他', linkRole: link?.role || 'viewer' };
