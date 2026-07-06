@@ -63,7 +63,10 @@ export default function BabyDetailPage() {
       const sorted = [...result.contacts].sort((a, b) => {
         const sd = statusOrder(a) - statusOrder(b);
         if (sd !== 0) return sd;
-        return roleOrder(a) - roleOrder(b);
+        const rd = roleOrder(a) - roleOrder(b);
+        if (rd !== 0) return rd;
+        // 同状态同角色：最后登录时间倒序（最近登录排前面）
+        return (b.lastLoginTime || 0) - (a.lastLoginTime || 0);
       });
       setContacts(sorted);
     }
