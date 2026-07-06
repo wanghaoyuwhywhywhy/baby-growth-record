@@ -5,7 +5,7 @@ import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { calcAge } from '@/utils/date';
 import { Edit3, User, Calendar, Heart, Plus, Trash2, Copy, Users } from 'lucide-react';
-import { getAuthBabyRelations, getAuthBabyLinkRoles } from '@/lib/auth';
+import { getAuthBabyRelations, getAuthBabyLinkRoles, getAuthAccount } from '@/lib/auth';
 import { cloudGetBabyContacts, cloudCreateInvite, cloudRemoveContact, cloudUpdateContact } from '@/lib/cloud';
 
 interface Contact {
@@ -38,6 +38,9 @@ export default function BabyDetailPage() {
   const [editRole, setEditRole] = useState('');
 
   const isOwner = baby ? babyLinkRoles[baby.record_id] === 'owner' : false;
+  const myRole = baby ? babyLinkRoles[baby.record_id] || '' : '';
+  const canEdit = isOwner || myRole === 'editor';
+  const myAccountName = getAuthAccount();
 
   useEffect(() => {
     if (baby?.record_id) {
@@ -129,13 +132,15 @@ export default function BabyDetailPage() {
         title="宝宝档案"
         showBack
         rightAction={
-          <button
-            onClick={() => navigate(`/baby/edit?id=${baby.record_id}`)}
-            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors"
-            aria-label="编辑"
-          >
-            <Edit3 size={18} className="text-ink" />
-          </button>
+          canEdit ? (
+            <button
+              onClick={() => navigate(`/baby/edit?id=${baby.record_id}`)}
+              className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors"
+              aria-label="编辑"
+            >
+              <Edit3 size={18} className="text-ink" />
+            </button>
+          ) : undefined
         }
       />
 
@@ -215,7 +220,7 @@ export default function BabyDetailPage() {
                     </div>
                   )}
                 </div>
-                {isOwner && c.role !== 'owner' && (
+                {(isOwner && c.role !== 'owner' || c.accountName === myAccountName) && c.role !== 'owner' && (
                   <>
                     <button
                       onClick={() => { setEditingContact(c); setEditRelation(c.relation); setEditRole(c.role); }}
@@ -223,12 +228,14 @@ export default function BabyDetailPage() {
                     >
                       <Edit3 size={14} />
                     </button>
-                    <button
-                      onClick={() => setRemoveTarget(c)}
-                      className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {isOwner && (
+                      <button
+                        onClick={() => setRemoveTarget(c)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -339,24 +346,28 @@ export default function BabyDetailPage() {
               </div>
               <div>
                 <label className="block text-xs text-muted mb-1">权限</label>
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => setEditRole('editor')}
-                    className={`text-xs px-3 py-1 rounded-full transition-colors ${
-                      editRole === 'editor' ? 'bg-coral text-white' : 'bg-cream-dark text-muted'
-                    }`}
-                  >
-                    可编辑
-                  </button>
-                  <button
-                    onClick={() => setEditRole('viewer')}
-                    className={`text-xs px-3 py-1 rounded-full transition-colors ${
-                      editRole === 'viewer' ? 'bg-coral text-white' : 'bg-cream-dark text-muted'
-                    }`}
-                  >
-                    仅浏览
-                  </button>
-                </div>
+                {isOwner ? (
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => setEditRole('editor')}
+                      className={`text-xs px-3 py-1 rounded-full transition-colors ${
+                        editRole === 'editor' ? 'bg-coral text-white' : 'bg-cream-dark text-muted'
+                      }`}
+                    >
+                      可编辑
+                    </button>
+                    <button
+                      onClick={() => setEditRole('viewer')}
+                      className={`text-xs px-3 py-1 rounded-full transition-colors ${
+                        editRole === 'viewer' ? 'bg-coral text-white' : 'bg-cream-dark text-muted'
+                      }`}
+                    >
+                      仅浏览
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted">{editingContact.role === 'editor' ? '可编辑' : '仅浏览'}（仅创建者可修改权限）</span>
+                )}
               </div>
               <button
                 onClick={handleSaveEditContact}

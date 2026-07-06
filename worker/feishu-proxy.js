@@ -515,12 +515,18 @@ async function redeemInviteCode(accountName, code, env) {
     return { ok: false, error: '您已关联该宝宝' };
   }
 
-  // 填入账号名
+  // 填入账号名 + 审计字段 + 关联宝宝
+  const babyId = fields['宝宝ID'];
   const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${record.record_id}`;
   await fetch(updateUrl, {
     method: 'PUT',
     headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fields: { '账号名': accountName } }),
+    body: JSON.stringify({ fields: {
+      '账号名': accountName,
+      '关联宝宝': babyId ? [babyId] : [],
+      '修改人账号': accountName,
+      '修改时间': Date.now(),
+    } }),
   });
 
   accountBabyCache = { data: new Map(), expires: 0 };
@@ -1237,15 +1243,32 @@ export default {
           }
           if (body.action === 'updateContact') {
             if (!body.record_id) return new Response(JSON.stringify({ ok: false, error: '参数不完整' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-            const updates = {};
-            if (body.relation) updates['关系'] = body.relation;
-            if (body.role && ['editor', 'viewer'].includes(body.role)) updates['角色'] = body.role;
-            updates['修改人账号'] = auth.accountName;
-            updates['修改时间'] = Date.now();
-            if (Object.keys(updates).length === 0) return new Response(JSON.stringify({ ok: false, error: '无更新内容' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            // 权限检查：获取该关联记录对应的宝宝，判断当前用户角色
             const feishuToken = await getTenantToken(env);
             const linkTableId = await ensureAccountBabyTable(feishuToken, env);
             const appToken = env.FEISHU_BASE_TOKEN;
+            const recUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${body.record_id}`;
+            const recResp = await fetch(recUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+            const recData = await recResp.json();
+            if (recData.code !== 0 || !recData.data?.record) {
+              return new Response(JSON.stringify({ ok: false, error: '记录不存在' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            }
+            const recordAccountName = recData.data.record.fields?.['账号名'] || '';
+            const recordBabyId = recData.data.record.fields?.['宝宝ID'] || '';
+            const links = await getAccountBabyIds(auth.accountName, env);
+            const myLink = links.find(l => l.babyId === recordBabyId);
+            const isOwner = myLink && myLink.role === 'owner';
+            const isSelf = recordAccountName === auth.accountName;
+            // owner 可以修改任何人的关系和角色；非 owner 只能修改自己的关系，不能改角色
+            if (!isOwner && !isSelf) {
+              return new Response(JSON.stringify({ ok: false, error: '无权修改此联系人' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            }
+            const updates = {};
+            if (body.relation) updates['关系'] = body.relation;
+            if (isOwner && body.role && ['editor', 'viewer'].includes(body.role)) updates['角色'] = body.role;
+            updates['修改人账号'] = auth.accountName;
+            updates['修改时间'] = Date.now();
+            if (Object.keys(updates).length === 0) return new Response(JSON.stringify({ ok: false, error: '无更新内容' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${body.record_id}`;
             const resp = await fetch(updateUrl, {
               method: 'PUT',
