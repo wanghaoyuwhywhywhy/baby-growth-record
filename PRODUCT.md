@@ -568,7 +568,51 @@
 | 后端 | Cloudflare Worker | https://api.tongxi.xyz |
 | 代码仓库 | GitHub | wanghaoyuwhywhywhy/baby-growth-record |
 
-### 8.1 前端部署配置
+### 8.1 自动部署工作流（GitHub Actions）
+
+**工作流文件**：`.github/workflows/deploy.yml`
+
+**触发规则**：
+| 操作 | 触发条件 | 效果 |
+|------|----------|------|
+| push 到 main | `git push origin main` | 自动部署前端(Pages) + 后端(Worker) 到生产环境 |
+| PR 到 main | 创建/更新 Pull Request | 自动构建前端预览部署，PR 中显示预览 URL |
+| 其他分支 push | 非 main 分支 | 不触发 |
+
+**日常工作流程（推荐）**：
+1. 本地开发 + 测试：`npm run dev`
+2. 提交代码：`git add <文件> && git commit -m "描述"`
+3. 推送到 GitHub：`git push origin main`
+4. 等待 GitHub Actions 自动部署（约1-2分钟）
+5. 查看 Actions 运行状态：https://github.com/wanghaoyuwhywhywhy/baby-growth-record/actions
+
+**预发布验证流程（推荐）**：
+1. 创建开发分支：`git checkout -b feat/xxx`
+2. 开发 + 提交 + 推送：`git push origin feat/xxx`
+3. 创建 PR 到 main（GitHub 网页或 `gh pr create`）
+4. PR 自动构建预览，点击预览 URL 验证
+5. 验证通过后合并 PR，自动部署到生产环境
+
+**重要：不要再本地手动部署！** 以下命令已废弃：
+- ~~`cd worker && npx wrangler deploy`~~ → 现在由 GitHub Actions 自动完成
+- ~~`npm run build && npx wrangler pages deploy docs`~~ → 现在由 GitHub Actions 自动完成
+
+**GitHub Secrets**（已配置）：
+| Secret 名 | 用途 |
+|-----------|------|
+| CLOUDFLARE_API_TOKEN | Cloudflare 部署凭证 |
+| CLOUDFLARE_ACCOUNT_ID | Cloudflare 账号 ID |
+
+**换电脑后恢复开发**：
+```bash
+git clone https://github.com/wanghaoyuwhywhywhy/baby-growth-record.git
+cd baby-growth-record
+npm install
+npm run dev          # 本地开发
+# git push origin main → 自动部署，无需任何额外配置
+```
+
+### 8.2 前端部署配置
 
 - Framework preset: None
 - Build command: `npm run build`
@@ -576,7 +620,7 @@
 - Root directory: `/`（根目录即项目目录）
 - GitHub Pages: 已禁用（防止 Jekyll 冲突）
 
-### 8.2 Worker 环境变量
+### 8.3 Worker 环境变量
 
 | 变量名 | 说明 |
 |--------|------|
