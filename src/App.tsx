@@ -92,19 +92,21 @@ export default function App() {
     setupAutoUpdate();
   }, []);
 
-  // 验证当前账号是否仍存在且状态为approved
+  // 验证当前账号是否仍存在且状态为approved（后台静默验证，不阻塞页面渲染）
   const verifyAccount = useCallback(async () => {
     const token = localStorage.getItem('auth_token');
     if (!token) {
       setVerifying(false);
       return;
     }
+    // 乐观渲染：有 token 就直接放行，不等 API 返回
+    setAuthed(true);
+    setVerifying(false);
     try {
       const result = await verifyAuth();
       console.log('[verifyAccount] API返回:', result);
       if (result.ok) {
-        setAuthed(true);
-        // Store baby relations and link roles from verify result
+        // 更新宝宝关联信息
         if (result.babies) {
           const relations: Record<string, string> = {};
           const linkRoles: Record<string, string> = {};
@@ -122,26 +124,17 @@ export default function App() {
         }
       } else {
         console.log('[verifyAccount] 验证失败:', result.error, result.code);
-        // 仅在明确的账号状态异常或密码变更时登出，其他错误保持登录避免临时网络问题导致登出
+        // 仅在明确的账号状态异常时登出
         const shouldLogout = ['pending', 'frozen', 'deleted', 'rejected', 'account_not_found', 'password_invalid', 'password_changed'].includes(result.code || '');
         if (shouldLogout) {
           clearAuthInfo();
           setAuthed(false);
         }
-        // 非明确错误时保持登录
       }
     } catch (e) {
       console.log('[verifyAccount] 请求异常:', e);
-      // 网络错误时，如果有格式正确的token则放行（离线可用），否则登出
-      const parts = token.split(':');
-      if (parts.length >= 3 && parts[1]) {
-        setAuthed(true);
-      } else {
-        clearAuthInfo();
-        setAuthed(false);
-      }
+      // 网络错误不处理，保持已登录状态（离线可用）
     }
-    setVerifying(false);
   }, []);
 
   // 首次加载：验证token有效性
