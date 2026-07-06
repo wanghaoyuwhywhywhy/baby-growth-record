@@ -1,5 +1,25 @@
 const WORKER_URL = 'https://api.tongxi.xyz';
 const AUTH_TOKEN_KEY = 'auth_token';
+
+// 确保宝宝字段是字符串（飞书可能返回富文本数组格式）
+function sanitizeBabyField(value: any): string {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((v: any) => typeof v === 'string' ? v : v?.text || '').join('');
+  return String(value);
+}
+
+function sanitizeBabies(babies: any[]): any[] {
+  if (!babies) return [];
+  return babies.map(b => ({
+    ...b,
+    宝宝姓名: sanitizeBabyField(b.宝宝姓名),
+    性别: sanitizeBabyField(b.性别),
+    妈妈名字: sanitizeBabyField(b.妈妈名字),
+    爸爸名字: sanitizeBabyField(b.爸爸名字),
+    备注: sanitizeBabyField(b.备注),
+  }));
+}
 const AUTH_ROLE_KEY = 'auth_role'; // 'edit' | 'view' | 'admin'
 const AUTH_ACCOUNT_KEY = 'auth_account'; // 账号名
 const AUTH_BABIES_KEY = 'auth_babies'; // 关联宝宝列表
@@ -143,11 +163,12 @@ export async function login(account: string, password?: string): Promise<{ ok: b
       const role = data.role || 'view';
       const accountName = data.accountName || account;
       setAuthInfo(data.token, role, accountName);
-      if (data.babies) setAuthBabies(data.babies);
-      if (data.babies) {
+      const safeBabies = sanitizeBabies(data.babies);
+      if (safeBabies.length) setAuthBabies(safeBabies);
+      if (safeBabies.length) {
         const relations: Record<string, string> = {};
         const linkRoles: Record<string, string> = {};
-        for (const baby of data.babies) {
+        for (const baby of safeBabies) {
           if (baby.record_id && baby.relation) {
             relations[baby.record_id] = baby.relation;
           }
@@ -158,7 +179,7 @@ export async function login(account: string, password?: string): Promise<{ ok: b
         setAuthBabyRelations(relations);
         setAuthBabyLinkRoles(linkRoles);
       }
-      return { ok: true, token: data.token, role, accountName, status: data.status, babies: data.babies };
+      return { ok: true, token: data.token, role, accountName, status: data.status, babies: safeBabies };
     }
     // 账号待审批
     if (data.code === 'pending') {
@@ -220,11 +241,12 @@ export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; acco
     const data = await resp.json();
     if (data.ok) {
       setAuthInfo(token, data.role, data.accountName);
-      if (data.babies) setAuthBabies(data.babies);
-      if (data.babies) {
+      const safeBabies = sanitizeBabies(data.babies);
+      if (safeBabies.length) setAuthBabies(safeBabies);
+      if (safeBabies.length) {
         const relations: Record<string, string> = {};
         const linkRoles: Record<string, string> = {};
-        for (const baby of data.babies) {
+        for (const baby of safeBabies) {
           if (baby.record_id && baby.relation) {
             relations[baby.record_id] = baby.relation;
           }
@@ -235,7 +257,7 @@ export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; acco
         setAuthBabyRelations(relations);
         setAuthBabyLinkRoles(linkRoles);
       }
-      return { ok: true, role: data.role, accountName: data.accountName, status: data.status, babies: data.babies };
+      return { ok: true, role: data.role, accountName: data.accountName, status: data.status, babies: safeBabies };
     }
     // 不在此处清除 token，由调用方根据 code 决定
     return { ok: false, error: data.error, code: data.code };

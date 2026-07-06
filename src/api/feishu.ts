@@ -75,9 +75,24 @@ export interface VaccineRecord {
   关联宝宝: string[];
 }
 
+// 确保宝宝字段都是字符串（兼容飞书富文本数组格式残留数据）
+function sanitizeBaby(baby: any): Baby {
+  return {
+    record_id: baby.record_id,
+    宝宝姓名: typeof baby.宝宝姓名 === 'string' ? baby.宝宝姓名 : String(baby.宝宝姓名?.[0]?.text || baby.宝宝姓名?.text || baby.宝宝姓名 || ''),
+    出生日期: baby.出生日期 || '',
+    性别: typeof baby.性别 === 'string' ? baby.性别 : String(baby.性别?.[0]?.text || baby.性别?.text || baby.性别 || ''),
+    妈妈名字: typeof baby.妈妈名字 === 'string' ? baby.妈妈名字 : String(baby.妈妈名字?.[0]?.text || baby.妈妈名字?.text || baby.妈妈名字 || ''),
+    爸爸名字: typeof baby.爸爸名字 === 'string' ? baby.爸爸名字 : String(baby.爸爸名字?.[0]?.text || baby.爸爸名字?.text || baby.爸爸名字 || ''),
+    头像: baby.头像 || '',
+    备注: typeof baby.备注 === 'string' ? baby.备注 : String(baby.备注?.[0]?.text || baby.备注?.text || baby.备注 || ''),
+  };
+}
+
 export const feishuAPI = {
   async getBabies(): Promise<Baby[]> {
-    return dbGetBabies();
+    const babies = await dbGetBabies();
+    return babies.map(sanitizeBaby);
   },
 
   async createBaby(data: Omit<Baby, 'record_id'>): Promise<Baby> {
