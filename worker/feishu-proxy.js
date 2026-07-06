@@ -624,6 +624,37 @@ async function getAccountInfo(accountName, env) {
   }
 }
 
+// 解析飞书文本字段：兼容纯字符串和富文本数组 [{text: "xxx", type: "text"}]
+function parseTextField(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map(item => {
+      if (typeof item === 'string') return item;
+      if (item && item.text) return item.text;
+      return '';
+    }).join('');
+  }
+  return String(value);
+}
+
+// 将飞书原始宝宝记录转换为前端可用的格式
+function feishuToBaby(item) {
+  const fields = item.fields || {};
+  return {
+    record_id: item.record_id || item.id,
+    宝宝姓名: parseTextField(fields['宝宝姓名']),
+    出生日期: typeof fields['出生日期'] === 'number'
+      ? new Date(fields['出生日期']).toISOString().split('T')[0]
+      : fields['出生日期'] || '',
+    性别: parseTextField(fields['性别']),
+    妈妈名字: parseTextField(fields['妈妈名字']),
+    爸爸名字: parseTextField(fields['爸爸名字']),
+    头像: fields['头像'] || '',
+    备注: parseTextField(fields['备注']),
+  };
+}
+
 // 根据宝宝ID列表获取宝宝详细信息（使用batch_get API，一次请求获取所有宝宝）
 async function getBabiesByIds(babyIds, env) {
   if (!babyIds || babyIds.length === 0) return [];
@@ -643,8 +674,10 @@ async function getBabiesByIds(babyIds, env) {
       console.error('[getBabiesByIds] batch_get failed:', data.msg);
       return [];
     }
-    // 过滤掉状态为"删除"的宝宝
-    return data.data.records.filter(item => item.fields?.['状态'] !== '删除');
+    // 过滤掉状态为"删除"的宝宝，并转换为前端可用格式
+    return data.data.records
+      .filter(item => item.fields?.['状态'] !== '删除')
+      .map(feishuToBaby);
   } catch (e) {
     console.error('[getBabiesByIds] Error:', e.message);
     return [];
