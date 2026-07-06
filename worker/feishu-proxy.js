@@ -184,45 +184,48 @@ let accountTableIdCache = null;
 async function ensureAccountTable(token, env) {
   if (accountTableIdCache) return accountTableIdCache;
 
+  const appToken = env.FEISHU_BASE_TOKEN;
+  let tableId = null;
+
   // 如果环境变量中有 FEISHU_TABLE_ACCOUNT，优先使用
   if (env.FEISHU_TABLE_ACCOUNT) {
-    accountTableIdCache = env.FEISHU_TABLE_ACCOUNT;
-    return accountTableIdCache;
+    tableId = env.FEISHU_TABLE_ACCOUNT;
+  } else {
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const listData = await listResp.json();
+    const tables = listData.data?.items || [];
+    const existing = tables.find(t => t.name === '账号表');
+    if (existing) {
+      tableId = existing.table_id;
+    }
   }
 
-  const appToken = env.FEISHU_BASE_TOKEN;
-  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
-
-  // 列出所有表，查找"账号表"
-  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
-  const listData = await listResp.json();
-  const tables = listData.data?.items || [];
-  const existing = tables.find(t => t.name === '账号表');
-  if (existing) {
-    accountTableIdCache = existing.table_id;
-    return accountTableIdCache;
-  }
-
-  // 创建"账号表"
-  const createResp = await fetch(listUrl, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: { name: '账号表' } }),
-  });
-  const createData = await createResp.json();
-  if (createData.code !== 0) {
-    throw new Error(`创建账号表失败: ${createData.msg}`);
-  }
-
-  const tableId = createData.data?.table_id;
   if (!tableId) {
-    throw new Error('创建账号表成功但未获取到 table_id');
+    // 创建"账号表"
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+    const createResp = await fetch(listUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table: { name: '账号表' } }),
+    });
+    const createData = await createResp.json();
+    if (createData.code !== 0) {
+      throw new Error(`创建账号表失败: ${createData.msg}`);
+    }
+    tableId = createData.data?.table_id;
+    if (!tableId) {
+      throw new Error('创建账号表成功但未获取到 table_id');
+    }
   }
 
-  // 创建字段：账号名（文本）、加密密码（文本）、权限（单选:view/edit/admin）、最后修改时间（日期）、最后登录时间（日期）
+  // 检查并补充缺失字段
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const fieldsData = await fieldsResp.json();
+  const existingFields = (fieldsData.data?.items || []).map(f => f.field_name);
+
   const accountFields = [
-    { field_name: '账号名', type: 1 },
     { field_name: '加密密码', type: 1 },
     { field_name: '权限', type: 3, property: { options: [{ name: 'superadmin' }] } },
     { field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }, { name: '审批未通过' }] } },
@@ -231,11 +234,13 @@ async function ensureAccountTable(token, env) {
     { field_name: '创建时间', type: 2 },
   ];
   for (const field of accountFields) {
-    await fetch(fieldsUrl, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(field),
-    });
+    if (!existingFields.includes(field.field_name)) {
+      await fetch(fieldsUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(field),
+      });
+    }
   }
 
   accountTableIdCache = tableId;
@@ -282,40 +287,49 @@ async function ensureDefaultAdmin(token, env, tableId) {
 async function ensureAccountBabyTable(token, env) {
   if (accountBabyTableIdCache) return accountBabyTableIdCache;
 
-  // 优先使用环境变量中的表 ID（避免每次登录都列出所有表）
-  if (env.FEISHU_TABLE_ACCOUNT_BABY) {
-    accountBabyTableIdCache = env.FEISHU_TABLE_ACCOUNT_BABY;
-    return accountBabyTableIdCache;
-  }
-
   const appToken = env.FEISHU_BASE_TOKEN;
-  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+  let tableId = null;
+  let isNewTable = false;
 
-  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
-  const listData = await listResp.json();
-  const tables = listData.data?.items || [];
-  const existing = tables.find(t => t.name === '账号宝宝关联');
-  if (existing) {
-    accountBabyTableIdCache = existing.table_id;
-    return accountBabyTableIdCache;
+  // 优先使用环境变量中的表 ID
+  if (env.FEISHU_TABLE_ACCOUNT_BABY) {
+    tableId = env.FEISHU_TABLE_ACCOUNT_BABY;
+  } else {
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+    const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const listData = await listResp.json();
+    const tables = listData.data?.items || [];
+    const existing = tables.find(t => t.name === '账号宝宝关联');
+    if (existing) {
+      tableId = existing.table_id;
+    }
   }
 
-  const createResp = await fetch(listUrl, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ table: { name: '账号宝宝关联' } }),
-  });
-  const createData = await createResp.json();
-  if (createData.code !== 0) {
-    throw new Error(`创建账号宝宝关联表失败: ${createData.msg}`);
-  }
-
-  const tableId = createData.data?.table_id;
   if (!tableId) {
-    throw new Error('创建账号宝宝关联表成功但未获取到 table_id');
+    // 表不存在，创建新表
+    const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+    const createResp = await fetch(listUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table: { name: '账号宝宝关联' } }),
+    });
+    const createData = await createResp.json();
+    if (createData.code !== 0) {
+      throw new Error(`创建账号宝宝关联表失败: ${createData.msg}`);
+    }
+    tableId = createData.data?.table_id;
+    if (!tableId) {
+      throw new Error('创建账号宝宝关联表成功但未获取到 table_id');
+    }
+    isNewTable = true;
   }
 
+  // 检查并补充缺失字段（无论新表还是已有表）
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
+  const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const fieldsData = await fieldsResp.json();
+  const existingFields = (fieldsData.data?.items || []).map(f => f.field_name);
+
   const abFields = [
     { field_name: '账号名', type: 1 },
     { field_name: '账号ID', type: 1 },
@@ -325,17 +339,19 @@ async function ensureAccountBabyTable(token, env) {
     { field_name: '关系', type: 3, property: { options: [{ name: '爸爸' }, { name: '妈妈' }, { name: '爷爷' }, { name: '奶奶' }, { name: '外公' }, { name: '外婆' }, { name: '姑姑' }, { name: '叔叔' }, { name: '舅舅' }, { name: '阿姨' }, { name: '其他' }] } },
     { field_name: '邀请码', type: 1 },
     { field_name: '修改人账号', type: 1 },
-    { field_name: '修改时间', type: 2 }, // 数字类型存时间戳
+    { field_name: '修改时间', type: 2 },
   ];
   for (const field of abFields) {
-    try {
-      await fetch(fieldsUrl, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(field),
-      });
-    } catch (e) {
-      // 关联字段创建可能因权限不足失败，静默忽略
+    if (!existingFields.includes(field.field_name)) {
+      try {
+        await fetch(fieldsUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(field),
+        });
+      } catch (e) {
+        // 关联字段创建可能因权限不足失败，静默忽略
+      }
     }
   }
 

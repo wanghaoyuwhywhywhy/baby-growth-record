@@ -16,6 +16,11 @@
 6. 新增迁移步骤backfill-account-id，回填4条历史关联记录的账号ID字段
 7. 迁移脚本中linkAccountToBaby调用也传入accItem.record_id作为账号ID
 
+**ensureAccountTable/ensureAccountBabyTable字段补全修复：**
+8. 修复ensureAccountTable/ensureAccountBabyTable在表已存在时不创建缺失字段的问题
+9. 现在无论表是否新建，都会检查并补充缺失字段（如"账号ID"、"创建时间"等）
+10. 回填wangdan账号的创建时间字段
+
 ### v2.7 (2026-07-07)
 **关联宝宝双向关联字段修复：**
 1. 修复新建宝宝时"关联宝宝"双向关联字段写入失败的问题：飞书API在POST创建记录时直接传双向关联字段可能返回成功但实际未建立关联，改为先POST创建记录（不含关联宝宝字段），再用PUT单独写入
