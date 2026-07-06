@@ -174,23 +174,21 @@ export async function login(account: string, password?: string): Promise<{ ok: b
     if (data.ok && data.token) {
       const role = data.role || 'view';
       const accountName = data.accountName || account;
-      setAuthInfo(data.token, role, accountName);
+      setAuthInfo(data.token, role, accountName, data.accountId);
       const safeBabies = sanitizeBabies(data.babies);
-      if (safeBabies.length) setAuthBabies(safeBabies);
-      if (safeBabies.length) {
-        const relations: Record<string, string> = {};
-        const linkRoles: Record<string, string> = {};
-        for (const baby of safeBabies) {
-          if (baby.record_id && baby.relation) {
-            relations[baby.record_id] = baby.relation;
-          }
-          if (baby.record_id && baby.linkRole) {
-            linkRoles[baby.record_id] = baby.linkRole;
-          }
+      setAuthBabies(safeBabies);
+      const relations: Record<string, string> = {};
+      const linkRoles: Record<string, string> = {};
+      for (const baby of safeBabies) {
+        if (baby.record_id && baby.relation) {
+          relations[baby.record_id] = baby.relation;
         }
-        setAuthBabyRelations(relations);
-        setAuthBabyLinkRoles(linkRoles);
+        if (baby.record_id && baby.linkRole) {
+          linkRoles[baby.record_id] = baby.linkRole;
+        }
       }
+      setAuthBabyRelations(relations);
+      setAuthBabyLinkRoles(linkRoles);
       return { ok: true, token: data.token, role, accountName, status: data.status, babies: safeBabies };
     }
     // 账号待审批
@@ -254,21 +252,19 @@ export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; acco
     if (data.ok) {
       setAuthInfo(token, data.role, data.accountName, data.accountId);
       const safeBabies = sanitizeBabies(data.babies);
-      if (safeBabies.length) setAuthBabies(safeBabies);
-      if (safeBabies.length) {
-        const relations: Record<string, string> = {};
-        const linkRoles: Record<string, string> = {};
-        for (const baby of safeBabies) {
-          if (baby.record_id && baby.relation) {
-            relations[baby.record_id] = baby.relation;
-          }
-          if (baby.record_id && baby.linkRole) {
-            linkRoles[baby.record_id] = baby.linkRole;
-          }
+      setAuthBabies(safeBabies);
+      const relations: Record<string, string> = {};
+      const linkRoles: Record<string, string> = {};
+      for (const baby of safeBabies) {
+        if (baby.record_id && baby.relation) {
+          relations[baby.record_id] = baby.relation;
         }
-        setAuthBabyRelations(relations);
-        setAuthBabyLinkRoles(linkRoles);
+        if (baby.record_id && baby.linkRole) {
+          linkRoles[baby.record_id] = baby.linkRole;
+        }
       }
+      setAuthBabyRelations(relations);
+      setAuthBabyLinkRoles(linkRoles);
       return { ok: true, role: data.role, accountName: data.accountName, status: data.status, babies: safeBabies };
     }
     // 不在此处清除 token，由调用方根据 code 决定
