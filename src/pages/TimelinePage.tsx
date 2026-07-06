@@ -929,23 +929,25 @@ export default function TimelinePage() {
                 const emoji = category?.emoji ?? '📝';
                 const color = category?.color ?? '#8B7D7A';
 
+                const marker = babyDob ? getAgeMarker(record.记录时间, babyDob) : null;
+
                 return (
                   <div key={record.record_id} className="relative pl-10 animate-fade-up" style={{ animationDelay: `${Math.min(index, 9) * 50}ms` }}>
-                    <div className="absolute left-[17px] top-4 w-2 h-2 rounded-full bg-coral shadow-sm" />
+                    {marker ? (
+                      <div className="absolute left-0 top-3 -translate-x-1/2">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral text-white font-medium whitespace-nowrap shadow-sm">
+                          {marker}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="absolute left-[17px] top-4 w-2 h-2 rounded-full bg-coral shadow-sm" />
+                    )}
                     <div className="card-shadow p-3.5">
-                      {/* 时间 + 里程碑标识 + 标签 + 编辑 */}
+                      {/* 时间 + 标签 + 编辑 */}
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className="text-xs text-muted/80 font-mono">
                           {formatTimelineTime(record.记录时间)}
                         </span>
-                        {(() => {
-                          const marker = babyDob ? getAgeMarker(record.记录时间, babyDob) : null;
-                          return marker ? (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-coral/10 text-coral font-medium">
-                              {marker}
-                            </span>
-                          ) : null;
-                        })()}
                         {style && (
                           <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${style.bg} ${style.text}`}>
                             {style.icon}{primaryMedia === 'text' ? '文字' : primaryMedia === 'voice' ? '语音' : primaryMedia === 'video' ? '视频' : '照片'}
