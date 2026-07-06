@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { isAuthenticated, clearAuthInfo, verifyAuth, type AuthRole, isEditMode, setAuthBabyRelations, setAuthBabyLinkRoles, setAuthBabies } from '@/lib/auth';
+import { clearAuthInfo, verifyAuth, type AuthRole, setAuthBabyRelations, setAuthBabyLinkRoles, setAuthBabies } from '@/lib/auth';
 import LoginPage from '@/pages/LoginPage';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
@@ -81,9 +81,16 @@ function ScrollToTop({ onVerifyAccount }: { onVerifyAccount: () => void }) {
   return null;
 }
 
+// 从 localStorage 读取初始登录状态（零延迟，不等任何 API）
+function getInitialAuthed(): boolean {
+  const token = localStorage.getItem('auth_token');
+  if (!token) return false;
+  const parts = token.split(':');
+  return parts.length >= 3 && !!parts[1];
+}
+
 export default function App() {
-  const [authed, setAuthed] = useState(false);
-  const [verifying, setVerifying] = useState(true); // 首次加载时先验证
+  const [authed, setAuthed] = useState(getInitialAuthed);
   const initApp = useAppStore((s) => s.initApp);
   const initialized = useAppStore((s) => s.initialized);
 
@@ -92,16 +99,10 @@ export default function App() {
     setupAutoUpdate();
   }, []);
 
-  // 验证当前账号是否仍存在且状态为approved（后台静默验证，不阻塞页面渲染）
+  // 后台静默验证账号（不阻塞页面渲染，仅验证失败时处理登出）
   const verifyAccount = useCallback(async () => {
     const token = localStorage.getItem('auth_token');
-    if (!token) {
-      setVerifying(false);
-      return;
-    }
-    // 乐观渲染：有 token 就直接放行，不等 API 返回
-    setAuthed(true);
-    setVerifying(false);
+    if (!token) return;
     try {
       const result = await verifyAuth();
       console.log('[verifyAccount] API返回:', result);
@@ -179,18 +180,6 @@ export default function App() {
     window.scrollTo(0, 0);
     setAuthed(true);
   }, []);
-
-  // 首次验证token时显示加载
-  if (verifying) {
-    return (
-      <div className="page-container flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
-          <p className="text-sm text-muted">验证中...</p>
-        </div>
-      </div>
-    );
-  }
 
   if (!authed) {
     return <LoginPage onSuccess={handleLoginSuccess} />;
