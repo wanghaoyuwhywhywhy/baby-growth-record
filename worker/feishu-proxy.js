@@ -416,12 +416,20 @@ async function getAccountBabyIds(accountId, accountName, env) {
     let listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
     let listData = await listResp.json();
 
-    // 如果按账号ID没查到且账号名存在，回退到按账号名查（兼容旧数据）
+    // 如果按账号ID没查到且账号名存在，回退到按账号名查（兼容旧数据：只有账号ID为空的记录才匹配）
     if (accountId && accountName && (!listData.data?.items || listData.data.items.length === 0)) {
+      // 查所有同名账号的关联记录，然后只保留账号ID为空的（旧数据兼容）
       filterStr = `CurrentValue.[账号名]="${accountName}"`;
       listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
       listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
       listData = await listResp.json();
+      // 过滤：只保留账号ID为空的记录（真正属于当前账号的旧数据），跳过已有其他账号ID的记录（同名不同账号）
+      if (listData.data?.items) {
+        listData.data.items = listData.data.items.filter(item => {
+          const itemAccountId = item.fields?.['账号ID'];
+          return !itemAccountId; // 只有没有账号ID的旧记录才匹配
+        });
+      }
     }
     const links = [];
     if (listData.code === 0 && listData.data?.items) {
@@ -465,9 +473,21 @@ async function linkAccountToBaby(accountId, accountName, babyId, role, env, rela
 
   // 检查是否已存在关联（用账号ID+宝宝ID匹配）
   let filterStr = accountId ? `CurrentValue.[账号ID]="${accountId}"&&CurrentValue.[宝宝ID]="${babyId}"` : `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${babyId}"`;
-  const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
-  const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-  const checkData = await checkResp.json();
+  let checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+  let checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+  let checkData = await checkResp.json();
+
+  // 回退：按账号ID没查到时，用账号名+宝宝ID查，但只匹配账号ID为空的记录（同名不同账号）
+  if (accountId && accountName && (!checkData.data?.items || checkData.data.items.length === 0)) {
+    filterStr = `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${babyId}"`;
+    checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=10`;
+    checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    checkData = await checkResp.json();
+    if (checkData.data?.items) {
+      checkData.data.items = checkData.data.items.filter(item => !item.fields?.['账号ID']);
+    }
+  }
+
   if (checkData.code === 0 && checkData.data?.items?.length > 0) {
     // 已存在，更新关系和角色（包括从 unlinked 恢复）
     const existingRecordId = checkData.data.items[0].record_id;
@@ -829,6 +849,7 @@ async function handleAuth(request, env, ctx) {
           '加密密码': encryptedPassword,
           '状态': '待审批',
           '最后修改时间': Date.now(),
+          '创建时间': Date.now(),
         },
       }),
     });
