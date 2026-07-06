@@ -551,16 +551,39 @@ function extractLinkedIds(field) {
 }
 
 // 获取账号信息（含状态）
-// 账号信息缓存（避免每次 verify 都查飞书，2分钟TTL）
+// 使用 Cache API（边缘缓存）+ 内存缓存双重缓存，避免每次 verify 都查飞书
 let accountInfoCache = { data: new Map(), expires: 0 };
 const ACCOUNT_INFO_TTL = 2 * 60 * 1000; // 2分钟
 
+// 清除账号信息缓存（内存 + Cache API）
+async function clearAccountInfoCache(accountName) {
+  accountInfoCache = { data: new Map(), expires: 0 };
+  try {
+    const cache = caches.default;
+    await cache.delete(new Request(`https://cache.internal/account-info/${encodeURIComponent(accountName)}`));
+  } catch (e) {}
+}
+
 async function getAccountInfo(accountName, env) {
-  // 优先查缓存
+  // 1. 先查内存缓存（最快，但 isolate 间不共享）
   const now = Date.now();
   if (accountInfoCache.expires > now && accountInfoCache.data.has(accountName)) {
     return accountInfoCache.data.get(accountName);
   }
+  // 2. 查 Cache API（边缘缓存，同一节点共享）
+  try {
+    const cacheKey = new Request(`https://cache.internal/account-info/${encodeURIComponent(accountName)}`);
+    const cache = caches.default;
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      const info = await cached.json();
+      // 回填内存缓存
+      accountInfoCache.data.set(accountName, info);
+      accountInfoCache.expires = now + ACCOUNT_INFO_TTL;
+      return info;
+    }
+  } catch (e) {}
+
   try {
     const feishuToken = await getTenantToken(env);
     const tableId = await ensureAccountTable(feishuToken, env);
@@ -582,9 +605,18 @@ async function getAccountInfo(accountName, env) {
       lastModifiedTime: fields['最后修改时间'] || null,
       lastLoginTime: fields['最后登录时间'] || null,
     };
-    // 写入缓存
+    // 写入双重缓存
     accountInfoCache.data.set(accountName, info);
     accountInfoCache.expires = now + ACCOUNT_INFO_TTL;
+    try {
+      const cache = caches.default;
+      const cacheKey = new Request(`https://cache.internal/account-info/${encodeURIComponent(accountName)}`);
+      const cacheResp = new Response(JSON.stringify(info), {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${ACCOUNT_INFO_TTL / 1000}` },
+      });
+      // 异步写入 Cache API，不阻塞响应
+      cache.put(cacheKey, cacheResp.clone()).catch(() => {});
+    } catch (e) {}
     return info;
   } catch (e) {
     console.error('[getAccountInfo] Error:', e.message);
