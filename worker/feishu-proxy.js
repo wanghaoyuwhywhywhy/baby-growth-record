@@ -562,7 +562,7 @@ async function getAccountInfo(accountName, env) {
       accountName: fields['账号名'],
       role: fields['权限'] || 'view',
       status: fields['状态'] || '正常',
-      encryptedPassword: fields['加密密码'] || fields['密码哈希'] || '',
+      encryptedPassword: fields['加密密码'] || '',
     };
   } catch (e) {
     console.error('[getAccountInfo] Error:', e.message);
@@ -706,7 +706,7 @@ async function handleAuth(request, env) {
 
     const accountRecord = listData.data.items[0];
     const fields = accountRecord.fields || {};
-    const storedEncryptedPassword = fields['加密密码'] || fields['密码哈希'] || '';
+    const storedEncryptedPassword = fields['加密密码'] || '';
     const role = fields['权限'] === 'superadmin' ? 'superadmin' : 'view';
     const accountName = fields['账号名'] || account;
     const status = fields['状态'] || '正常'; // 旧账号没有状态字段，默认正常
@@ -738,7 +738,8 @@ async function handleAuth(request, env) {
         headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { '加密密码': encryptedPassword, '状态': '正常', '最后修改时间': Date.now() } }),
       });
-      const token = await deriveToken(await sha256(password), role, accountName);
+      // 使用存储的加密密码派生token（与verify保持一致）
+      const token = await deriveToken(encryptedPassword, role, accountName);
       const links = await getAccountBabyIds(accountName, env);
       const babyIds = links.map(l => l.babyId);
       const babies = await getBabiesByIds(babyIds, env);
@@ -755,7 +756,7 @@ async function handleAuth(request, env) {
 
     if (!password) return { error: '请输入密码' };
 
-    // 密码校验
+    // 密码校验（仅AES解密比对，不再兼容SHA-256哈希）
     let passwordMatch = false;
     const aesKey = env.AES_ENCRYPT_KEY;
     if (aesKey) {
@@ -764,13 +765,10 @@ async function handleAuth(request, env) {
         if (decryptedPassword === password) passwordMatch = true;
       } catch (e) {}
     }
-    if (!passwordMatch) {
-      const inputHash = await sha256(password);
-      if (inputHash === storedEncryptedPassword) passwordMatch = true;
-    }
     if (!passwordMatch) return { error: '密码错误' };
 
-    const token = await deriveToken(await sha256(password), role, accountName);
+    // 使用存储的加密密码派生token（与verify保持一致）
+    const token = await deriveToken(storedEncryptedPassword, role, accountName);
     // 更新最后登录时间
     const loginUpdateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
     await fetch(loginUpdateUrl, {
@@ -809,7 +807,7 @@ async function handleAccounts(request, env, token, auth) {
     if (data.code !== 0) return { code: -1, msg: data.msg };
     const items = (data.data?.items || []).map(item => {
       const fields = item.fields || {};
-      const hasPassword = !!(fields['加密密码'] || fields['密码哈希']);
+      const hasPassword = !!(fields['加密密码']);
       return {
         record_id: item.record_id,
         账号名: fields['账号名'] || '',
