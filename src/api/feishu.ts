@@ -3,7 +3,6 @@ import {
   dbGetRecords, dbAddRecord, dbUpdateRecordMedia,
   dbGetGrowthRecords, dbAddGrowthRecord, dbDeleteGrowthRecord,
   dbAddMedia, dbGetMediaByRecord, dbDeleteMedia,
-  dbClearAll,
 } from '@/lib/db';
 import {
   cloudGetBabies, cloudCreateBaby, cloudUpdateBaby, cloudDeleteBaby,
@@ -232,7 +231,7 @@ export const feishuAPI = {
     await dbDeleteMedia(id);
   },
 
-  // 云端同步：先清空本地再写入云端数据（确保多端一致）
+  // 云端同步：本地优先 + 增量合并（不再清空本地，避免首屏空白/长时间等待）
   async syncFromCloud(): Promise<{ babies: number; records: number; growth: number }> {
     // 使用 allSettled 避免单个请求失败导致整个同步中断
     const [babiesResult, recordsResult, growthResult] = await Promise.allSettled([
@@ -250,10 +249,10 @@ export const feishuAPI = {
       return { babies: 0, records: 0, growth: 0 };
     }
 
-    // 清空本地数据，批量写入云端数据
-    await dbClearAll();
-
-    // 并行写入三类数据
+    // 本地优先：不再清空 IndexedDB，改为按 record_id 增量 upsert。
+    // 云端返回的同类数据会覆盖本地同 id 记录；本地独有（如离线新增尚未上传）的数据保留，
+    // 因此首屏始终能立即读到上次已同步的本地数据，无需等待本次云端拉取完成。
+    // 注：云端删除的记录不会自动回删本地（保留离线创建的内容），如需彻底重一致可执行一次「强制全量重置」。
     const [babiesSynced, recordsSynced, growthSynced] = await Promise.all([
       Promise.all(cloudBabies.map(b => dbAddBaby(b))).then(() => cloudBabies.length),
       Promise.all(cloudRecords.map(r => dbAddRecord(r))).then(() => cloudRecords.length),

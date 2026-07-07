@@ -1024,6 +1024,10 @@ async function handleAuth(request, env, ctx) {
 
     if (!password) return { error: '请输入密码' };
 
+    // 并发：密码校验 与 获取关联宝宝列表（两者都只依赖已解析的 recordId/accountName）
+    // 不再登录时强制清空 accountBabyCache/accountInfoCache，使 5 分钟缓存真正生效
+    const babyLinksPromise = getAccountBabyIds(recordId, accountName, env);
+
     // 密码校验（仅AES解密比对，不再兼容SHA-256哈希）
     let passwordMatch = false;
     const aesKey = env.AES_ENCRYPT_KEY;
@@ -1048,10 +1052,7 @@ async function handleAuth(request, env, ctx) {
       }).catch(() => {}));
     }
 
-    // 获取关联宝宝列表（登录时强制清除缓存，确保获取最新关联数据）
-    accountBabyCache = { data: new Map(), expires: 0 };
-    accountInfoCache = { data: new Map(), expires: 0 };
-    const links = await getAccountBabyIds(recordId, accountName, env);
+    const links = await babyLinksPromise;
     const babyIds = links.map(l => l.babyId);
     const babies = await getBabiesByIds(babyIds, env);
     const babiesWithRelation = babies.map(baby => {
