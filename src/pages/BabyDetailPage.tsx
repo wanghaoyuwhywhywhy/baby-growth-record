@@ -178,7 +178,7 @@ export default function BabyDetailPage() {
         <div className="card-shadow mb-5 overflow-hidden">
           <div className="px-4 py-3 border-b border-rule/40 bg-cream-dark/30 flex items-center justify-between">
             <h3 className="text-sm font-outfit font-bold text-ink">联系人</h3>
-            {isOwner && (
+            {canEdit && (
               <button
                 onClick={() => { setShowInviteForm(true); setInviteCode(''); }}
                 className="text-xs text-coral font-medium flex items-center gap-1"
@@ -220,7 +220,7 @@ export default function BabyDetailPage() {
                     </div>
                   )}
                 </div>
-                {(isOwner && c.role !== 'owner' || c.accountName === myAccountName) && c.role !== 'owner' && (
+                {(isOwner && c.role !== 'owner' || c.accountName === myAccountName) && (
                   <>
                     <button
                       onClick={() => { setEditingContact(c); setEditRelation(c.relation); setEditRole(c.role); }}
@@ -228,7 +228,7 @@ export default function BabyDetailPage() {
                     >
                       <Edit3 size={14} />
                     </button>
-                    {isOwner && (
+                    {isOwner && c.role !== 'owner' && (
                       <button
                         onClick={() => setRemoveTarget(c)}
                         className="p-1.5 rounded-lg hover:bg-red-50 text-muted hover:text-red-500 transition-colors"
@@ -346,7 +346,7 @@ export default function BabyDetailPage() {
               </div>
               <div>
                 <label className="block text-xs text-muted mb-1">权限</label>
-                {isOwner ? (
+                {isOwner && editingContact.role !== 'owner' ? (
                   <div className="flex gap-1.5">
                     <button
                       onClick={() => setEditRole('editor')}
@@ -366,7 +366,7 @@ export default function BabyDetailPage() {
                     </button>
                   </div>
                 ) : (
-                  <span className="text-xs text-muted">{editingContact.role === 'editor' ? '可编辑' : '仅浏览'}（仅创建者可修改权限）</span>
+                  <span className="text-xs text-muted">{editingContact.role === 'owner' ? '创建者' : editingContact.role === 'editor' ? '可编辑' : '仅浏览'}（仅创建者可修改权限）</span>
                 )}
               </div>
               <button
