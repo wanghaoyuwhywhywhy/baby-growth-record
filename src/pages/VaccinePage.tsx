@@ -267,7 +267,7 @@ export default function VaccinePage() {
                     canEdit={canEdit}
                     onVaccinate={() => setCalendarTarget({ id: v.record_id, type: 'vaccinate', currentDate: new Date().toISOString().split('T')[0] })}
                     onEditExpected={() => setCalendarTarget({ id: v.record_id, type: 'expected', currentDate: v.预计接种时间 })}
-                    onEditVaccinateDate={() => setCalendarTarget({ id: v.record_id, type: 'vaccinateDate', currentDate: v.接种时间 })}
+                    onEditVaccinateDate={() => setCalendarTarget({ id: v.record_id, type: 'vaccinateDate', currentDate: v.接种时间 ?? new Date().toISOString().split('T')[0] })}
                   />
                 ))}
               </div>

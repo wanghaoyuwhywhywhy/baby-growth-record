@@ -16,7 +16,7 @@ function authHeaders(): Record<string, string> {
 // 飞书关联字段提取 record_ids
 // 飞书返回格式: [{record_ids: ["recxxx"], text: "名称", type: "text"}, ...]
 // 本地需要格式: ["recxxx"]
-function extractLinkedIds(field: any): string[] {
+export function extractLinkedIds(field: any): string[] {
   if (!field) return [];
   if (Array.isArray(field)) {
     // 如果是对象数组（飞书格式），提取 record_ids
@@ -31,7 +31,7 @@ function extractLinkedIds(field: any): string[] {
 }
 
 // 解析飞书文本字段：兼容纯字符串和飞书富文本数组 [{text: "xxx", type: "text"}]
-function parseTextField(value: any): string {
+export function parseTextField(value: any): string {
   if (!value) return '';
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) {

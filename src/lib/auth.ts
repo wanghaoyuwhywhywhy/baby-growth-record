@@ -1,22 +1,37 @@
+import type { Baby } from '@/api/feishu';
+
 const WORKER_URL = 'https://api.tongxi.xyz';
 const AUTH_TOKEN_KEY = 'auth_token';
 
 // 确保宝宝字段是字符串（飞书可能返回富文本数组格式）
-function sanitizeBabyField(value: any): string {
+export function sanitizeBabyField(value: unknown): string {
   if (!value) return '';
   if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map((v: any) => typeof v === 'string' ? v : v?.text || '').join('');
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => {
+        if (typeof v === 'string') return v;
+        if (v && typeof v === 'object' && 'text' in v) {
+          return String((v as { text?: unknown }).text ?? '');
+        }
+        return '';
+      })
+      .join('');
+  }
   return String(value);
 }
 
-function sanitizeBabies(babies: any[]): any[] {
+export function sanitizeBabies(babies: unknown[]): Baby[] {
   if (!babies) return [];
-  return babies.map(b => ({
-    ...b,
-    宝宝姓名: sanitizeBabyField(b.宝宝姓名),
-    性别: sanitizeBabyField(b.性别),
-    备注: sanitizeBabyField(b.备注),
-  }));
+  return babies.map((b) => {
+    const rec = (b ?? {}) as Record<string, unknown>;
+    return {
+      ...rec,
+      宝宝姓名: sanitizeBabyField(rec['宝宝姓名']),
+      性别: sanitizeBabyField(rec['性别']),
+      备注: sanitizeBabyField(rec['备注']),
+    } as Baby;
+  });
 }
 const AUTH_ROLE_KEY = 'auth_role'; // 'edit' | 'view' | 'admin'
 const AUTH_ACCOUNT_KEY = 'auth_account'; // 账号名
@@ -105,17 +120,17 @@ export function clearAuthInfo(): void {
 }
 
 // 获取关联宝宝列表
-export function getAuthBabies(): any[] {
+export function getAuthBabies(): Baby[] {
   try {
     const raw = localStorage.getItem(AUTH_BABIES_KEY);
-    return raw ? JSON.parse(raw) : [];
+    return raw ? (JSON.parse(raw) as Baby[]) : [];
   } catch {
     return [];
   }
 }
 
 // 保存认证关联宝宝
-export function setAuthBabies(babies: any[]): void {
+export function setAuthBabies(babies: Baby[]): void {
   localStorage.setItem(AUTH_BABIES_KEY, JSON.stringify(babies));
 }
 
@@ -161,7 +176,7 @@ export function isAuthenticated(): boolean {
 }
 
 // 账号登录（account 必填，password 必填）
-export async function login(account: string, password?: string): Promise<{ ok: boolean; token?: string; role?: AuthRole; accountName?: string; error?: string; code?: string; needsSetup?: boolean; accountNotFound?: boolean; status?: string; babies?: any[] }> {
+export async function login(account: string, password?: string): Promise<{ ok: boolean; token?: string; role?: AuthRole; accountName?: string; error?: string; code?: string; needsSetup?: boolean; accountNotFound?: boolean; status?: string; babies?: Baby[] }> {
   try {
     const resp = await fetch(`${WORKER_URL}/api/auth`, {
       method: 'POST',
@@ -237,7 +252,7 @@ export async function register(account: string, password: string): Promise<{ ok:
 
 // 验证 token 是否仍有效（含状态检查）
 // 注意：本函数不在失败时清除 token，由调用方根据 code 决定是否登出
-export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; accountName?: string; status?: string; babies?: any[]; error?: string; code?: string }> {
+export async function verifyAuth(): Promise<{ ok: boolean; role?: AuthRole; accountName?: string; status?: string; babies?: Baby[]; error?: string; code?: string }> {
   const token = getAuthToken();
   if (!token) return { ok: false };
   try {

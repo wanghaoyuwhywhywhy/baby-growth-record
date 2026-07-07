@@ -92,8 +92,8 @@ export default function HomePage() {
     try {
       const result = await analyzeBaby(baby, growthRecords, records, abort.signal);
       setAiResult(result);
-    } catch (e: any) {
-      if (e.name === 'AbortError') return;
+    } catch (e: unknown) {
+      if ((e instanceof Error || e instanceof DOMException) && e.name === 'AbortError') return;
       setAiResult(`分析失败：${e instanceof Error ? e.message : '未知错误'}`);
     } finally {
       setAiAnalyzing(false);

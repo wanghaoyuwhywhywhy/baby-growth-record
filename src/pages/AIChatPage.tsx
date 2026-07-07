@@ -10,6 +10,21 @@ interface ChatMessage {
   content: string;
 }
 
+// 语音识别的最小类型（本机 TS lib.dom 未包含厂商前缀的 SpeechRecognition 构造函数）
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<ArrayLike<{ transcript: string }>>;
+}
+
 const CHAT_HISTORY_KEY = 'ai_chat_history';
 const MAX_HISTORY = 50; // 最多保存50条消息
 
@@ -50,7 +65,7 @@ export default function AIChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // 自动滚动到底部（不用smooth避免跳动）
@@ -168,9 +183,9 @@ export default function AIChatPage() {
       );
       // 流式完成后持久化
       persistMessages([...newMessages, { role: 'assistant', content: finalContent }]);
-    } catch (e: any) {
-      if (e.name === 'AbortError') return;
-      const errContent = `❌ 请求失败：${e.message || '未知错误'}`;
+    } catch (e: unknown) {
+      if ((e instanceof Error || e instanceof DOMException) && e.name === 'AbortError') return;
+      const errContent = `❌ 请求失败：${e instanceof Error ? e.message : '未知错误'}`;
       setMessages(prev => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
@@ -195,18 +210,22 @@ export default function AIChatPage() {
       return;
     }
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
+    const w = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const SpeechRecognitionCtor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
       alert('您的浏览器不支持语音输入，请使用Chrome或Safari');
       return;
     }
 
-    const recognition = new SpeechRecognition();
+    const recognition = new SpeechRecognitionCtor();
     recognition.lang = 'zh-CN';
     recognition.interimResults = true;
     recognition.continuous = false;
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEventLike) => {
       let transcript = '';
       for (let i = 0; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;

@@ -29,7 +29,7 @@ export default function BabyDetailPage() {
   // 从URL参数设置当前宝宝，确保刷新后不会跳到其他宝宝
   useEffect(() => {
     if (urlBabyId) {
-      const exists = babies.find((b: any) => b.record_id === urlBabyId);
+      const exists = babies.find((b) => b.record_id === urlBabyId);
       if (exists) switchBaby(urlBabyId);
     }
   }, [urlBabyId]);

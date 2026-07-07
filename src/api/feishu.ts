@@ -20,6 +20,8 @@ export interface Baby {
   性别: string;
   头像?: string;
   备注?: string;
+  relation?: string;
+  linkRole?: string;
 }
 
 export interface MediaAttachment {
