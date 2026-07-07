@@ -344,31 +344,6 @@ export default function BabyDetailPage() {
                   ))}
                 </div>
               </div>
-              <div>
-                <label className="block text-xs text-muted mb-1">权限</label>
-                {isOwner && editingContact.role !== 'owner' ? (
-                  <div className="flex gap-1.5">
-                    <button
-                      onClick={() => setEditRole('editor')}
-                      className={`text-xs px-3 py-1 rounded-full transition-colors ${
-                        editRole === 'editor' ? 'bg-coral text-white' : 'bg-cream-dark text-muted'
-                      }`}
-                    >
-                      可编辑
-                    </button>
-                    <button
-                      onClick={() => setEditRole('viewer')}
-                      className={`text-xs px-3 py-1 rounded-full transition-colors ${
-                        editRole === 'viewer' ? 'bg-coral text-white' : 'bg-cream-dark text-muted'
-                      }`}
-                    >
-                      仅浏览
-                    </button>
-                  </div>
-                ) : (
-                  <span className="text-xs text-muted">{editingContact.role === 'owner' ? '创建者' : editingContact.role === 'editor' ? '可编辑' : '仅浏览'}（仅创建者可修改权限）</span>
-                )}
-              </div>
               <button
                 onClick={handleSaveEditContact}
                 className="btn-primary w-full py-2 text-sm"
