@@ -8,3 +8,13 @@ compatibility_date = "2024-01-01"
 # 本地开发（wrangler dev）请在 worker/.dev.vars 中设置 ALLOWED_ORIGINS 含 http://localhost:5173，
 # .dev.vars 仅本机生效且已 gitignore，不会被 wrangler deploy 带到生产。
 
+# KV 缓存命名空间（可选，用于跨 isolate 共享飞书 tenant token，消除冷启动重复取 token）：
+# 创建方式（二选一）：
+#   1) 命令行：npx wrangler kv namespace create baby_cache  （在 worker 目录执行）
+#   2) Cloudflare 控制台 → Workers & Pages → 本项目 → 设置 → 变量 → KV 命名空间 → 创建
+# 然后把下方注释解除并填 id 为创建后得到的 32 位命名空间 ID：
+# kv_namespaces = [
+#   { binding = "CACHE", id = "在此填入命名空间ID" }
+# ]
+# 注意：未配置时 Worker 自动降级为内存缓存（当前行为），不会报错。读接口的边缘缓存不依赖 KV，始终生效。
+

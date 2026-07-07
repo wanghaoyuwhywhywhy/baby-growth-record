@@ -762,6 +762,40 @@ async function getAccountInfo(accountName, env) {
   }
 }
 
+// ---- 读接口边缘缓存（Cache API，跨 isolate 共享，降低冷启动）----
+// 仅缓存 GET 读响应；写操作（POST/PUT/DELETE）会主动失效对应 key。
+// 数据一致性：TTL 较短，且写时立即 purge，最坏只会短暂读到 TTL 内的旧数据。
+const READ_CACHE_TTL = 120; // 秒
+
+async function getCachedRead(key) {
+  try {
+    if (!caches || !caches.default) return null;
+    const req = new Request(`https://cache.internal/read/${key}`);
+    const cached = await caches.default.match(req);
+    if (cached) return await cached.json();
+  } catch (e) {}
+  return null;
+}
+
+function putCachedRead(key, data) {
+  try {
+    if (!caches || !caches.default) return;
+    const req = new Request(`https://cache.internal/read/${key}`);
+    const resp = new Response(JSON.stringify(data), {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${READ_CACHE_TTL}` },
+    });
+    caches.default.put(req, resp.clone()).catch(() => {});
+  } catch (e) {}
+}
+
+function purgeRead(key) {
+  try {
+    if (!caches || !caches.default) return;
+    const req = new Request(`https://cache.internal/read/${key}`);
+    caches.default.delete(req).catch(() => {});
+  } catch (e) {}
+}
+
 // 解析飞书文本字段：兼容纯字符串和富文本数组 [{text: "xxx", type: "text"}]
 function parseTextField(value) {
   if (!value) return '';
@@ -1506,17 +1540,41 @@ export default {
       switch (path) {
         case '/api/babies': {
           const token = await getTenantToken(env);
-          result = await handleBabies(request, env, token, auth);
+          if (request.method === 'GET') {
+            const cacheKey = `babies:${auth.accountName}`;
+            const cached = await getCachedRead(cacheKey);
+            result = cached || await handleBabies(request, env, token, auth);
+            if (!cached && !result.error) putCachedRead(cacheKey, result);
+          } else {
+            result = await handleBabies(request, env, token, auth);
+            purgeRead(`babies:${auth.accountName}`);
+          }
           break;
         }
         case '/api/records': {
           const token = await getTenantToken(env);
-          result = await handleRecords(request, env, token, auth);
+          if (request.method === 'GET') {
+            const cacheKey = `records:${auth.accountName}`;
+            const cached = await getCachedRead(cacheKey);
+            result = cached || await handleRecords(request, env, token, auth);
+            if (!cached && !result.error) putCachedRead(cacheKey, result);
+          } else {
+            result = await handleRecords(request, env, token, auth);
+            purgeRead(`records:${auth.accountName}`);
+          }
           break;
         }
         case '/api/growth': {
           const token = await getTenantToken(env);
-          result = await handleGrowth(request, env, token, auth);
+          if (request.method === 'GET') {
+            const cacheKey = `growth:${auth.accountName}`;
+            const cached = await getCachedRead(cacheKey);
+            result = cached || await handleGrowth(request, env, token, auth);
+            if (!cached && !result.error) putCachedRead(cacheKey, result);
+          } else {
+            result = await handleGrowth(request, env, token, auth);
+            purgeRead(`growth:${auth.accountName}`);
+          }
           break;
         }
         case '/api/upload': {
@@ -1548,6 +1606,7 @@ export default {
 };
 
 let tokenCache = { token: null, expires: 0 };
+let tokenPromise = null; // 并发去重：避免多个请求同时无缓存时各自取一次飞书
 let logTableIdCache = null; // 缓存"登录日志"表 ID
 let vaccineTableIdCache = null; // 缓存"疫苗接种"表 ID
 let adminExistsCache = false; // 缓存admin账号已存在，避免每次登录都查询
@@ -1555,34 +1614,57 @@ let accountBabyTableIdCache = null;
 let accountBabyCache = { data: new Map(), expires: 0 };
 
 async function getTenantToken(env) {
+  // 1. 内存缓存（同 isolate 最快）
   if (tokenCache.token && Date.now() < tokenCache.expires) {
     return tokenCache.token;
   }
+  // 2. KV 跨实例缓存（避免每个冷启动 isolate 都重取 token）
+  try {
+    if (env && env.CACHE) {
+      const raw = await env.CACHE.get('tenant_token');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.expires > Date.now() && parsed.token) {
+          tokenCache = { token: parsed.token, expires: parsed.expires };
+          return parsed.token;
+        }
+      }
+    }
+  } catch (e) {}
 
-  const appId = env.FEISHU_APP_ID;
-  const appSecret = env.FEISHU_APP_SECRET;
-
-  if (!appId || !appSecret) {
-    throw new Error(`环境变量缺失: APP_ID=${!!appId}, APP_SECRET=${!!appSecret}`);
+  // 3. 并发去重：多个请求同时到达且都无缓存时，只取一次飞书
+  if (!tokenPromise) {
+    tokenPromise = (async () => {
+      try {
+        const appId = env.FEISHU_APP_ID;
+        const appSecret = env.FEISHU_APP_SECRET;
+        if (!appId || !appSecret) {
+          throw new Error(`环境变量缺失: APP_ID=${!!appId}, APP_SECRET=${!!appSecret}`);
+        }
+        const resp = await fetch(`${FEISHU_API}/auth/v3/tenant_access_token/internal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+        });
+        const data = await resp.json();
+        if (data.code !== 0) throw new Error(`获取 token 失败: ${data.msg} (app_id=${appId})`);
+        const expires = Date.now() + (data.expire - 300) * 1000;
+        tokenCache = { token: data.tenant_access_token, expires };
+        // 写回 KV，供其他 isolate 复用，避免冷启动重复取
+        try {
+          if (env && env.CACHE) {
+            await env.CACHE.put('tenant_token', JSON.stringify({ token: data.tenant_access_token, expires }), {
+              expirationTtl: Math.max(60, data.expire - 300),
+            });
+          }
+        } catch (e) {}
+        return tokenCache.token;
+      } finally {
+        tokenPromise = null;
+      }
+    })();
   }
-
-  const resp = await fetch(`${FEISHU_API}/auth/v3/tenant_access_token/internal`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      app_id: appId,
-      app_secret: appSecret,
-    }),
-  });
-
-  const data = await resp.json();
-  if (data.code !== 0) throw new Error(`获取 token 失败: ${data.msg} (app_id=${appId})`);
-
-  tokenCache = {
-    token: data.tenant_access_token,
-    expires: Date.now() + (data.expire - 300) * 1000,
-  };
-  return tokenCache.token;
+  return tokenPromise;
 }
 
 async function bitableRequest(env, token, method, tableId, params = {}, recordId = null) {
