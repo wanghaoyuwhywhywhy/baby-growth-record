@@ -3,6 +3,18 @@
  */
 const FEISHU_API = 'https://open.feishu.cn/open-apis';
 
+// 统一解析飞书文本字段（飞书可能返回字符串或富文本数组 [{text:'xxx',type:'text'}]）
+function getText(field) {
+  if (!field) return '';
+  if (typeof field === 'string') return field;
+  if (Array.isArray(field)) return field.map(item => {
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object' && item.text !== undefined) return item.text;
+    return '';
+  }).join('');
+  return String(field);
+}
+
 // 收紧 CORS：仅允许自己的前端域名
 const ALLOWED_ORIGINS = [
   'https://tongxi.xyz',
@@ -169,7 +181,7 @@ async function refreshValidAccountsCache(env) {
     if (listData.code === 0 && listData.data?.items) {
       const accounts = new Set();
       for (const item of listData.data.items) {
-        const name = item.fields?.['账号名'];
+        const name = getText(item.fields?.['账号名']);
         if (name) accounts.add(name);
       }
       validAccountsCache = { accounts, expires: Date.now() + 5 * 60 * 1000 }; // 5分钟TTL
@@ -421,14 +433,14 @@ async function getAccountBabyIds(accountId, accountName, env) {
     const links = [];
     if (listData.code === 0 && listData.data?.items) {
       for (const item of listData.data.items) {
-        const babyId = item.fields?.['宝宝ID'];
-        const role = item.fields?.['角色'] || 'viewer';
+        const babyId = getText(item.fields?.['宝宝ID']);
+        const role = getText(item.fields?.['角色']) || 'viewer';
         // 跳过已解绑的记录
         if (babyId && role !== 'unlinked') {
           links.push({
             babyId,
             role,
-            relation: item.fields?.['关系'] || '其他',
+            relation: getText(item.fields?.['关系']) || '其他',
             record_id: item.record_id,
           });
         }
@@ -574,12 +586,12 @@ async function redeemInviteCode(accountName, code, env) {
   const fields = record.fields || {};
 
   // 检查是否已被使用
-  if (fields['账号名'] && fields['账号名'].trim()) {
+  if (getText(fields['账号名']) && getText(fields['账号名']).trim()) {
     return { ok: false, error: '邀请码已被使用' };
   }
 
   // 检查是否已关联该宝宝
-  const checkFilter = `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${fields['宝宝ID']}"`;
+  const checkFilter = `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${getText(fields['宝宝ID'])}"`;
   const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(checkFilter)}&page_size=1`;
   const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
   const checkData = await checkResp.json();
@@ -588,7 +600,7 @@ async function redeemInviteCode(accountName, code, env) {
   }
 
   // 填入账号名 + 审计字段 + 关联宝宝
-  const babyId = fields['宝宝ID'];
+  const babyId = getText(fields['宝宝ID']);
   const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${record.record_id}`;
   await fetch(updateUrl, {
     method: 'PUT',
@@ -602,7 +614,7 @@ async function redeemInviteCode(accountName, code, env) {
   });
 
   accountBabyCache = { data: new Map(), expires: 0 };
-  return { ok: true, babyId: fields['宝宝ID'], relation: fields['关系'] || '其他' };
+  return { ok: true, babyId: getText(fields['宝宝ID']), relation: getText(fields['关系']) || '其他' };
 }
 
 // 获取宝宝的邀请码列表（仅owner可见）
@@ -620,16 +632,17 @@ async function getBabyInviteCodes(babyId, env) {
   if (listData.code === 0 && listData.data?.items) {
     for (const item of listData.data.items) {
       const fields = item.fields || {};
-      const role = fields['角色'] || 'viewer';
+      const role = getText(fields['角色']) || 'viewer';
+      const accName = getText(fields['账号名']);
       results.push({
         record_id: item.record_id,
-        accountName: fields['账号名'] || '',
-        babyId: fields['宝宝ID'],
+        accountName: accName || '',
+        babyId: getText(fields['宝宝ID']),
         role,
-        relation: fields['关系'] || '其他',
-        inviteCode: fields['邀请码'] || '',
-        isPending: !fields['账号名'] || !fields['账号名'].trim(),
-        modifiedBy: fields['修改人账号'] || '',
+        relation: getText(fields['关系']) || '其他',
+        inviteCode: getText(fields['邀请码']) || '',
+        isPending: !accName || !accName.trim(),
+        modifiedBy: getText(fields['修改人账号']) || '',
         modifiedTime: fields['修改时间'] || null,
       });
     }
@@ -702,10 +715,10 @@ async function getAccountInfo(accountName, env) {
     const fields = listData.data.items[0].fields || {};
     const info = {
       record_id: listData.data.items[0].record_id,
-      accountName: fields['账号名'],
-      role: fields['权限'] || 'view',
-      status: fields['状态'] || '正常',
-      encryptedPassword: fields['加密密码'] || '',
+      accountName: getText(fields['账号名']),
+      role: getText(fields['权限']) || 'view',
+      status: getText(fields['状态']) || '正常',
+      encryptedPassword: getText(fields['加密密码']) || '',
       lastModifiedTime: fields['最后修改时间'] || null,
       lastLoginTime: fields['最后登录时间'] || null,
     };
@@ -780,7 +793,7 @@ async function getBabiesByIds(babyIds, env) {
     }
     // 过滤掉状态为"删除"的宝宝，并转换为前端可用格式
     return data.data.records
-      .filter(item => item.fields?.['状态'] !== '删除')
+      .filter(item => getText(item.fields?.['状态']) !== '删除')
       .map(feishuToBaby);
   } catch (e) {
     console.error('[getBabiesByIds] Error:', e.message);
@@ -908,10 +921,10 @@ async function handleAuth(request, env, ctx) {
 
     const accountRecord = listData.data.items[0];
     const fields = accountRecord.fields || {};
-    const storedEncryptedPassword = fields['加密密码'] || '';
-    const role = fields['权限'] === 'superadmin' ? 'superadmin' : 'view';
-    const accountName = fields['账号名'] || account;
-    const status = fields['状态'] || '正常'; // 旧账号没有状态字段，默认正常
+    const storedEncryptedPassword = getText(fields['加密密码']) || '';
+    const role = getText(fields['权限']) === 'superadmin' ? 'superadmin' : 'view';
+    const accountName = getText(fields['账号名']) || account;
+    const status = getText(fields['状态']) || '正常'; // 旧账号没有状态字段，默认正常
     const recordId = accountRecord.record_id;
 
     // 检查账号状态
@@ -982,7 +995,9 @@ async function handleAuth(request, env, ctx) {
       }).catch(() => {}));
     }
 
-    // 获取关联宝宝列表
+    // 获取关联宝宝列表（登录时强制清除缓存，确保获取最新关联数据）
+    accountBabyCache = { data: new Map(), expires: 0 };
+    accountInfoCache = { data: new Map(), expires: 0 };
     const links = await getAccountBabyIds(recordId, accountName, env);
     const babyIds = links.map(l => l.babyId);
     const babies = await getBabiesByIds(babyIds, env);
@@ -1014,12 +1029,12 @@ async function handleAccounts(request, env, token, auth) {
     if (data.code !== 0) return { code: -1, msg: data.msg };
     const items = (data.data?.items || []).map(item => {
       const fields = item.fields || {};
-      const hasPassword = !!(fields['加密密码']);
+      const hasPassword = !!getText(fields['加密密码']);
       return {
         record_id: item.record_id,
-        账号名: fields['账号名'] || '',
-        权限: fields['权限'] || '',
-        状态: fields['状态'] || '正常',
+        账号名: getText(fields['账号名']) || '',
+        权限: getText(fields['权限']) || '',
+        状态: getText(fields['状态']) || '正常',
         最后修改时间: fields['最后修改时间'] || null,
         hasPassword,
       };
@@ -1292,11 +1307,11 @@ export default {
                   if (accountData.code === 0 && accountData.data?.items) {
                     const map = {};
                     for (const aItem of accountData.data.items) {
-                      const name = aItem.fields?.['账号名'];
+                      const name = getText(aItem.fields?.['账号名']);
                       if (name) {
                         map[name] = {
                           lastLoginTime: aItem.fields?.['最后登录时间'] || aItem.fields?.['最后修改时间'] || null,
-                          status: aItem.fields?.['状态'] || '正常',
+                          status: getText(aItem.fields?.['状态']) || '正常',
                         };
                       }
                     }
@@ -1347,8 +1362,8 @@ export default {
             if (recData.code !== 0 || !recData.data?.record) {
               return new Response(JSON.stringify({ ok: false, error: '记录不存在' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             }
-            const recordAccountName = recData.data.record.fields?.['账号名'] || '';
-            const recordBabyId = recData.data.record.fields?.['宝宝ID'] || '';
+            const recordAccountName = getText(recData.data.record.fields?.['账号名']) || '';
+            const recordBabyId = getText(recData.data.record.fields?.['宝宝ID']) || '';
             const _accountId = await getAuthAccountId(auth, env);
             const links = await getAccountBabyIds(_accountId, auth.accountName, env);
             const myLink = links.find(l => l.babyId === recordBabyId);
@@ -1387,7 +1402,7 @@ export default {
             const recResp = await fetch(recUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
             const recData = await recResp.json();
             if (recData.code === 0 && recData.data?.record) {
-              const babyId = recData.data.record.fields?.['宝宝ID'];
+              const babyId = getText(recData.data.record.fields?.['宝宝ID']);
               const _accountId = await getAuthAccountId(auth, env);
             const links = await getAccountBabyIds(_accountId, auth.accountName, env);
               const myLink = links.find(l => l.babyId === babyId);
@@ -1436,7 +1451,8 @@ export default {
         const token = await getTenantToken(env);
         // 从请求中获取真实 IP
         const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || '';
-        const result = await handleLog(request, env, token, ip, auth);
+        const logAuth = { ...auth, accountId: await getAuthAccountId(auth, env) || '' };
+        const result = await handleLog(request, env, token, ip, logAuth);
         return new Response(JSON.stringify(result), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders },
         });
@@ -1879,6 +1895,33 @@ async function ensureLogTable(token, env) {
   const existing = tables.find(t => t.name === '登录日志');
   if (existing) {
     logTableIdCache = existing.table_id;
+    // 补充缺失字段（表已存在时可能缺少新字段）
+    try {
+      const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${logTableIdCache}/fields`;
+      const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const fieldsData = await fieldsResp.json();
+      const existingFieldNames = (fieldsData.data?.items || []).map(f => f.field_name);
+      const logFields = [
+        { field_name: '时间', type: 5 },
+        { field_name: '操作', type: 1 },
+        { field_name: 'IP', type: 1 },
+        { field_name: '设备型号', type: 1 },
+        { field_name: '系统版本', type: 1 },
+        { field_name: '登录账号', type: 1 },
+        { field_name: '账号ID', type: 1 },
+      ];
+      for (const field of logFields) {
+        if (!existingFieldNames.includes(field.field_name)) {
+          await fetch(fieldsUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(field),
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[ensureLogTable] 补充字段失败:', e.message);
+    }
     return logTableIdCache;
   }
 
@@ -1898,7 +1941,7 @@ async function ensureLogTable(token, env) {
     throw new Error('创建登录日志表成功但未获取到 table_id');
   }
 
-  // 创建字段：时间（日期）、操作（文本）、IP（文本）、设备型号（文本）、系统版本（文本）、登录账号（文本）
+  // 创建字段：时间（日期）、操作（文本）、IP（文本）、设备型号（文本）、系统版本（文本）、登录账号（文本）、账号ID（文本）
   const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/fields`;
   const logFields = [
     { field_name: '时间', type: 5 },
@@ -1907,6 +1950,7 @@ async function ensureLogTable(token, env) {
     { field_name: '设备型号', type: 1 },
     { field_name: '系统版本', type: 1 },
     { field_name: '登录账号', type: 1 },
+    { field_name: '账号ID', type: 1 },
   ];
   for (const field of logFields) {
     await fetch(fieldsUrl, {
@@ -2132,6 +2176,7 @@ async function handleLog(request, env, token, ip, authRole) {
 
     // 登录账号：优先使用 accountName
     const loginAccount = (typeof authRole === 'object' && authRole.accountName) ? authRole.accountName : (typeof authRole === 'string' ? authRole : '未知');
+    const loginAccountId = (typeof authRole === 'object' && authRole.accountId) ? authRole.accountId : '';
 
     const resp = await fetch(recordUrl, {
       method: 'POST',
@@ -2144,6 +2189,7 @@ async function handleLog(request, env, token, ip, authRole) {
           '设备型号': deviceShort,
           '系统版本': osVersion,
           '登录账号': loginAccount,
+          '账号ID': loginAccountId,
         },
       }),
     });
@@ -2264,6 +2310,7 @@ async function handleMigrate(env, token) {
       const newFields = [
         { field_name: '系统版本', type: 1 },
         { field_name: '登录账号', type: 1 },
+        { field_name: '账号ID', type: 1 },
       ];
       let logFieldsAdded = 0;
       for (const field of newFields) {
@@ -2486,14 +2533,14 @@ async function handleMigrate(env, token) {
     if (accListData.code === 0 && accListData.data?.items) {
       for (const accItem of accListData.data.items) {
         const fields = accItem.fields || {};
-        const accName = fields['账号名'];
-        const accStatus = fields['状态'];
+        const accName = getText(fields['账号名']);
+        const accStatus = getText(fields['状态']);
 
         // 设置状态为approved（如果还没有状态字段）
         if (!accStatus) {
           const updateFields = { '状态': '正常' };
           // Upgrade admin to superadmin
-          if (fields['权限'] === 'admin' && accName === 'admin') {
+          if (getText(fields['权限']) === 'admin' && accName === 'admin') {
             updateFields['权限'] = 'superadmin';
           }
           const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records/${accItem.record_id}`;
@@ -2506,7 +2553,7 @@ async function handleMigrate(env, token) {
 
         // 关联所有现有宝宝到该账号
         for (const baby of babyItems) {
-          await linkAccountToBaby(accItem.record_id, accName, baby.record_id, fields['权限'] === 'superadmin' || fields['权限'] === 'admin' ? 'owner' : 'editor', env, fields['权限'] === 'superadmin' || fields['权限'] === 'admin' ? '爸爸' : '其他');
+          await linkAccountToBaby(accItem.record_id, accName, baby.record_id, getText(fields['权限']) === 'superadmin' || getText(fields['权限']) === 'admin' ? 'owner' : 'editor', env, getText(fields['权限']) === 'superadmin' || getText(fields['权限']) === 'admin' ? '爸爸' : '其他');
         }
       }
       results.existingAccountsMigrated = accListData.data.items.length;
@@ -2546,7 +2593,7 @@ async function handleMigrate(env, token) {
     const listData13 = await listResp13.json();
     if (listData13.code === 0 && listData13.data?.items?.length > 0) {
       const adminRecord = listData13.data.items[0];
-      const encryptedPwd = adminRecord.fields?.['加密密码'];
+      const encryptedPwd = getText(adminRecord.fields?.['加密密码']);
       if (!encryptedPwd || encryptedPwd === '') {
         const defaultPwd = await encryptPassword('admin123', env);
         const updateUrl13 = `${FEISHU_API}/bitable/v1/apps/${appToken13}/tables/${tableId13}/records/${adminRecord.record_id}`;
@@ -2614,7 +2661,7 @@ async function migrateAdminPassword(env, token) {
     const listData = await listResp.json();
     if (listData.code === 0 && listData.data?.items?.length > 0) {
       const adminRecord = listData.data.items[0];
-      const encryptedPwd = adminRecord.fields?.['加密密码'];
+      const encryptedPwd = getText(adminRecord.fields?.['加密密码']);
       if (!encryptedPwd || encryptedPwd === '') {
         const defaultPwd = await encryptPassword('admin123', env);
         const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${adminRecord.record_id}`;
@@ -2631,7 +2678,7 @@ async function migrateAdminPassword(env, token) {
         results.reason = 'admin密码已存在，无需设置';
       }
       // 同时确保admin的权限字段为superadmin
-      const currentRole = adminRecord.fields?.['权限'];
+      const currentRole = getText(adminRecord.fields?.['权限']);
       if (currentRole !== 'superadmin') {
         const updateUrl2 = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${adminRecord.record_id}`;
         await fetch(updateUrl2, {
@@ -2786,7 +2833,7 @@ async function migrateBackfillLink(env, token) {
     let failed = 0;
     if (listData.code === 0 && listData.data?.items) {
       for (const item of listData.data.items) {
-        const babyId = item.fields?.['宝宝ID'];
+        const babyId = getText(item.fields?.['宝宝ID']);
         const existingLink = item.fields?.['关联宝宝'];
         // 检查是否已有有效的record_ids关联（必须是字符串数组的record_id）
         let hasValidLink = false;
@@ -2914,7 +2961,7 @@ async function migrateBackfillAccountId(env, token) {
       for (const acc of accListData.data.items) {
         accountIdSet.add(acc.record_id);
         // 回填账号ID字段
-        if (!acc.fields?.['账号ID']) {
+        if (!getText(acc.fields?.['账号ID'])) {
           const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records/${acc.record_id}`;
           await fetch(updateUrl, {
             method: 'PUT',
@@ -2937,8 +2984,8 @@ async function migrateBackfillAccountId(env, token) {
     let noAccountId = 0;
     if (abListData.code === 0 && abListData.data?.items) {
       for (const item of abListData.data.items) {
-        const existingId = item.fields?.['账号ID'];
-        const role = item.fields?.['角色'];
+        const existingId = getText(item.fields?.['账号ID']);
+        const role = getText(item.fields?.['角色']);
 
         if (existingId) {
           if (!accountIdSet.has(existingId) && role !== 'unlinked') {
@@ -3320,7 +3367,7 @@ async function deleteBabyAssociations(babyId, env, operatorAccount) {
   if (listData.code === 0 && listData.data?.items) {
     const now = Date.now();
     for (const item of listData.data.items) {
-      if (item.fields?.['角色'] === 'unlinked') continue; // 已解绑的跳过
+      if (getText(item.fields?.['角色']) === 'unlinked') continue; // 已解绑的跳过
       const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
       await fetch(updateUrl, {
         method: 'PUT',
