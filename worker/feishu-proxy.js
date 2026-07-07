@@ -3496,10 +3496,31 @@ async function handleAsset(request, env, token) {
       });
     }
 
-    // 照片/视频：302 重定向到飞书 CDN（带 CORS 头）
-    return new Response(null, {
-      status: 302,
-      headers: { 'Location': downloadUrl, ...getCORSHeaders(request) },
+    // 照片/视频：通过 Worker 流式代理返回（保持同源 api.tongxi.xyz，满足 CSP），
+    // 不再 302 重定向到飞书 CDN —— 否则最终 URL 落在飞书域名，被 media-src/img-src 白名单拦截导致加载失败。
+    const proxyHeaders = {};
+    const range = request.headers.get('Range');
+    if (range) proxyHeaders['Range'] = range; // 转发 Range 以支持视频拖动进度
+    const fileResp = await fetch(downloadUrl, { headers: proxyHeaders });
+    if (!fileResp.ok && fileResp.status !== 206) {
+      return new Response(JSON.stringify({ error: '文件下载失败' }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
+      });
+    }
+    const outHeaders = {
+      'Content-Type': fileResp.headers.get('Content-Type') || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
+      'Cache-Control': 'public, max-age=3600',
+      'Accept-Ranges': 'bytes',
+      ...getCORSHeaders(request),
+    };
+    const contentRange = fileResp.headers.get('Content-Range');
+    if (contentRange) outHeaders['Content-Range'] = contentRange;
+    const contentLength = fileResp.headers.get('Content-Length');
+    if (contentLength) outHeaders['Content-Length'] = contentLength;
+    return new Response(fileResp.body, {
+      status: fileResp.status,
+      headers: outHeaders,
     });
   } catch (e) {
     console.error('[handleAsset] 异常:', e.message);
