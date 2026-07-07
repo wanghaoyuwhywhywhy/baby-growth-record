@@ -2987,6 +2987,7 @@ async function migrateBackfillAccountId(env, token) {
     let orphaned = 0;
     let skipped = 0;
     let noAccountId = 0;
+    let noAccountIdFixed = 0;
     let unlinkedCleaned = 0;
     if (abListData.code === 0 && abListData.data?.items) {
       for (const item of abListData.data.items) {
@@ -3017,19 +3018,47 @@ async function migrateBackfillAccountId(env, token) {
             skipped++;
           }
         } else {
-          // 没有账号ID的有效记录，物理删除
-          const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
-          await fetch(deleteUrl, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-          noAccountId++;
+          // 没有账号ID但有账号名的有效记录，尝试通过账号名查找并回填accountId
+          const accName = getText(item.fields?.['账号名']);
+          if (accName && accName.trim()) {
+            const accFilter = `CurrentValue.[账号名]="${accName}"`;
+            const accListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records?filter=${encodeURIComponent(accFilter)}&page_size=1`;
+            const accResp = await fetch(accListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+            const accData = await accResp.json();
+            if (accData.code === 0 && accData.data?.items?.length > 0) {
+              const foundAccId = accData.data.items[0].record_id;
+              const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
+              await fetch(updateUrl, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { '账号ID': foundAccId } }),
+              });
+              noAccountIdFixed++;
+            } else {
+              // 账号不存在，物理删除
+              const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
+              await fetch(deleteUrl, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
+              });
+              noAccountId++;
+            }
+          } else {
+            // 既没账号ID也没账号名的无效记录，物理删除
+            const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
+            await fetch(deleteUrl, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` },
+            });
+            noAccountId++;
+          }
         }
       }
     }
     results.skipped = skipped;
     results.orphaned = orphaned;
     results.noAccountId = noAccountId;
+    results.noAccountIdFixed = noAccountIdFixed;
     results.unlinkedCleaned = unlinkedCleaned;
   } catch (e) {
     results.error = e.message;
