@@ -110,6 +110,18 @@ export async function dbAddRecord(record: DailyRecord): Promise<void> {
   await db.put('records', record);
 }
 
+// 删除单条记录并清理其关联的本地媒体（孤儿清理用）
+export async function dbDeleteRecord(record_id: string): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(['records', 'media'], 'readwrite');
+  await tx.objectStore('records').delete(record_id);
+  const medias = await tx.objectStore('media').index('by-record').getAll(record_id);
+  for (const m of medias) {
+    await tx.objectStore('media').delete(m.id);
+  }
+  await tx.done;
+}
+
 export async function dbUpdateRecordMedia(recordId: string, mediaTokens: string[]): Promise<void> {
   const db = await getDB();
   const record = await db.get('records', recordId);
@@ -126,6 +138,12 @@ export async function dbGetGrowthRecords(babyId: string): Promise<GrowthRecord[]
   const records = all.filter((r) => r.关联宝宝?.includes(babyId));
   records.sort((a, b) => new Date(a.测量日期).getTime() - new Date(b.测量日期).getTime());
   return records;
+}
+
+// 获取全部成长记录（孤儿清理用，不按宝宝过滤）
+export async function dbGetAllGrowth(): Promise<GrowthRecord[]> {
+  const db = await getDB();
+  return db.getAll('growth');
 }
 
 export async function dbAddGrowthRecord(record: GrowthRecord): Promise<void> {

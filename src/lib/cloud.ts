@@ -211,14 +211,14 @@ export async function cloudCreateBaby(baby: Baby): Promise<string | null> {
   }
 }
 
-export async function cloudGetRecords(): Promise<DailyRecord[]> {
+export async function cloudGetRecords(): Promise<{ records: DailyRecord[]; hasMore: boolean }> {
   try {
     const data = await apiGet('/api/records');
-    if (data.code !== 0 || !data.data?.items) return [];
-    return data.data.items.map(feishuToRecord);
+    if (data.code !== 0 || !data.data?.items) return { records: [], hasMore: false };
+    return { records: data.data.items.map(feishuToRecord), hasMore: !!data.data.has_more };
   } catch (e) {
     console.warn('云端拉取记录失败:', e);
-    return [];
+    return { records: [], hasMore: false };
   }
 }
 
@@ -251,14 +251,14 @@ export async function cloudCreateRecord(record: DailyRecord): Promise<string | n
   }
 }
 
-export async function cloudGetGrowth(): Promise<GrowthRecord[]> {
+export async function cloudGetGrowth(): Promise<{ records: GrowthRecord[]; hasMore: boolean }> {
   try {
     const data = await apiGet('/api/growth');
-    if (data.code !== 0 || !data.data?.items) return [];
-    return data.data.items.map(feishuToGrowth);
+    if (data.code !== 0 || !data.data?.items) return { records: [], hasMore: false };
+    return { records: data.data.items.map(feishuToGrowth), hasMore: !!data.data.has_more };
   } catch (e) {
     console.warn('云端拉取成长记录失败:', e);
-    return [];
+    return { records: [], hasMore: false };
   }
 }
 

@@ -1,7 +1,7 @@
 import {
   dbGetBabies, dbAddBaby, dbUpdateBaby, dbDeleteBaby,
-  dbGetRecords, dbAddRecord, dbUpdateRecordMedia,
-  dbGetGrowthRecords, dbAddGrowthRecord, dbDeleteGrowthRecord,
+  dbGetRecords, dbAddRecord, dbUpdateRecordMedia, dbDeleteRecord,
+  dbGetGrowthRecords, dbGetAllGrowth, dbAddGrowthRecord, dbDeleteGrowthRecord,
   dbAddMedia, dbGetMediaByRecord, dbDeleteMedia,
 } from '@/lib/db';
 import {
@@ -241,8 +241,10 @@ export const feishuAPI = {
     ]);
 
     const cloudBabies = babiesResult.status === 'fulfilled' ? babiesResult.value : [];
-    const cloudRecords = recordsResult.status === 'fulfilled' ? recordsResult.value : [];
-    const cloudGrowth = growthResult.status === 'fulfilled' ? growthResult.value : [];
+    const cloudRecords = recordsResult.status === 'fulfilled' ? recordsResult.value.records : [];
+    const cloudRecordsHasMore = recordsResult.status === 'fulfilled' ? recordsResult.value.hasMore : true;
+    const cloudGrowth = growthResult.status === 'fulfilled' ? growthResult.value.records : [];
+    const cloudGrowthHasMore = growthResult.status === 'fulfilled' ? growthResult.value.hasMore : true;
 
     if (cloudBabies.length === 0 && cloudRecords.length === 0 && cloudGrowth.length === 0) {
       console.warn('[syncFromCloud] 所有云端请求失败，保留本地数据');
@@ -252,12 +254,36 @@ export const feishuAPI = {
     // 本地优先：不再清空 IndexedDB，改为按 record_id 增量 upsert。
     // 云端返回的同类数据会覆盖本地同 id 记录；本地独有（如离线新增尚未上传）的数据保留，
     // 因此首屏始终能立即读到上次已同步的本地数据，无需等待本次云端拉取完成。
-    // 注：云端删除的记录不会自动回删本地（保留离线创建的内容），如需彻底重一致可执行一次「强制全量重置」。
     const [babiesSynced, recordsSynced, growthSynced] = await Promise.all([
       Promise.all(cloudBabies.map(b => dbAddBaby(b))).then(() => cloudBabies.length),
       Promise.all(cloudRecords.map(r => dbAddRecord(r))).then(() => cloudRecords.length),
       Promise.all(cloudGrowth.map(g => dbAddGrowthRecord(g))).then(() => cloudGrowth.length),
     ]);
+
+    // 自动清理云端已删除的孤儿数据（无需手动「强制全量重置」按钮）：
+    // 1) 仅当云端返回的是完整集合（has_more=false）时才删除本地多余项，
+    //    避免分页未拉全时误删云端实际存在的记录；
+    // 2) 仅删除 id 以 "rec" 开头的飞书真实记录，保留本地临时 id（如 g<时间戳> 的成长记录）
+    //    这类本地临时记录是「上传失败残留」，不应被清掉。
+    const isCloudId = (id: string) => typeof id === 'string' && id.startsWith('rec');
+    if (!cloudRecordsHasMore) {
+      const localRecords = await dbGetRecords();
+      const cloudIds = new Set(cloudRecords.map(r => r.record_id));
+      const orphans = localRecords.filter(r => isCloudId(r.record_id) && !cloudIds.has(r.record_id));
+      if (orphans.length) {
+        await Promise.all(orphans.map(r => dbDeleteRecord(r.record_id)));
+        console.info(`[syncFromCloud] 自动清理 ${orphans.length} 条云端已删除的记录`);
+      }
+    }
+    if (!cloudGrowthHasMore) {
+      const localGrowth = await dbGetAllGrowth();
+      const cloudIds = new Set(cloudGrowth.map(g => g.record_id));
+      const orphans = localGrowth.filter(g => isCloudId(g.record_id) && !cloudIds.has(g.record_id));
+      if (orphans.length) {
+        await Promise.all(orphans.map(g => dbDeleteGrowthRecord(g.record_id)));
+        console.info(`[syncFromCloud] 自动清理 ${orphans.length} 条云端已删除的成长记录`);
+      }
+    }
 
     return { babies: babiesSynced, records: recordsSynced, growth: growthSynced };
   },
