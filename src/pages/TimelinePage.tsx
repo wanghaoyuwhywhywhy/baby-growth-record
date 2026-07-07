@@ -715,9 +715,10 @@ function ageLabelToDateRange(label: string, birthDate: string): { start: string;
   if (end > now) end.setTime(now.getTime());
 
   const fmt = (d: Date) => {
+    const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    return `${m}-${day}`;
+    return `${y}-${m}-${day}`;
   };
 
   return { start: fmt(start), end: fmt(end) };
