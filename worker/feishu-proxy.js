@@ -264,6 +264,7 @@ async function ensureAccountTable(token, env) {
   }
 
   const accountFields = [
+    { field_name: '账号ID', type: 1 },
     { field_name: '加密密码', type: 1 },
     { field_name: '权限', type: 3, property: { options: [{ name: 'superadmin' }] } },
     { field_name: '状态', type: 3, property: { options: [{ name: '正常' }, { name: '冻结' }, { name: '删除' }, { name: '待审批' }, { name: '审批未通过' }] } },
@@ -832,6 +833,15 @@ async function handleAuth(request, env, ctx) {
     });
     const data = await resp.json();
     if (data.code !== 0) return { error: `注册失败: ${data.msg}` };
+    // 回填账号ID（飞书record_id）
+    if (data.data?.record?.record_id) {
+      const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${data.data.record.record_id}`;
+      await fetch(updateUrl, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { '账号ID': data.data.record.record_id } }),
+      });
+    }
     return { ok: true, message: '注册成功，请等待管理员审核' };
   }
 
@@ -1049,6 +1059,15 @@ async function handleAccounts(request, env, token, auth) {
     });
     const data = await resp.json();
     if (data.code !== 0) return { code: -1, msg: data.msg };
+    // 回填账号ID
+    if (data.data?.record?.record_id) {
+      const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${data.data.record.record_id}`;
+      await fetch(updateUrl, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { '账号ID': data.data.record.record_id } }),
+      });
+    }
     return { code: 0, data: { record: data.data?.record } };
   }
 
@@ -2877,7 +2896,7 @@ async function migrateLoginTimeField(env, token) {
   return { ok: true, ...results };
 }
 
-// 清理关联表中的孤儿记录（账号ID对应的账号已删除）和空账号ID记录
+// 清理关联表中的孤儿记录 + 回填账号表账号ID
 async function migrateBackfillAccountId(env, token) {
   const results = { step: 'backfill-account-id' };
   try {
@@ -2885,19 +2904,31 @@ async function migrateBackfillAccountId(env, token) {
     const accountTableId = await ensureAccountTable(token, env);
     const abTableId = await ensureAccountBabyTable(token, env);
 
-    // 1. 获取所有当前账号ID集合
+    // 1. 获取所有当前账号，回填账号ID字段 + 构建ID集合
     const accListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records?page_size=500`;
     const accListResp = await fetch(accListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
     const accListData = await accListResp.json();
     const accountIdSet = new Set();
+    let accountBackfilled = 0;
     if (accListData.code === 0 && accListData.data?.items) {
       for (const acc of accListData.data.items) {
         accountIdSet.add(acc.record_id);
+        // 回填账号ID字段
+        if (!acc.fields?.['账号ID']) {
+          const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${accountTableId}/records/${acc.record_id}`;
+          await fetch(updateUrl, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { '账号ID': acc.record_id } }),
+          });
+          accountBackfilled++;
+        }
       }
     }
     results.accountCount = accountIdSet.size;
+    results.accountBackfilled = accountBackfilled;
 
-    // 2. 获取关联表所有记录
+    // 2. 获取关联表所有记录，清理孤儿
     const abListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records?page_size=500`;
     const abListResp = await fetch(abListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
     const abListData = await abListResp.json();
@@ -2910,9 +2941,7 @@ async function migrateBackfillAccountId(env, token) {
         const role = item.fields?.['角色'];
 
         if (existingId) {
-          // 已有账号ID，检查对应账号是否还存在
           if (!accountIdSet.has(existingId) && role !== 'unlinked') {
-            // 账号已被删除，标记为unlinked并清空账号ID
             const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
             await fetch(updateUrl, {
               method: 'PUT',
@@ -2924,7 +2953,6 @@ async function migrateBackfillAccountId(env, token) {
             skipped++;
           }
         } else if (role !== 'unlinked') {
-          // 没有账号ID的记录，标记为unlinked（无法按账号ID匹配，等同无效记录）
           const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
           await fetch(updateUrl, {
             method: 'PUT',
