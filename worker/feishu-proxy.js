@@ -1162,7 +1162,7 @@ async function handleAccounts(request, env, token, auth) {
     const recordId = body.record_id;
     if (!recordId) return { code: -1, msg: 'record_id is required' };
 
-    // 逻辑删除：设置状态为"删除"，不物理删除
+    // 逻辑删除：设置状态为"删除"，同时物理删除该账号的所有关联记录
     const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
     const resp = await fetch(updateUrl, {
       method: 'PUT',
@@ -1171,6 +1171,8 @@ async function handleAccounts(request, env, token, auth) {
     });
     const data = await resp.json();
     if (data.code !== 0) return { code: -1, msg: data.msg };
+    // 物理删除该账号在关联表中的所有记录
+    await deleteAccountAssociations(recordId, env);
     validAccountsCache = { accounts: new Set(), expires: 0 };
     accountInfoCache = { data: new Map(), expires: 0 };
     return { code: 0 };
@@ -1391,7 +1393,7 @@ export default {
             return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
           if (body.action === 'remove') {
-            // 移除联系人或取消邀请：标记角色为 unlinked 而非删除记录
+            // 移除联系人或取消邀请：物理删除关联记录
             const { record_id } = body;
             if (!record_id) return new Response(JSON.stringify({ error: 'record_id is required' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             // 验证是owner才能移除
@@ -1410,12 +1412,11 @@ export default {
                 return new Response(JSON.stringify({ error: '只有宝宝的创建者才能移除联系人' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
               }
             }
-            // 更新角色为 unlinked + 修改人/修改时间
-            const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${record_id}`;
-            await fetch(updateUrl, {
-              method: 'PUT',
-              headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fields: { '角色': 'unlinked', '修改人账号': auth.accountName, '修改时间': Date.now() } }),
+            // 物理删除关联记录
+            const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${record_id}`;
+            await fetch(deleteUrl, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${feishuToken}` },
             });
             accountBabyCache = { data: new Map(), expires: 0 };
             return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -2975,36 +2976,48 @@ async function migrateBackfillAccountId(env, token) {
     results.accountCount = accountIdSet.size;
     results.accountBackfilled = accountBackfilled;
 
-    // 2. 获取关联表所有记录，清理孤儿
+    // 2. 获取关联表所有记录，物理删除孤儿和unlinked记录
     const abListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records?page_size=500`;
     const abListResp = await fetch(abListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
     const abListData = await abListResp.json();
     let orphaned = 0;
     let skipped = 0;
     let noAccountId = 0;
+    let unlinkedCleaned = 0;
     if (abListData.code === 0 && abListData.data?.items) {
       for (const item of abListData.data.items) {
         const existingId = getText(item.fields?.['账号ID']);
         const role = getText(item.fields?.['角色']);
 
+        // unlinked记录直接物理删除
+        if (role === 'unlinked') {
+          const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
+          await fetch(deleteUrl, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          unlinkedCleaned++;
+          continue;
+        }
+
         if (existingId) {
-          if (!accountIdSet.has(existingId) && role !== 'unlinked') {
-            const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
-            await fetch(updateUrl, {
-              method: 'PUT',
-              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fields: { '角色': 'unlinked', '账号ID': '' } }),
+          // 账号ID对应的账号已删除，物理删除关联记录
+          if (!accountIdSet.has(existingId)) {
+            const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
+            await fetch(deleteUrl, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` },
             });
             orphaned++;
           } else {
             skipped++;
           }
-        } else if (role !== 'unlinked') {
-          const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
-          await fetch(updateUrl, {
-            method: 'PUT',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields: { '角色': 'unlinked' } }),
+        } else {
+          // 没有账号ID的有效记录，物理删除
+          const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${abTableId}/records/${item.record_id}`;
+          await fetch(deleteUrl, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` },
           });
           noAccountId++;
         }
@@ -3013,6 +3026,7 @@ async function migrateBackfillAccountId(env, token) {
     results.skipped = skipped;
     results.orphaned = orphaned;
     results.noAccountId = noAccountId;
+    results.unlinkedCleaned = unlinkedCleaned;
   } catch (e) {
     results.error = e.message;
   }
@@ -3354,25 +3368,45 @@ async function handleAsset(request, env, token) {
   }
 }
 
-// 删除宝宝时标记所有关联记录为 unlinked（而非删除记录）
+// 删除账号时物理删除关联表中所有该账号的记录
+async function deleteAccountAssociations(accountId, env) {
+  if (!accountId) return;
+  const feishuToken = await getTenantToken(env);
+  const linkTableId = await ensureAccountBabyTable(feishuToken, env);
+  const appToken = env.FEISHU_BASE_TOKEN;
+  // 获取该账号的所有关联记录，物理删除
+  const filterStr = `CurrentValue.[账号ID]="${accountId}"`;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+  const listData = await listResp.json();
+  if (listData.code === 0 && listData.data?.items) {
+    for (const item of listData.data.items) {
+      const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
+      await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${feishuToken}` },
+      });
+    }
+  }
+  accountBabyCache = { data: new Map(), expires: 0 };
+}
+
+// 删除宝宝时物理删除所有关联记录
 async function deleteBabyAssociations(babyId, env, operatorAccount) {
   const feishuToken = await getTenantToken(env);
   const linkTableId = await ensureAccountBabyTable(feishuToken, env);
   const appToken = env.FEISHU_BASE_TOKEN;
-  // 获取该宝宝的所有关联记录
+  // 获取该宝宝的所有关联记录，物理删除
   const filterStr = `CurrentValue.[宝宝ID]="${babyId}"`;
   const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
   const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
   const listData = await listResp.json();
   if (listData.code === 0 && listData.data?.items) {
-    const now = Date.now();
     for (const item of listData.data.items) {
-      if (getText(item.fields?.['角色']) === 'unlinked') continue; // 已解绑的跳过
-      const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
-      await fetch(updateUrl, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: { '角色': 'unlinked', '修改人账号': operatorAccount, '修改时间': now } }),
+      const deleteUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${linkTableId}/records/${item.record_id}`;
+      await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${feishuToken}` },
       });
     }
   }
