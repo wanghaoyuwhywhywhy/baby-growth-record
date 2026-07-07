@@ -1300,6 +1300,13 @@ export default {
         });
       }
 
+      // /api/asset 媒体文件：由 Worker 端租户 token + file_token（能力令牌）鉴权，
+      // 前端不传用户 token（避免 token 进入 URL 日志/Referer）。仅放行 GET。
+      if (path === '/api/asset' && request.method === 'GET') {
+        const token = await getTenantToken(env);
+        return await handleAsset(request, env, token);
+      }
+
       // 所有其他接口需要认证
       const auth = await parseAuth(request, env);
       if (!auth.valid) {
