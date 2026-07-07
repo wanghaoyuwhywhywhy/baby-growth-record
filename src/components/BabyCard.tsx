@@ -65,7 +65,7 @@ export default function BabyCard({ baby }: BabyCardProps) {
         </div>
 
         <button
-          onClick={() => navigate('/baby/detail')}
+          onClick={() => navigate(`/baby/detail?id=${baby.record_id}`)}
           className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors flex-shrink-0"
           aria-label="宝宝档案"
         >

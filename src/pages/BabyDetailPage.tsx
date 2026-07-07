@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { calcAge } from '@/utils/date';
@@ -21,8 +21,19 @@ interface Contact {
 }
 
 export default function BabyDetailPage() {
-  const { currentBaby } = useAppStore();
+  const { currentBaby, switchBaby, babies } = useAppStore();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const urlBabyId = searchParams.get('id');
+
+  // 从URL参数设置当前宝宝，确保刷新后不会跳到其他宝宝
+  useEffect(() => {
+    if (urlBabyId) {
+      const exists = babies.find((b: any) => b.record_id === urlBabyId);
+      if (exists) switchBaby(urlBabyId);
+    }
+  }, [urlBabyId]);
+
   const baby = currentBaby();
   const babyRelations = getAuthBabyRelations();
   const babyLinkRoles = getAuthBabyLinkRoles();

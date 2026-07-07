@@ -1282,8 +1282,8 @@ export default {
             const _accountId = await getAuthAccountId(auth, env);
             const links = await getAccountBabyIds(_accountId, auth.accountName, env);
             const myLink = links.find(l => l.babyId === babyId);
-            if (!myLink || myLink.role !== 'owner') {
-              return new Response(JSON.stringify({ error: '只有宝宝的创建者才能邀请' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            if (!myLink || (myLink.role !== 'owner' && myLink.role !== 'editor')) {
+              return new Response(JSON.stringify({ error: '只有可编辑权限才能邀请' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
             }
             const code = await createInviteCode(babyId, role || 'editor', relation || '其他', env);
             return new Response(JSON.stringify({ ok: true, code }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
