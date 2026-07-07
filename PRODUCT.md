@@ -1,19 +1,36 @@
 # 宝宝成长记录 - 产品文档
 
-> 最后更新：2026-07-07 16:10 (北京时间/UTC+8)
+> 最后更新：2026-07-07 16:30 (北京时间/UTC+8)
 
 ---
 
 ## 版本记录
 
+### v2.9 (2026-07-07)
+**飞书富文本字段解析修复（核心bug）：**
+1. 飞书API返回文本字段可能为富文本数组`[{text:'xxx',type:'text'}]`而非字符串，导致所有字段比较失败
+2. 全面应用getText()函数到Worker中所有飞书字段读取位置（getAccountBabyIds/getAccountInfo/handleAuth/handleAccounts/getBabyInviteCodes/refreshValidAccountsCache/联系人列表/迁移代码等）
+3. 根因：getAccountInfo.status返回富文本数组，verify时`status!=='正常'`判断为true，verify返回错误，前端不更新babies缓存，旧数据一直保留
+
+**关联查询彻底只用账号ID：**
+4. getAccountBabyIds/canWriteBaby完全移除账号名回退查询，只用accountId查询关联
+
+**登录日志增加账号ID：**
+5. 登录日志表新增"账号ID"字段（文本类型，存储账号表的record_id）
+6. handleLog写入账号ID字段
+7. ensureLogTable修复：表已存在时也检查并补充缺失字段（同ensureAccountTable修复）
+
+**缓存优化：**
+8. 登录时强制清除accountBabyCache和accountInfoCache，确保获取最新关联数据
+
 ### v2.8 (2026-07-07)
 **关联表从账号名匹配改为账号ID匹配：**
 1. 账号宝宝关联表新增"账号ID"字段（文本类型，存储账号表的record_id）
-2. 所有关联查询（getAccountBabyIds/canWriteBaby/linkAccountToBaby）从"按账号名匹配"改为"优先按账号ID匹配，兼容回退按账号名查"
+2. 所有关联查询（getAccountBabyIds/canWriteBaby/linkAccountToBaby）从"按账号名匹配"改为"只用账号ID匹配"
 3. 修复同名账号误关联历史宝宝数据的bug（如wangdan账号重新注册后关联到旧的xixi记录）
 4. login/verify接口返回accountId字段，前端auth.ts存储accountId到localStorage
 5. 新增getAuthAccountId辅助函数（带缓存），在handleBabies/handleRecords/handleGrowth/handleVaccines等函数中获取账号ID
-6. 新增迁移步骤backfill-account-id，回填4条历史关联记录的账号ID字段
+6. 新增迁移步骤backfill-account-id，回填历史关联记录的账号ID字段
 7. 迁移脚本中linkAccountToBaby调用也传入accItem.record_id作为账号ID
 
 **ensureAccountTable/ensureAccountBabyTable字段补全修复：**
