@@ -12,9 +12,8 @@ compatibility_date = "2024-01-01"
 # 创建方式（二选一）：
 #   1) 命令行：npx wrangler kv namespace create baby_cache  （在 worker 目录执行）
 #   2) Cloudflare 控制台 → Workers & Pages → 本项目 → 设置 → 变量 → KV 命名空间 → 创建
-# 然后把下方注释解除并填 id 为创建后得到的 32 位命名空间 ID：
-# kv_namespaces = [
-#   { binding = "CACHE", id = "在此填入命名空间ID" }
-# ]
-# 注意：未配置时 Worker 自动降级为内存缓存（当前行为），不会报错。读接口的边缘缓存不依赖 KV，始终生效。
+# 已配置：飞书 tenant token 跨实例缓存（消除冷启动重复取 token）。读接口边缘缓存不依赖 KV，始终生效。
+kv_namespaces = [
+  { binding = "CACHE", id = "4e8a63322a69458880eef98d1ec12e19" }
+]
 
