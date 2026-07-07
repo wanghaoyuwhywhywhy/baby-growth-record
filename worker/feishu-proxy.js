@@ -568,7 +568,7 @@ async function createInviteCode(babyId, role, relation, env) {
 }
 
 // 使用邀请码：账号填入邀请码对应的关联记录
-async function redeemInviteCode(accountName, code, env) {
+async function redeemInviteCode(accountName, accountId, code, env) {
   const feishuToken = await getTenantToken(env);
   const tableId = await ensureAccountBabyTable(feishuToken, env);
   const appToken = env.FEISHU_BASE_TOKEN;
@@ -590,27 +590,31 @@ async function redeemInviteCode(accountName, code, env) {
     return { ok: false, error: '邀请码已被使用' };
   }
 
-  // 检查是否已关联该宝宝
-  const checkFilter = `CurrentValue.[账号名]="${accountName}"&&CurrentValue.[宝宝ID]="${getText(fields['宝宝ID'])}"`;
-  const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(checkFilter)}&page_size=1`;
-  const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
-  const checkData = await checkResp.json();
-  if (checkData.code === 0 && checkData.data?.items?.length > 0) {
-    return { ok: false, error: '您已关联该宝宝' };
+  // 检查是否已关联该宝宝（用账号ID查询）
+  if (accountId) {
+    const checkFilter = `CurrentValue.[账号ID]="${accountId}"&&CurrentValue.[宝宝ID]="${getText(fields['宝宝ID'])}"`;
+    const checkUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(checkFilter)}&page_size=1`;
+    const checkResp = await fetch(checkUrl, { headers: { 'Authorization': `Bearer ${feishuToken}` } });
+    const checkData = await checkResp.json();
+    if (checkData.code === 0 && checkData.data?.items?.length > 0) {
+      return { ok: false, error: '您已关联该宝宝' };
+    }
   }
 
-  // 填入账号名 + 审计字段 + 关联宝宝
+  // 填入账号名 + 账号ID + 审计字段 + 关联宝宝
   const babyId = getText(fields['宝宝ID']);
+  const updateFields = {
+    '账号名': accountName,
+    '关联宝宝': babyId ? [babyId] : [],
+    '修改人账号': accountName,
+    '修改时间': Date.now(),
+  };
+  if (accountId) updateFields['账号ID'] = accountId;
   const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${record.record_id}`;
   await fetch(updateUrl, {
     method: 'PUT',
     headers: { 'Authorization': `Bearer ${feishuToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fields: {
-      '账号名': accountName,
-      '关联宝宝': babyId ? [babyId] : [],
-      '修改人账号': accountName,
-      '修改时间': Date.now(),
-    } }),
+    body: JSON.stringify({ fields: updateFields }),
   });
 
   accountBabyCache = { data: new Map(), expires: 0 };
@@ -1288,7 +1292,7 @@ export default {
             // 使用邀请码
             const { code } = body;
             if (!code) return new Response(JSON.stringify({ error: '请输入邀请码' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-            const result = await redeemInviteCode(auth.accountName, code, env);
+            const result = await redeemInviteCode(auth.accountName, await getAuthAccountId(auth, env), code, env);
             return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
           }
           if (body.action === 'list') {
