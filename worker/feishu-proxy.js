@@ -15,11 +15,11 @@ function getText(field) {
   return String(field);
 }
 
-// 收紧 CORS：仅允许自己的前端域名
-const ALLOWED_ORIGINS = [
+// 收紧 CORS：默认仅允许生产前端域名；本地开发源通过环境变量 ALLOWED_ORIGINS 注入
+// （在 worker/.dev.vars 中配置 http://localhost:5173，仅本机 wrangler dev 生效）
+let ALLOWED_ORIGINS = [
   'https://tongxi.xyz',
   'https://baby-growth-record.pages.dev',
-  'http://localhost:5173', // 本地开发
 ];
 
 function getCORSHeaders(request) {
@@ -139,6 +139,23 @@ async function parseAuth(request, env) {
   const token = request.headers.get('X-Auth-Token')
     || new URL(request.url).searchParams.get('token');
   return parseAuthToken(token);
+}
+
+// 判断 /api/migrate 是否允许执行（高危端点：会执行建表/回填等写操作）
+// 规则：
+//   1) 已配置 MIGRATE_SECRET 时，必须 ?secret= 与之匹配；
+//   2) 持有有效超管 token（X-Auth-Token）也放行；
+//   3) 未配置 MIGRATE_SECRET 时向后兼容放行，但强烈建议配置，否则接口公网开放。
+async function isMigrateAllowed(request, env) {
+  const auth = await parseAuth(request, env);
+  if (auth.valid && auth.role === 'superadmin') return true;
+  const secret = env && env.MIGRATE_SECRET;
+  if (secret) {
+    const provided = new URL(request.url).searchParams.get('secret');
+    return provided === secret;
+  }
+  console.warn('[migrate] MIGRATE_SECRET 未配置，/api/migrate 当前对公网开放，请尽快在 Cloudflare 环境变量中设置 MIGRATE_SECRET');
+  return true;
 }
 
 // 获取 auth 对应的账号ID（账号表record_id，带缓存）
@@ -769,8 +786,6 @@ function feishuToBaby(item) {
       ? new Date(fields['出生日期']).toISOString().split('T')[0]
       : fields['出生日期'] || '',
     性别: parseTextField(fields['性别']),
-    妈妈名字: parseTextField(fields['妈妈名字']),
-    爸爸名字: parseTextField(fields['爸爸名字']),
     头像: fields['头像'] || '',
     备注: parseTextField(fields['备注']),
   };
@@ -1187,6 +1202,11 @@ async function handleAccounts(request, env, token, auth) {
 
 export default {
   async fetch(request, env, ctx) {
+    // 按环境注入 CORS 白名单（生产默认仅生产域名；本地 dev 经 wrangler.toml [vars] 注入 localhost）
+    if (env && env.ALLOWED_ORIGINS) {
+      const custom = String(env.ALLOWED_ORIGINS).split(',').map(s => s.trim()).filter(Boolean);
+      if (custom.length) ALLOWED_ORIGINS = custom;
+    }
     const corsHeaders = getCORSHeaders(request);
 
     if (request.method === 'OPTIONS') {
@@ -1212,8 +1232,14 @@ export default {
         });
       }
 
-      // /api/migrate GET 免认证（方便直接浏览器访问执行迁移）
+      // /api/migrate GET：高危写操作，必须鉴权（secret 或超管 token）
       if (path === '/api/migrate' && request.method === 'GET') {
+        if (!await isMigrateAllowed(request, env)) {
+          return new Response(JSON.stringify({ error: '禁止访问，需要 MIGRATE_SECRET 或超管 token', code: 403 }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders },
+          });
+        }
         const token = await getTenantToken(env);
         const step = url.searchParams.get('step');
         let result;

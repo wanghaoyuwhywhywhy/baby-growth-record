@@ -15,8 +15,6 @@ function sanitizeBabies(babies: any[]): any[] {
     ...b,
     宝宝姓名: sanitizeBabyField(b.宝宝姓名),
     性别: sanitizeBabyField(b.性别),
-    妈妈名字: sanitizeBabyField(b.妈妈名字),
-    爸爸名字: sanitizeBabyField(b.爸爸名字),
     备注: sanitizeBabyField(b.备注),
   }));
 }

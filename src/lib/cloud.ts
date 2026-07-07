@@ -69,8 +69,6 @@ function feishuToBaby(item: any): Baby {
       ? new Date(fields['出生日期']).toISOString().split('T')[0]
       : fields['出生日期'] || '',
     性别: parseTextField(fields['性别']),
-    妈妈名字: parseTextField(fields['妈妈名字']),
-    爸爸名字: parseTextField(fields['爸爸名字']),
     头像: fields['头像'] || '',
     备注: parseTextField(fields['备注']),
   };
@@ -203,8 +201,6 @@ export async function cloudCreateBaby(baby: Baby): Promise<string | null> {
       '出生日期': toTimestamp(baby.出生日期),
       '性别': baby.性别,
     };
-    if (baby.妈妈名字) fields['妈妈名字'] = baby.妈妈名字;
-    if (baby.爸爸名字) fields['爸爸名字'] = baby.爸爸名字;
     if (baby.备注) fields['备注'] = baby.备注;
     const data = await apiPost('/api/babies', fields);
     // 返回飞书生成的 record_id
@@ -292,8 +288,6 @@ export async function cloudUpdateBaby(baby: Baby): Promise<boolean> {
       '出生日期': toTimestamp(baby.出生日期),
       '性别': baby.性别,
     };
-    if (baby.妈妈名字) fields['妈妈名字'] = baby.妈妈名字;
-    if (baby.爸爸名字) fields['爸爸名字'] = baby.爸爸名字;
     if (baby.备注) fields['备注'] = baby.备注;
     await apiPut('/api/babies', baby.record_id, fields);
     return true;
@@ -413,11 +407,11 @@ export async function cloudUploadMedia(recordId: string, file: Blob, fileName: s
 }
 
 // 获取云端媒体文件的代理 URL
+// 注意：不再把用户 token 拼到 URL 查询参数（避免 token 进入服务器日志/浏览器历史/Referer）。
+// 媒体鉴权由 Worker 端租户 token 完成，前端无需传递用户 token。
 export function getCloudAssetUrl(recordId: string, fileToken: string, type?: 'voice' | 'photo' | 'video'): string {
-  const token = getAuthToken();
-  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
   const typeParam = type ? `&type=${type}` : '';
-  return `${WORKER_URL}/api/asset?record_id=${encodeURIComponent(recordId)}&file_token=${encodeURIComponent(fileToken)}${tokenParam}${typeParam}`;
+  return `${WORKER_URL}/api/asset?record_id=${encodeURIComponent(recordId)}&file_token=${encodeURIComponent(fileToken)}${typeParam}`;
 }
 
 // 疫苗接种

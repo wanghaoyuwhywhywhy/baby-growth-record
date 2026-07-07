@@ -4,7 +4,7 @@ import tsconfigPaths from "vite-tsconfig-paths";
 import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   base: '/',
   build: {
     sourcemap: 'hidden',
@@ -13,14 +13,17 @@ export default defineConfig({
   plugins: [
     react({
       babel: {
-        plugins: [
-          'react-dev-locator',
-        ],
+        // react-dev-locator 仅用于开发期定位组件源码路径，
+        // 生产构建注入会把源码文件路径打到 DOM（data-* 属性），泄露项目结构，故仅在 dev 启用
+        plugins: mode === 'development' ? ['react-dev-locator'] : [],
       },
     }),
     tsconfigPaths(),
     VitePWA({
       registerType: 'autoUpdate',
+      // 关闭自动注入的内联注册脚本（CSP script-src 'self' 会拦截内联脚本，导致 PWA 失效）
+      // 改为在 main.tsx 中通过 virtual:pwa-register 同源模块手动注册
+      injectRegister: false,
       includeAssets: ['favicon.svg', 'icons/icon-192.png', 'icons/icon-512.png'],
       manifest: {
         name: '宝宝成长记录',
@@ -59,4 +62,4 @@ export default defineConfig({
       },
     }),
   ],
-});
+}));

@@ -1,0 +1,9 @@
+/*
+  # 内容安全策略：默认仅允许同源资源；
+  # 飞书媒体走 api.tongxi.xyz（图片/媒体/接口）；
+  # 内联样式放开（React 内联 style 需要）；脚本仅同源（SW 注册已改为同源模块）。
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' https://api.tongxi.xyz data: blob:; media-src 'self' https://api.tongxi.xyz blob:; connect-src 'self' https://api.tongxi.xyz; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=()
