@@ -711,3 +711,221 @@ export async function cloudUpdateContact(record_id: string, updates: { relation?
     return { ok: false, error: '网络错误' };
   }
 }
+
+// ========== AI 会话/消息持久化 ==========
+
+export interface ChatSession {
+  record_id?: string;
+  sessionId: string;          // 业务主键 UUID
+  accountName?: string;       // 服务端写入
+  accountId?: string;         // 服务端写入
+  babyScope: '全部宝宝' | '指定宝宝';
+  babyName: string;           // "全部宝宝" 或 具体宝宝名
+  babyId?: string;            // scope=全部宝宝 时为空
+  title: string;              // 会话标题（首条用户消息前 30 字）
+  messageCount: number;
+  createdAt: string;          // ISO 时间字符串
+  lastMessageAt: string;
+  sourcePage: 'AI对话' | '首页分析' | '记录辅助';
+  status: '活跃' | '已清空';
+}
+
+export interface ChatMessageRecord {
+  record_id?: string;
+  messageId: string;          // 业务主键 UUID
+  sessionId: string;
+  accountName?: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  createdAt: string;
+  status: '成功' | '失败' | '流式中';
+  errorMessage?: string;
+  sourcePage: 'AI对话' | '首页分析' | '记录辅助';
+}
+
+// 解析飞书单选字段（可能是对象 {name} 或字符串）
+function parseSingleSelect(value: any): string {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value?.name) return value.name;
+  return String(value);
+}
+
+function feishuToChatSession(item: any): ChatSession {
+  const f = item.fields || {};
+  return {
+    record_id: item.record_id,
+    sessionId: f['会话ID'] || '',
+    accountName: f['账号名'] || '',
+    accountId: f['账号ID'] || '',
+    babyScope: parseSingleSelect(f['宝宝范围']) as ChatSession['babyScope'] || '指定宝宝',
+    babyName: f['宝宝名称'] || '',
+    babyId: f['宝宝ID'] || '',
+    title: f['会话标题'] || '',
+    messageCount: Number(f['消息数']) || 0,
+    createdAt: typeof f['创建时间'] === 'number' ? new Date(f['创建时间']).toISOString() : (f['创建时间'] || ''),
+    lastMessageAt: typeof f['最后消息时间'] === 'number' ? new Date(f['最后消息时间']).toISOString() : (f['最后消息时间'] || ''),
+    sourcePage: parseSingleSelect(f['来源页']) as ChatSession['sourcePage'] || 'AI对话',
+    status: parseSingleSelect(f['状态']) as ChatSession['status'] || '活跃',
+  };
+}
+
+function feishuToChatMessage(item: any): ChatMessageRecord {
+  const f = item.fields || {};
+  return {
+    record_id: item.record_id,
+    messageId: f['消息ID'] || '',
+    sessionId: f['会话ID'] || '',
+    accountName: f['账号名'] || '',
+    role: parseSingleSelect(f['角色']) as ChatMessageRecord['role'] || 'user',
+    content: f['消息内容'] || '',
+    createdAt: typeof f['创建时间'] === 'number' ? new Date(f['创建时间']).toISOString() : (f['创建时间'] || ''),
+    status: parseSingleSelect(f['状态']) as ChatMessageRecord['status'] || '成功',
+    errorMessage: f['错误信息'] || '',
+    sourcePage: parseSingleSelect(f['来源页']) as ChatMessageRecord['sourcePage'] || 'AI对话',
+  };
+}
+
+// 生成 UUID（兼容 crypto.randomUUID 不存在的环境）
+function genId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxxxxxx4xxx'.replace(/[x]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+// 拉取当前账号最近 1 条活跃会话
+export async function cloudGetActiveChatSession(): Promise<ChatSession | null> {
+  try {
+    const data = await apiGet('/api/ai-sessions');
+    if (data.code !== 0) return null;
+    const items = data.data?.items || [];
+    if (items.length === 0) return null;
+    return feishuToChatSession(items[0]);
+  } catch (e) {
+    console.warn('云端拉取AI会话失败:', e);
+    return null;
+  }
+}
+
+// 创建新会话
+export async function cloudCreateChatSession(input: {
+  babyScope: '全部宝宝' | '指定宝宝';
+  babyName: string;
+  babyId?: string;
+  title: string;
+  sourcePage?: 'AI对话' | '首页分析' | '记录辅助';
+}): Promise<ChatSession | null> {
+  try {
+    const sessionId = genId();
+    const fields: Record<string, any> = {
+      '会话ID': sessionId,
+      '宝宝范围': input.babyScope,
+      '宝宝名称': input.babyName,
+      '会话标题': input.title,
+      '来源页': input.sourcePage || 'AI对话',
+    };
+    if (input.babyId) fields['宝宝ID'] = input.babyId;
+    const data = await apiPost('/api/ai-sessions', fields);
+    if (data.code !== 0) {
+      console.warn('云端创建AI会话失败:', data.msg);
+      return null;
+    }
+    // 返回构造的会话对象（服务端会补充账号信息、时间戳等）
+    return {
+      sessionId,
+      babyScope: input.babyScope,
+      babyName: input.babyName,
+      babyId: input.babyId,
+      title: input.title,
+      messageCount: 0,
+      createdAt: new Date().toISOString(),
+      lastMessageAt: new Date().toISOString(),
+      sourcePage: input.sourcePage || 'AI对话',
+      status: '活跃',
+      record_id: data?.data?.record?.record_id,
+    };
+  } catch (e) {
+    console.warn('云端创建AI会话异常:', e);
+    return null;
+  }
+}
+
+// 删除会话及其所有消息
+export async function cloudDeleteChatSession(sessionId?: string): Promise<boolean> {
+  try {
+    const url = sessionId
+      ? `${WORKER_URL}/api/ai-sessions?session_id=${encodeURIComponent(sessionId)}`
+      : `${WORKER_URL}/api/ai-sessions`;
+    const resp = await fetch(url, {
+      method: 'DELETE',
+      headers: { ...authHeaders() },
+    });
+    if (resp.status === 401) {
+      window.dispatchEvent(new Event('auth-expired'));
+      throw new Error('AUTH_EXPIRED');
+    }
+    return resp.ok;
+  } catch (e) {
+    console.warn('云端删除AI会话失败:', e);
+    return false;
+  }
+}
+
+// 拉取某会话的所有消息（按时间升序）
+export async function cloudGetChatMessages(sessionId: string): Promise<ChatMessageRecord[]> {
+  try {
+    const data = await apiGet(`/api/ai-messages?session_id=${encodeURIComponent(sessionId)}`);
+    if (data.code !== 0) return [];
+    const items = data.data?.items || [];
+    return items.map(feishuToChatMessage);
+  } catch (e) {
+    console.warn('云端拉取AI消息失败:', e);
+    return [];
+  }
+}
+
+// 新增一条消息
+export async function cloudCreateChatMessage(input: {
+  sessionId: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  status?: '成功' | '失败' | '流式中';
+  errorMessage?: string;
+  sourcePage?: 'AI对话' | '首页分析' | '记录辅助';
+}): Promise<ChatMessageRecord | null> {
+  try {
+    const messageId = genId();
+    const now = Date.now();
+    const fields: Record<string, any> = {
+      '消息ID': messageId,
+      '会话ID': input.sessionId,
+      '角色': input.role,
+      '消息内容': input.content,
+      '创建时间': now,
+      '状态': input.status || '成功',
+      '来源页': input.sourcePage || 'AI对话',
+    };
+    if (input.errorMessage) fields['错误信息'] = input.errorMessage;
+    const data = await apiPost('/api/ai-messages', fields);
+    if (data.code !== 0) {
+      console.warn('云端写入AI消息失败:', data.msg);
+      return null;
+    }
+    return {
+      messageId,
+      sessionId: input.sessionId,
+      role: input.role,
+      content: input.content,
+      createdAt: new Date(now).toISOString(),
+      status: input.status || '成功',
+      errorMessage: input.errorMessage,
+      sourcePage: input.sourcePage || 'AI对话',
+      record_id: data?.data?.record?.record_id,
+    };
+  } catch (e) {
+    console.warn('云端写入AI消息异常:', e);
+    return null;
+  }
+}

@@ -1540,6 +1540,24 @@ export default {
         });
       }
 
+      // /api/ai-sessions AI 会话管理（GET 拉取当前账号最近会话，POST 新建会话，DELETE 清空会话及其消息）
+      if (path === '/api/ai-sessions') {
+        const token = await getTenantToken(env);
+        const result = await handleAIChatSessions(request, env, token, auth);
+        return new Response(JSON.stringify(result), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
+      // /api/ai-messages AI 消息管理（GET 按 session_id 拉取消息列表，POST 新增消息）
+      if (path === '/api/ai-messages') {
+        const token = await getTenantToken(env);
+        const result = await handleAIChatMessages(request, env, token, auth);
+        return new Response(JSON.stringify(result), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+
       // 写操作权限检查在各个 handler 内部根据宝宝关联角色判断
       // superadmin 账号管理权限在 handleAccounts 内部检查
 
@@ -1620,6 +1638,8 @@ let vaccineTableIdCache = null; // 缓存"疫苗接种"表 ID
 let adminExistsCache = false; // 缓存admin账号已存在，避免每次登录都查询
 let accountBabyTableIdCache = null;
 let accountBabyCache = { data: new Map(), expires: 0 };
+let aiSessionTableIdCache = null; // 缓存"AI会话"表 ID
+let aiMessageTableIdCache = null; // 缓存"AI消息"表 ID
 
 async function getTenantToken(env) {
   // 1. 内存缓存（同 isolate 最快）
@@ -3581,4 +3601,348 @@ async function deleteBabyAssociations(babyId, env, operatorAccount) {
     }
   }
   accountBabyCache = { data: new Map(), expires: 0 };
+}
+
+// ========== AI 会话/消息持久化 ==========
+// 表结构（AI会话）：
+//   会话ID(文本主键)、账号名(文本)、账号ID(文本)、宝宝范围(单选: 全部宝宝/指定宝宝)、
+//   宝宝名称(文本)、宝宝ID(文本)、会话标题(文本)、消息数(数字)、
+//   创建时间(日期)、最后消息时间(日期)、来源页(单选)、状态(单选: 活跃/已清空)
+// 表结构（AI消息）：
+//   消息ID(文本主键)、会话ID(文本)、账号名(文本)、角色(单选: user/assistant/system)、
+//   消息内容(文本)、创建时间(日期)、状态(单选: 成功/失败/流式中)、
+//   错误信息(文本)、来源页(单选)
+
+// 查找或创建"AI会话"表，返回表 ID
+async function ensureAIChatSessionTable(token, env) {
+  if (aiSessionTableIdCache) return aiSessionTableIdCache;
+
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const listData = await listResp.json();
+  const tables = listData.data?.items || [];
+  const existing = tables.find(t => t.name === 'AI会话');
+
+  const fieldsDef = [
+    { field_name: '会话ID', type: 1 },
+    { field_name: '账号名', type: 1 },
+    { field_name: '账号ID', type: 1 },
+    { field_name: '宝宝范围', type: 3, property: { options: [{ name: '全部宝宝' }, { name: '指定宝宝' }] } },
+    { field_name: '宝宝名称', type: 1 },
+    { field_name: '宝宝ID', type: 1 },
+    { field_name: '会话标题', type: 1 },
+    { field_name: '消息数', type: 2 },
+    { field_name: '创建时间', type: 5 },
+    { field_name: '最后消息时间', type: 5 },
+    { field_name: '来源页', type: 3, property: { options: [{ name: 'AI对话' }, { name: '首页分析' }, { name: '记录辅助' }] } },
+    { field_name: '状态', type: 3, property: { options: [{ name: '活跃' }, { name: '已清空' }] } },
+  ];
+
+  if (existing) {
+    aiSessionTableIdCache = existing.table_id;
+    // 补充缺失字段
+    try {
+      const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${aiSessionTableIdCache}/fields`;
+      const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const fieldsData = await fieldsResp.json();
+      const existingFieldNames = (fieldsData.data?.items || []).map(f => f.field_name);
+      for (const field of fieldsDef) {
+        if (!existingFieldNames.includes(field.field_name)) {
+          await fetch(fieldsUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(field),
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[ensureAIChatSessionTable] 补充字段失败:', e.message);
+    }
+    return aiSessionTableIdCache;
+  }
+
+  // 创建表（带主键字段名）
+  const createResp = await fetch(listUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: { name: 'AI会话', default_view: { name: '默认视图' }, fields: fieldsDef } }),
+  });
+  const createData = await createResp.json();
+  if (createData.code !== 0) {
+    throw new Error(`创建AI会话表失败: ${createData.msg}`);
+  }
+  aiSessionTableIdCache = createData.data?.table_id;
+  if (!aiSessionTableIdCache) {
+    throw new Error('创建AI会话表成功但未获取到 table_id');
+  }
+  return aiSessionTableIdCache;
+}
+
+// 查找或创建"AI消息"表，返回表 ID
+async function ensureAIChatMessageTable(token, env) {
+  if (aiMessageTableIdCache) return aiMessageTableIdCache;
+
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
+
+  const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  const listData = await listResp.json();
+  const tables = listData.data?.items || [];
+  const existing = tables.find(t => t.name === 'AI消息');
+
+  const fieldsDef = [
+    { field_name: '消息ID', type: 1 },
+    { field_name: '会话ID', type: 1 },
+    { field_name: '账号名', type: 1 },
+    { field_name: '角色', type: 3, property: { options: [{ name: 'user' }, { name: 'assistant' }, { name: 'system' }] } },
+    { field_name: '消息内容', type: 1 },
+    { field_name: '创建时间', type: 5 },
+    { field_name: '状态', type: 3, property: { options: [{ name: '成功' }, { name: '失败' }, { name: '流式中' }] } },
+    { field_name: '错误信息', type: 1 },
+    { field_name: '来源页', type: 3, property: { options: [{ name: 'AI对话' }, { name: '首页分析' }, { name: '记录辅助' }] } },
+  ];
+
+  if (existing) {
+    aiMessageTableIdCache = existing.table_id;
+    // 补充缺失字段
+    try {
+      const fieldsUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${aiMessageTableIdCache}/fields`;
+      const fieldsResp = await fetch(fieldsUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const fieldsData = await fieldsResp.json();
+      const existingFieldNames = (fieldsData.data?.items || []).map(f => f.field_name);
+      for (const field of fieldsDef) {
+        if (!existingFieldNames.includes(field.field_name)) {
+          await fetch(fieldsUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(field),
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[ensureAIChatMessageTable] 补充字段失败:', e.message);
+    }
+    return aiMessageTableIdCache;
+  }
+
+  const createResp = await fetch(listUrl, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: { name: 'AI消息', default_view: { name: '默认视图' }, fields: fieldsDef } }),
+  });
+  const createData = await createResp.json();
+  if (createData.code !== 0) {
+    throw new Error(`创建AI消息表失败: ${createData.msg}`);
+  }
+  aiMessageTableIdCache = createData.data?.table_id;
+  if (!aiMessageTableIdCache) {
+    throw new Error('创建AI消息表成功但未获取到 table_id');
+  }
+  return aiMessageTableIdCache;
+}
+
+// 处理 AI 会话请求
+// GET    : 返回当前账号最近的"活跃"会话（按"最后消息时间"倒序，取第一条）；可带 ?all=1 返回全部会话
+// POST   : 创建新会话，body.fields 包含 会话ID/宝宝范围/宝宝名称/宝宝ID/会话标题/来源页
+// DELETE : ?session_id=xxx 物理删除该会话及其所有消息；不传 session_id 则物理删除该账号所有"活跃"会话及其消息
+async function handleAIChatSessions(request, env, token, auth) {
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const tableId = await ensureAIChatSessionTable(token, env);
+  const messageTableId = await ensureAIChatMessageTable(token, env);
+  const accountId = await getAuthAccountId(auth, env);
+
+  if (request.method === 'GET') {
+    const filterStr = `CurrentValue.[账号名]="${auth.accountName}"`;
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+    const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: data.code, msg: data.msg, data: { items: [] } };
+
+    let items = data.data?.items || [];
+    // 按"最后消息时间"倒序
+    items.sort((a, b) => {
+      const ta = a.fields?.['最后消息时间'] || a.fields?.['创建时间'] || 0;
+      const tb = b.fields?.['最后消息时间'] || b.fields?.['创建时间'] || 0;
+      return tb - ta;
+    });
+
+    const urlObj = new URL(request.url);
+    if (urlObj.searchParams.get('all') === '1') {
+      return { code: 0, data: { items, has_more: false, total: items.length } };
+    }
+    // 默认只返回最近 1 条活跃会话
+    const active = items.filter(it => {
+      const st = it.fields?.['状态'];
+      // 兼容单选对象或字符串
+      const sv = typeof st === 'object' ? st?.name : st;
+      return sv !== '已清空';
+    });
+    return { code: 0, data: { items: active.slice(0, 1), has_more: false, total: active.length } };
+  }
+
+  if (request.method === 'POST') {
+    const body = await request.json();
+    const fields = body.fields || {};
+    // 强制服务端写入账号信息，避免前端伪造
+    fields['账号名'] = auth.accountName || '';
+    if (accountId) fields['账号ID'] = accountId;
+    if (!fields['创建时间']) fields['创建时间'] = Date.now();
+    if (!fields['最后消息时间']) fields['最后消息时间'] = fields['创建时间'];
+    if (!fields['消息数']) fields['消息数'] = 0;
+    if (!fields['状态']) fields['状态'] = '活跃';
+    if (!fields['来源页']) fields['来源页'] = 'AI对话';
+    const createUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+    const resp = await fetch(createUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    const result = await resp.json();
+    return result;
+  }
+
+  if (request.method === 'PUT') {
+    const body = await request.json();
+    const recordId = body.record_id;
+    if (!recordId) return { error: 'record_id is required' };
+    const fields = body.fields || {};
+    // 校验该会话归属当前账号
+    const existUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const existResp = await fetch(existUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+    const existData = await existResp.json();
+    if (existData.code !== 0 || !existData.data?.record) return { error: '会话不存在' };
+    if (existData.data.record.fields?.['账号名'] !== auth.accountName) {
+      return { error: '无权修改他人会话', code: 403 };
+    }
+    const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
+    const resp = await fetch(updateUrl, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    return await resp.json();
+  }
+
+  if (request.method === 'DELETE') {
+    const urlObj = new URL(request.url);
+    const sessionId = urlObj.searchParams.get('session_id'); // 业务层的"会话ID"字段，不是 record_id
+
+    // 收集需要删除的会话 record_id 列表
+    let toDeleteRecordIds = [];
+    let toDeleteSessionIds = [];
+
+    if (sessionId) {
+      // 按"会话ID"字段过滤
+      const filterStr = `CurrentValue.[会话ID]="${sessionId}"&&CurrentValue.[账号名]="${auth.accountName}"`;
+      const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=10`;
+      const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const listData = await listResp.json();
+      const items = listData.data?.items || [];
+      toDeleteRecordIds = items.map(it => it.record_id);
+      toDeleteSessionIds = items.map(it => it.fields?.['会话ID']).filter(Boolean);
+    } else {
+      // 删除该账号所有"活跃"会话
+      const filterStr = `CurrentValue.[账号名]="${auth.accountName}"`;
+      const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=100`;
+      const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const listData = await listResp.json();
+      const items = (listData.data?.items || []).filter(it => {
+        const st = it.fields?.['状态'];
+        const sv = typeof st === 'object' ? st?.name : st;
+        return sv !== '已清空';
+      });
+      toDeleteRecordIds = items.map(it => it.record_id);
+      toDeleteSessionIds = items.map(it => it.fields?.['会话ID']).filter(Boolean);
+    }
+
+    // 1. 删除会话记录
+    for (const rid of toDeleteRecordIds) {
+      const delUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${rid}`;
+      await fetch(delUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+    }
+    // 2. 删除这些会话下的所有消息
+    for (const sid of toDeleteSessionIds) {
+      const filterStr = `CurrentValue.[会话ID]="${sid}"`;
+      const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${messageTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=500`;
+      const listResp = await fetch(listUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const listData = await listResp.json();
+      const items = listData.data?.items || [];
+      for (const it of items) {
+        const delUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${messageTableId}/records/${it.record_id}`;
+        await fetch(delUrl, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+      }
+    }
+    return { code: 0, data: { deleted_sessions: toDeleteRecordIds.length } };
+  }
+
+  return { error: 'Method not allowed' };
+}
+
+// 处理 AI 消息请求
+// GET  : ?session_id=xxx 按"创建时间"升序返回该会话所有消息
+// POST : body.fields 包含 消息ID/会话ID/角色/消息内容/状态/错误信息/来源页
+async function handleAIChatMessages(request, env, token, auth) {
+  const appToken = env.FEISHU_BASE_TOKEN;
+  const tableId = await ensureAIChatMessageTable(token, env);
+
+  if (request.method === 'GET') {
+    const urlObj = new URL(request.url);
+    const sessionId = urlObj.searchParams.get('session_id');
+    if (!sessionId) return { code: 0, data: { items: [], has_more: false, total: 0 } };
+    const filterStr = `CurrentValue.[会话ID]="${sessionId}"&&CurrentValue.[账号名]="${auth.accountName}"`;
+    const url = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=500`;
+    const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+    const data = await resp.json();
+    if (data.code !== 0) return { code: data.code, msg: data.msg, data: { items: [] } };
+    const items = (data.data?.items || []).sort((a, b) => {
+      const ta = a.fields?.['创建时间'] || 0;
+      const tb = b.fields?.['创建时间'] || 0;
+      return ta - tb; // 升序
+    });
+    return { code: 0, data: { items, has_more: false, total: items.length } };
+  }
+
+  if (request.method === 'POST') {
+    const body = await request.json();
+    const fields = body.fields || {};
+    if (!fields['会话ID']) return { error: '会话ID is required' };
+    if (!fields['消息ID']) fields['消息ID'] = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    // 强制服务端写入账号名
+    fields['账号名'] = auth.accountName || '';
+    if (!fields['创建时间']) fields['创建时间'] = Date.now();
+    if (!fields['状态']) fields['状态'] = '成功';
+    if (!fields['来源页']) fields['来源页'] = 'AI对话';
+    const createUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records`;
+    const resp = await fetch(createUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    const result = await resp.json();
+    // 同步更新会话表的"最后消息时间"和"消息数"
+    try {
+      const sessionTableId = await ensureAIChatSessionTable(token, env);
+      const filterStr = `CurrentValue.[会话ID]="${fields['会话ID']}"&&CurrentValue.[账号名]="${auth.accountName}"`;
+      const sListUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${sessionTableId}/records?filter=${encodeURIComponent(filterStr)}&page_size=1`;
+      const sListResp = await fetch(sListUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+      const sListData = await sListResp.json();
+      const sItem = sListData.data?.items?.[0];
+      if (sItem) {
+        const oldCount = Number(sItem.fields?.['消息数']) || 0;
+        const updateUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${sessionTableId}/records/${sItem.record_id}`;
+        await fetch(updateUrl, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { '最后消息时间': fields['创建时间'], '消息数': oldCount + 1 } }),
+        });
+      }
+    } catch (e) {
+      console.error('[handleAIChatMessages] 更新会话统计失败:', e.message);
+    }
+    return result;
+  }
+
+  return { error: 'Method not allowed' };
 }

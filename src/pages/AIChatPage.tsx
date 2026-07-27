@@ -3,11 +3,21 @@ import { useAppStore } from '@/store/useAppStore';
 import NavHeader from '@/components/NavHeader';
 import { chatStream } from '@/lib/ai';
 import { getAuthBabyRelations } from '@/lib/auth';
+import {
+  cloudGetActiveChatSession,
+  cloudGetChatMessages,
+  cloudCreateChatSession,
+  cloudCreateChatMessage,
+  cloudDeleteChatSession,
+} from '@/lib/cloud';
 import { Send, Mic, MicOff, Loader2, Sparkles, Trash2 } from 'lucide-react';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  messageId?: string;   // 云端消息 ID（落库后回写）
+  createdAt?: string;   // ISO 时间字符串
+  status?: '成功' | '失败' | '流式中';
 }
 
 // 语音识别的最小类型（本机 TS lib.dom 未包含厂商前缀的 SpeechRecognition 构造函数）
@@ -28,7 +38,8 @@ interface SpeechRecognitionEventLike {
 const CHAT_HISTORY_KEY = 'ai_chat_history';
 const MAX_HISTORY = 50; // 最多保存50条消息
 
-function loadHistory(): ChatMessage[] {
+// 本地缓存（作为离线兜底，主存储已迁移至云端飞书多维表）
+function loadLocalHistory(): ChatMessage[] {
   try {
     const raw = localStorage.getItem(CHAT_HISTORY_KEY);
     if (!raw) return [];
@@ -39,7 +50,7 @@ function loadHistory(): ChatMessage[] {
   }
 }
 
-function saveHistory(messages: ChatMessage[]) {
+function saveLocalHistory(messages: ChatMessage[]) {
   try {
     localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messages.slice(-MAX_HISTORY)));
   } catch {
@@ -55,13 +66,17 @@ export default function AIChatPage() {
   const vaccines = useAppStore((s) => s.vaccines);
   const babyRelations = getAuthBabyRelations();
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() => loadHistory());
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [listening, setListening] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
   // 宝宝范围选择：'current' = 仅当前宝宝，'all' = 全部宝宝
   const [babyScope, setBabyScope] = useState<'current' | 'all'>('current');
+
+  // 当前会话 ID（云端业务主键），首屏异步加载后填充；为 null 时表示当前无活跃会话
+  const sessionRef = useRef<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -73,11 +88,49 @@ export default function AIChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages]);
 
-  // 持久化消息到localStorage
-  const persistMessages = useCallback((msgs: ChatMessage[]) => {
-    // 只持久化内容完整（非空）的消息
+  // 首屏：从云端加载最近活跃会话及其消息；失败时降级到 localStorage
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingHistory(true);
+      try {
+        const session = await cloudGetActiveChatSession();
+        if (cancelled) return;
+        if (session) {
+          sessionRef.current = session.sessionId;
+          const msgs = await cloudGetChatMessages(session.sessionId);
+          if (cancelled) return;
+          const restored: ChatMessage[] = msgs
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              messageId: m.messageId,
+              createdAt: m.createdAt,
+              status: m.status,
+            }));
+          setMessages(restored.slice(-MAX_HISTORY));
+        } else {
+          // 无云端会话，尝试从 localStorage 恢复（兼容旧版本数据）
+          const local = loadLocalHistory();
+          if (local.length > 0) setMessages(local);
+        }
+      } catch {
+        if (!cancelled) {
+          const local = loadLocalHistory();
+          if (local.length > 0) setMessages(local);
+        }
+      } finally {
+        if (!cancelled) setLoadingHistory(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 本地缓存兜底（不阻塞主流程）
+  const persistLocalCache = useCallback((msgs: ChatMessage[]) => {
     const complete = msgs.filter(m => m.content.trim());
-    saveHistory(complete);
+    saveLocalHistory(complete);
   }, []);
 
   // 清理语音识别
@@ -154,6 +207,51 @@ export default function AIChatPage() {
     const abort = new AbortController();
     abortRef.current = abort;
 
+    // 1. 确保有会话（首次发送时创建）
+    let sid = sessionRef.current;
+    if (!sid) {
+      const babyNameStr = babyScope === 'all' ? '全部宝宝' : (baby?.宝宝姓名 || '宝宝');
+      const babyIdStr = babyScope === 'current' && baby ? baby.record_id : undefined;
+      try {
+        const session = await cloudCreateChatSession({
+          babyScope: babyScope === 'all' ? '全部宝宝' : '指定宝宝',
+          babyName: babyNameStr,
+          babyId: babyIdStr,
+          title: text.slice(0, 30),
+          sourcePage: 'AI对话',
+        });
+        if (session) {
+          sid = session.sessionId;
+          sessionRef.current = sid;
+        }
+      } catch (e) {
+        console.warn('创建AI会话失败，仅本地缓存:', e);
+      }
+    }
+
+    // 2. 持久化 user 消息（fire-and-forget，不阻塞流式）
+    if (sid) {
+      cloudCreateChatMessage({
+        sessionId: sid,
+        role: 'user',
+        content: text,
+        sourcePage: 'AI对话',
+      }).then(rec => {
+        if (rec) {
+          // 把 messageId 回写到对应消息
+          setMessages(prev => {
+            const updated = [...prev];
+            const idx = updated.findIndex(m => m.role === 'user' && m.content === text && !m.messageId);
+            if (idx >= 0) updated[idx] = { ...updated[idx], messageId: rec.messageId, createdAt: rec.createdAt };
+            return updated;
+          });
+        }
+      }).catch(() => {});
+    }
+
+    // 本地缓存兜底
+    persistLocalCache(newMessages);
+
     try {
       // 构建发送给DeepSeek的messages（不含最新assistant空消息）
       const apiMessages = newMessages.map(m => ({ role: m.role, content: m.content }));
@@ -181,8 +279,17 @@ export default function AIChatPage() {
         },
         abort.signal,
       );
-      // 流式完成后持久化
-      persistMessages([...newMessages, { role: 'assistant', content: finalContent }]);
+      // 流式完成后持久化 assistant 消息
+      if (sid) {
+        cloudCreateChatMessage({
+          sessionId: sid,
+          role: 'assistant',
+          content: finalContent,
+          status: '成功',
+          sourcePage: 'AI对话',
+        }).catch(() => {});
+      }
+      persistLocalCache([...newMessages, { role: 'assistant', content: finalContent }]);
     } catch (e: unknown) {
       if ((e instanceof Error || e instanceof DOMException) && e.name === 'AbortError') return;
       const errContent = `❌ 请求失败：${e instanceof Error ? e.message : '未知错误'}`;
@@ -194,7 +301,17 @@ export default function AIChatPage() {
         }
         return updated;
       });
-      persistMessages([...newMessages, { role: 'assistant', content: errContent }]);
+      if (sid) {
+        cloudCreateChatMessage({
+          sessionId: sid,
+          role: 'assistant',
+          content: errContent,
+          status: '失败',
+          errorMessage: e instanceof Error ? e.message : '未知错误',
+          sourcePage: 'AI对话',
+        }).catch(() => {});
+      }
+      persistLocalCache([...newMessages, { role: 'assistant', content: errContent }]);
     } finally {
       setStreaming(false);
       abortRef.current = null;
@@ -261,10 +378,20 @@ export default function AIChatPage() {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }
 
-  function handleClearHistory() {
+  async function handleClearHistory() {
+    const sid = sessionRef.current;
     setMessages([]);
+    sessionRef.current = null;
     localStorage.removeItem(CHAT_HISTORY_KEY);
     setShowClearConfirm(false);
+    // 同步删除云端会话及其所有消息（fire-and-forget）
+    if (sid) {
+      try {
+        await cloudDeleteChatSession(sid);
+      } catch (e) {
+        console.warn('云端删除AI会话失败:', e);
+      }
+    }
   }
 
   return (
@@ -339,7 +466,13 @@ export default function AIChatPage() {
 
       {/* 消息列表 - 独立滚动区域 */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-2">
-        {messages.length === 0 && (
+        {loadingHistory && (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <Loader2 size={24} className="animate-spin text-muted mb-3" />
+            <p className="text-sm text-muted">正在加载历史对话...</p>
+          </div>
+        )}
+        {!loadingHistory && messages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky to-mint flex items-center justify-center text-white shadow-soft mb-4">
               <Sparkles size={24} strokeWidth={2.5} />
@@ -422,7 +555,7 @@ export default function AIChatPage() {
           {/* 发送按钮 */}
           <button
             onClick={handleSend}
-            disabled={!input.trim() || streaming}
+            disabled={!input.trim() || streaming || loadingHistory}
             className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-coral text-white disabled:opacity-40 transition-opacity"
           >
             {streaming ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
