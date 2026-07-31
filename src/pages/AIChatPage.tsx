@@ -88,9 +88,16 @@ export default function AIChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages]);
 
-  // 首屏：从云端加载最近活跃会话及其消息；失败时降级到 localStorage
+  // 首屏：从云端加载最近活跃会话及其消息；失败/超时降级到 localStorage（5秒超时防卡死）
   useEffect(() => {
     let cancelled = false;
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) {
+        const local = loadLocalHistory();
+        if (local.length > 0) setMessages(local);
+        setLoadingHistory(false);
+      }
+    }, 5000);
     (async () => {
       setLoadingHistory(true);
       try {
@@ -121,10 +128,13 @@ export default function AIChatPage() {
           if (local.length > 0) setMessages(local);
         }
       } finally {
-        if (!cancelled) setLoadingHistory(false);
+        if (!cancelled) {
+          clearTimeout(timeoutId);
+          setLoadingHistory(false);
+        }
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(timeoutId); };
   }, []);
 
   // 本地缓存兜底（不阻塞主流程）
