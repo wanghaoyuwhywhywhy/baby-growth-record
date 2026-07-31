@@ -3224,7 +3224,11 @@ async function streamDeepSeek(apiKey, systemPrompt, messages, temperature, maxTo
     });
 
     if (!resp.ok) {
-      return { error: `DeepSeek API 错误: ${resp.status}` };
+      // 读取 DeepSeek 返回的具体错误信息，便于排查（限流/Key失效/服务异常等）
+      let detail = '';
+      try { detail = await resp.text(); } catch {}
+      console.error('[streamDeepSeek] DeepSeek 错误:', resp.status, detail.slice(0, 500));
+      return { error: `DeepSeek API 错误: ${resp.status} ${detail.slice(0, 200)}` };
     }
 
     // 返回流式 Response（SSE）
@@ -3236,6 +3240,7 @@ async function streamDeepSeek(apiKey, systemPrompt, messages, temperature, maxTo
       },
     });
   } catch (e) {
+    console.error('[streamDeepSeek] 异常:', e.message);
     return { error: e.message };
   }
 }
@@ -3343,10 +3348,15 @@ ${vaccines.length > 0
 3. 基于以上真实数据，结合专业知识，给出个性化、温暖的回答
 4. 用中文回答`;
       const streamResult = await streamDeepSeek(apiKey, systemPrompt, messages, 0.7, 1000);
-      // 如果是错误对象，返回JSON
-      if (streamResult.error) return streamResult;
-      // 流式Response，添加CORS头
       const corsHeaders = getCORSHeaders(request);
+      // 错误对象：以 502 返回，避免前端误把 JSON 当 SSE 流解析导致静默无回复
+      if (streamResult.error) {
+        return new Response(JSON.stringify({ error: streamResult.error }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders },
+        });
+      }
+      // 流式Response，添加CORS头
       return new Response(streamResult.body, {
         headers: {
           'Content-Type': 'text/event-stream',

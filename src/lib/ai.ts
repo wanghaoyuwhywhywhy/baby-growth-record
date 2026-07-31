@@ -87,7 +87,23 @@ export async function chatStream(
   });
 
   if (!response.ok) {
-    throw new Error(`AI 服务请求失败: ${response.status}`);
+    // 读取后端返回的具体错误信息（DeepSeek 限流/Key失效等），避免只显示状态码
+    let detail = '';
+    try {
+      const errBody = await response.json();
+      detail = errBody?.error || '';
+    } catch {
+      try { detail = await response.text(); } catch {}
+    }
+    throw new Error(detail || `AI 服务请求失败: ${response.status}`);
+  }
+
+  // 防御性检查：确保是 SSE 流，避免后端误返回 JSON 时静默无回复
+  const contentType = response.headers.get('Content-Type') || '';
+  if (!contentType.includes('text/event-stream')) {
+    let body = '';
+    try { body = await response.text(); } catch {}
+    throw new Error(`AI 服务返回非流式响应: ${body.slice(0, 200) || contentType}`);
   }
 
   // 解析 SSE 流

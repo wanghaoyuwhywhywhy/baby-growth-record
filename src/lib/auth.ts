@@ -91,8 +91,10 @@ export function isCurrentBabyOwner(): boolean {
 }
 
 // 是否为管理员
+// 无登录模式下（无 role 时）默认为 admin，保证编辑按钮可用
 export function isAdmin(): boolean {
   const role = getAuthRole();
+  if (!role) return true; // 无登录模式默认 admin
   return role === 'admin' || role === 'superadmin';
 }
 
