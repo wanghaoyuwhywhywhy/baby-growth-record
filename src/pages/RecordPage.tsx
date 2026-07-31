@@ -1,12 +1,11 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
+import { useUploadStore, type UploadTask } from '@/store/useUploadStore';
 import CategoryPicker from '@/components/CategoryPicker';
 import NavHeader from '@/components/NavHeader';
 import MediaInput, { type MediaItem } from '@/components/MediaInput';
-import { feishuAPI } from '@/api/feishu';
 import { autoCategory, polishContent } from '@/lib/ai';
-import { cloudUploadMedia } from '@/lib/cloud';
 import { Check, Sparkles, Wand2, Loader2 } from 'lucide-react';
 
 type MediaType = 'text' | 'voice' | 'video' | 'photo';
@@ -15,7 +14,6 @@ export default function RecordPage() {
   const [content, setContent] = useState('');
   const [category, setCategory] = useState('');
   const [categoryManuallySet, setCategoryManuallySet] = useState(false);
-  const [isMilestone, setIsMilestone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
@@ -104,60 +102,44 @@ export default function RecordPage() {
 
       const mediaIds = mediaItems.map(m => m.id);
 
+      // 1. 先创建记录（快速完成，不涉及大文件上传）
       const record = await createRecord({
         记录内容: content.trim(),
         分类: finalCategory,
-        是否为里程碑: isMilestone,
+        是否为里程碑: false,
         媒体类型: mediaTypes,
         媒体附件: mediaIds.length > 0 ? mediaIds : undefined,
         语音转文字: voiceTranscript.trim() || undefined,
       });
 
-      // 上传媒体到飞书云端，获取 file_tokens（并行上传提速）
-      const fileTokens: string[] = [];
-      const uploadErrors: string[] = [];
-      const uploadPromises = mediaItems.map(async (media, index) => {
-        // 存到本地 IndexedDB（用于即时预览）
-        await feishuAPI.addMedia(media.id, media.type, media.blob, record.record_id);
-        // 上传到飞书云端
-        const extMap: Record<string, string> = { video: 'mp4', image: 'jpg' };
-        // 语音扩展名根据实际录制格式决定
-        let ext = extMap[media.type] || 'bin';
-        if (media.type === 'voice') {
-          ext = media.blob.type.includes('mp4') ? 'mp4' : 'webm';
-        }
-        try {
-          const fileToken = await cloudUploadMedia(record.record_id, media.blob, `${media.id}.${ext}`);
-          if (fileToken) {
-            return { index, fileToken };
-          }
-        } catch (uploadErr) {
-          console.error('媒体上传失败:', uploadErr);
-          uploadErrors.push(uploadErr instanceof Error ? uploadErr.message : '上传失败');
-        }
-        return null;
-      });
-      const uploadResults = await Promise.all(uploadPromises);
-      uploadResults.filter(Boolean).sort((a, b) => a!.index - b!.index).forEach(r => {
-        if (r?.fileToken) fileTokens.push(r.fileToken);
-      });
+      // 2. 如果有媒体文件，交由后台上传任务
+      if (mediaItems.length > 0) {
+        const uploadTasks: UploadTask[] = mediaItems.map((media) => ({
+          id: `upload_${media.id}`,
+          recordId: record.record_id,
+          mediaId: media.id,
+          fileName: `${media.id}.${media.type === 'voice' ? (media.blob.type.includes('mp4') ? 'mp4' : 'webm') : media.type === 'video' ? 'mp4' : 'jpg'}`,
+          fileSize: media.blob.size,
+          mediaType: media.type,
+          blob: media.blob,
+          status: 'pending' as const,
+          progress: 0,
+        }));
 
-      // 用云端 file_tokens 替换本地 media IDs，持久化到 IndexedDB
-      if (fileTokens.length > 0) {
-        record.媒体附件 = fileTokens;
-        await feishuAPI.updateRecordMedia(record.record_id, fileTokens);
+        const { startUpload } = useUploadStore.getState();
+        startUpload({
+          recordId: record.record_id,
+          tasks: uploadTasks,
+          createdAt: Date.now(),
+          summary: content.trim().slice(0, 30) || '媒体记录',
+        });
       }
 
-      // 上传部分失败时提示
-      if (uploadErrors.length > 0 && mediaItems.length > 0) {
-        setSubmitting(false);
-        alert(`记录已保存，但图片上传失败：${uploadErrors.join('; ')}\n\n请打开浏览器控制台查看详细日志。`);
-      }
-
+      // 3. 立即返回首页，上传在后台继续
       setSubmitting(false);
       setSuccess(true);
       mediaItems.forEach((m) => URL.revokeObjectURL(m.url));
-      setTimeout(() => navigate('/'), 800);
+      setTimeout(() => navigate('/'), 600);
     } catch (e) {
       setSubmitting(false);
       alert(e instanceof Error ? e.message : '保存失败');
@@ -172,7 +154,7 @@ export default function RecordPage() {
             <Check size={40} className="text-white" strokeWidth={2.5} />
           </div>
           <h2 className="text-xl font-outfit font-bold text-ink mb-2">记录成功！</h2>
-          <p className="text-sm text-muted">成长的一刻已被珍藏 ✨</p>
+          <p className="text-sm text-muted">媒体文件将在后台上传 ✨</p>
         </div>
       </div>
     );
@@ -250,26 +232,6 @@ export default function RecordPage() {
             onMediaRemove={handleMediaRemove}
             mediaItems={mediaItems}
           />
-        </div>
-
-        <div className="mb-6">
-          <button
-            type="button"
-            onClick={() => setIsMilestone(!isMilestone)}
-            className={`
-              flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all duration-200
-              ${isMilestone
-                ? 'border-warm-orange bg-warm-light/30 text-warm-orange'
-                : 'border-rule bg-cream-light text-muted'
-              }
-            `}
-          >
-            <span className="text-2xl">{isMilestone ? '⭐' : '☆'}</span>
-            <div className="text-left">
-              <p className="text-sm font-medium">标记为成长里程碑</p>
-              <p className="text-xs opacity-70">如：第一次翻身、第一次叫妈妈</p>
-            </div>
-          </button>
         </div>
 
         <button

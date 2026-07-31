@@ -176,15 +176,7 @@ export default function BabyEditPage() {
           )}
         </button>
 
-        {isOwner && editId && (
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            className="w-full mt-6 py-2.5 rounded-xl border border-red-200 text-red-500 text-sm font-medium flex items-center justify-center gap-2 hover:bg-red-50 active:scale-[0.98] transition-all"
-          >
-            <Trash2 size={16} />
-            删除宝宝
-          </button>
-        )}
+        {/* 删除宝宝按钮已隐藏 */}
 
         {/* 加入已有宝宝 */}
         {!isEdit && (

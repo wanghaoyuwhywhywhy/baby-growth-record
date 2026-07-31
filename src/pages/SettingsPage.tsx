@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { LogOut, User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock } from 'lucide-react';
-import { clearAuthInfo, getAuthAccount, isSuperAdmin } from '@/lib/auth';
-import { cloudLogAccess } from '@/lib/cloud';
+import { User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock } from 'lucide-react';
+import { getAuthAccount, isSuperAdmin } from '@/lib/auth';
 import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, cloudApproveAccount, cloudRejectAccount, type AccountRecord } from '@/lib/cloud';
 
 export default function SettingsPage() {
@@ -26,12 +25,6 @@ export default function SettingsPage() {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [showFormPassword, setShowFormPassword] = useState(false);
   const [formStatus, setFormStatus] = useState('正常');
-
-  function handleLogout() {
-    clearAuthInfo();
-    window.location.reload();
-    cloudLogAccess('logout');
-  }
 
   // 加载账号列表：先从 localStorage 缓存秒开，后台刷新
   async function loadAccounts() {
@@ -178,13 +171,7 @@ export default function SettingsPage() {
               )}
             </div>
           </div>
-          <button
-            onClick={handleLogout}
-            className="w-full mt-4 py-2.5 rounded-xl border border-coral/30 text-coral text-sm font-medium flex items-center justify-center gap-2 hover:bg-coral/5 active:scale-[0.98] transition-all"
-          >
-            <LogOut size={16} />
-            退出登录
-          </button>
+          {/* 登录已隐藏，暂不展示退出登录按钮 */}
         </div>
 
         {/* 账号管理（仅superadmin可见） */}

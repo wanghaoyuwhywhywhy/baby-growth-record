@@ -1,8 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { clearAuthInfo, verifyAuth, type AuthRole, setAuthBabyRelations, setAuthBabyLinkRoles, setAuthBabies } from '@/lib/auth';
-import LoginPage from '@/pages/LoginPage';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
 import TimelinePage from '@/pages/TimelinePage';
@@ -12,6 +10,16 @@ import GrowthPage from '@/pages/GrowthPage';
 import SettingsPage from '@/pages/SettingsPage';
 import VaccinePage from '@/pages/VaccinePage';
 import AIChatPage from '@/pages/AIChatPage';
+
+// 登录已隐藏：默认以 admin 身份进入，确保 localStorage 中存在 admin 角色
+function ensureAdminRole() {
+  if (!localStorage.getItem('auth_role')) {
+    localStorage.setItem('auth_role', 'admin');
+  }
+  if (!localStorage.getItem('auth_account')) {
+    localStorage.setItem('auth_account', 'admin');
+  }
+}
 
 // PWA 自动更新：检测到新版本时自动刷新页面
 function setupAutoUpdate() {
@@ -62,93 +70,31 @@ function checkStaleCache() {
   }
 }
 
-// 路由切换时滚动到顶部 + 验证账号（5分钟节流，避免频繁调用慢API）
-let lastVerifyTime = 0;
-const VERIFY_THROTTLE_MS = 5 * 60 * 1000; // 5分钟
-function ScrollToTop({ onVerifyAccount }: { onVerifyAccount: () => void }) {
+// 路由切换时滚动到顶部
+function ScrollToTop() {
   const { pathname } = useLocation();
   useEffect(() => {
     window.scrollTo(0, 0);
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
-    // 节流：5分钟内不重复验证（verify API 需要数秒，频繁调用会导致页面卡顿）
-    const now = Date.now();
-    if (now - lastVerifyTime > VERIFY_THROTTLE_MS) {
-      lastVerifyTime = now;
-      onVerifyAccount();
-    }
-  }, [pathname, onVerifyAccount]);
+  }, [pathname]);
   return null;
 }
 
-// 从 localStorage 读取初始登录状态（零延迟，不等任何 API）
-function getInitialAuthed(): boolean {
-  const token = localStorage.getItem('auth_token');
-  if (!token) return false;
-  const parts = token.split(':');
-  return parts.length >= 3 && !!parts[1];
-}
-
 export default function App() {
-  const [authed, setAuthed] = useState(getInitialAuthed);
   const initApp = useAppStore((s) => s.initApp);
   const initialized = useAppStore((s) => s.initialized);
 
   useEffect(() => {
+    ensureAdminRole();
     checkStaleCache();
     setupAutoUpdate();
   }, []);
 
-  // 后台静默验证账号（不阻塞页面渲染，仅验证失败时处理登出）
-  const verifyAccount = useCallback(async () => {
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-    try {
-      const result = await verifyAuth();
-      console.log('[verifyAccount] API返回:', result);
-      if (result.ok) {
-        // 更新宝宝关联信息
-        if (result.babies) {
-          const relations: Record<string, string> = {};
-          const linkRoles: Record<string, string> = {};
-          for (const baby of result.babies) {
-            if (baby.record_id && baby.relation) {
-              relations[baby.record_id] = baby.relation;
-            }
-            if (baby.record_id && baby.linkRole) {
-              linkRoles[baby.record_id] = baby.linkRole;
-            }
-          }
-          setAuthBabyRelations(relations);
-          setAuthBabyLinkRoles(linkRoles);
-          setAuthBabies(result.babies);
-        }
-      } else {
-        console.log('[verifyAccount] 验证失败:', result.error, result.code);
-        // 仅在明确的账号状态异常时登出
-        const shouldLogout = ['pending', 'frozen', 'deleted', 'rejected', 'account_not_found', 'password_invalid', 'password_changed'].includes(result.code || '');
-        if (shouldLogout) {
-          clearAuthInfo();
-          setAuthed(false);
-        }
-      }
-    } catch (e) {
-      console.log('[verifyAccount] 请求异常:', e);
-      // 网络错误不处理，保持已登录状态（离线可用）
-    }
-  }, []);
-
-  // 首次加载：验证token有效性
+  // 默认以 admin 身份初始化数据
   useEffect(() => {
-    verifyAccount();
-  }, [verifyAccount]);
-
-  // authed变为true时初始化数据
-  useEffect(() => {
-    if (authed) {
-      initApp();
-    }
-  }, [authed, initApp]);
+    initApp();
+  }, [initApp]);
 
   // initialized 变为 true 时（数据加载完成），滚动到顶部
   useEffect(() => {
@@ -164,27 +110,6 @@ export default function App() {
     }
   }, [initialized]);
 
-  // API 401 时通过自定义事件通知 App 登出
-  useEffect(() => {
-    const handler = () => {
-      clearAuthInfo();
-      setAuthed(false);
-    };
-    window.addEventListener('auth-expired', handler);
-    return () => window.removeEventListener('auth-expired', handler);
-  }, []);
-
-  const handleLoginSuccess = useCallback((role: AuthRole) => {
-    // 清除 hash 确保登录后跳转首页（而非停留在之前的页面如 /settings）
-    window.location.hash = '#/';
-    window.scrollTo(0, 0);
-    setAuthed(true);
-  }, []);
-
-  if (!authed) {
-    return <LoginPage onSuccess={handleLoginSuccess} />;
-  }
-
   if (!initialized) {
     return (
       <div className="page-container flex items-center justify-center">
@@ -198,7 +123,7 @@ export default function App() {
 
   return (
     <Router>
-      <ScrollToTop onVerifyAccount={verifyAccount} />
+      <ScrollToTop />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/record" element={<RecordPage />} />
