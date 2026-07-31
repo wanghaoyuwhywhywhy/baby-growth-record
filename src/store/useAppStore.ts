@@ -42,6 +42,7 @@ interface AppState {
   updateVaccineStatus: (record_id: string, 接种时间: string) => Promise<void>;
   updateVaccineExpectedDate: (record_id: string, 预计接种时间: string) => Promise<void>;
   updateVaccineVaccinateDate: (record_id: string, 接种时间: string) => Promise<void>;
+  deleteVaccine: (record_id: string) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -296,5 +297,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     feishuAPI.updateVaccine(record_id, {
       接种时间,
     });
+  },
+
+  deleteVaccine: async (record_id) => {
+    // 乐观删除：先移除本地，后台同步云端
+    set((state) => ({
+      vaccines: state.vaccines.filter((v) => v.record_id !== record_id),
+    }));
+    await feishuAPI.deleteVaccine(record_id);
   },
 }));

@@ -465,6 +465,23 @@ export async function cloudUpdateVaccine(record_id: string, rawFields: Record<st
   }
 }
 
+export async function cloudDeleteVaccine(record_id: string): Promise<boolean> {
+  try {
+    // 后端 vaccines DELETE 从 body 读取 record_id（与通用 apiDelete 的 query 参数方式不同）
+    const resp = await fetch(`${WORKER_URL}/api/vaccines`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ record_id }),
+    });
+    if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
+    const data = await resp.json();
+    return data.code === 0;
+  } catch (e) {
+    console.warn('云端删除疫苗记录失败:', e);
+    return false;
+  }
+}
+
 // 记录登录/登出日志
 export async function cloudLogAccess(action: 'login' | 'logout'): Promise<void> {
   try {

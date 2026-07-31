@@ -8,17 +8,21 @@ interface CalendarPickerProps {
   title: string;
   maxDate?: string;
   mode?: 'single' | 'range';
+  // 可选：传入后底部显示"删除"按钮，点击后进入二次确认
+  onDelete?: () => void;
 }
 
 function toDateStr(y: number, m: number, d: number): string {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-export default function CalendarPicker({ initialDate, onConfirm, onClose, title, maxDate, mode = 'single' }: CalendarPickerProps) {
+export default function CalendarPicker({ initialDate, onConfirm, onClose, title, maxDate, mode = 'single', onDelete }: CalendarPickerProps) {
   const d0 = new Date(initialDate);
   const [viewYear, setViewYear] = useState(d0.getFullYear());
   const [viewMonth, setViewMonth] = useState(d0.getMonth());
   const today = new Date();
+  // 删除二次确认状态：true 时底部切换为 [取消] [确认删除]
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const [date1, setDate1] = useState<string | null>(null);
   const [date2, setDate2] = useState<string | null>(null);
@@ -238,9 +242,22 @@ export default function CalendarPicker({ initialDate, onConfirm, onClose, title,
                 className="btn-primary py-1.5 px-4 text-xs rounded-btn disabled:opacity-40 disabled:cursor-not-allowed">确认</button>
             </div>
           </div>
+        ) : confirmingDelete ? (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-red-500 font-medium">确认删除该疫苗记录？</span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setConfirmingDelete(false)} className="text-xs text-muted border border-rule rounded-full px-3 py-1.5 hover:bg-cream-dark transition-colors">取消</button>
+              <button onClick={() => { onDelete?.(); }} className="text-xs text-white bg-red-500 rounded-full px-3 py-1.5 hover:bg-red-600 transition-colors">确认删除</button>
+            </div>
+          </div>
         ) : (
-          <div className="flex items-center justify-end gap-2">
-            <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">今天</button>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button onClick={handleToday} className="text-xs text-coral border border-coral rounded-full px-3 py-1.5 hover:bg-coral/5 transition-colors">今天</button>
+              {onDelete && (
+                <button onClick={() => setConfirmingDelete(true)} className="text-xs text-muted border border-rule rounded-full px-3 py-1.5 hover:bg-cream-dark transition-colors">删除</button>
+              )}
+            </div>
             <button onClick={handleConfirm} className="btn-primary py-1.5 px-4 text-xs rounded-btn">确认</button>
           </div>
         )}

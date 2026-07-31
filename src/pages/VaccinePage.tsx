@@ -129,6 +129,7 @@ export default function VaccinePage() {
 
   const baby = currentBaby();
   const canEdit = isEditMode();
+  const deleteVaccine = useAppStore((s) => s.deleteVaccine);
 
   // 日历弹窗状态
   const [calendarTarget, setCalendarTarget] = useState<{ id: string; type: 'vaccinate' | 'vaccinateDate' | 'expected'; currentDate: string } | null>(null);
@@ -204,6 +205,11 @@ export default function VaccinePage() {
   function handleUpdateExpected(recordId: string, date: string) {
     setCalendarTarget(null);
     updateVaccineExpectedDate(recordId, new Date(date).toISOString());
+  }
+
+  async function handleDeleteVaccine(recordId: string) {
+    setCalendarTarget(null);
+    await deleteVaccine(recordId);
   }
 
   async function handleAddVaccine(template: VaccineTemplate) {
@@ -288,6 +294,7 @@ export default function VaccinePage() {
             else handleUpdateExpected(calendarTarget.id, date1);
           }}
           onClose={() => setCalendarTarget(null)}
+          onDelete={canEdit ? () => handleDeleteVaccine(calendarTarget.id) : undefined}
         />
       )}
 

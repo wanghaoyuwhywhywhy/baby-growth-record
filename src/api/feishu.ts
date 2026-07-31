@@ -9,7 +9,7 @@ import {
   cloudGetRecords, cloudCreateRecord, cloudUpdateRecord, cloudDeleteRecord,
   cloudGetGrowth, cloudCreateGrowth, cloudUpdateGrowth, cloudDeleteGrowth,
   cloudHealthCheck, cloudLogAccess,
-  cloudGetVaccines, cloudCreateVaccine, cloudUpdateVaccine,
+  cloudGetVaccines, cloudCreateVaccine, cloudUpdateVaccine, cloudDeleteVaccine,
 } from '@/lib/cloud';
 
 export interface Baby {
@@ -307,5 +307,9 @@ export const feishuAPI = {
 
   async updateVaccine(record_id: string, fields: Record<string, any>): Promise<boolean> {
     return cloudUpdateVaccine(record_id, fields);
+  },
+
+  async deleteVaccine(record_id: string): Promise<boolean> {
+    return cloudDeleteVaccine(record_id);
   },
 };
