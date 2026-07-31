@@ -132,10 +132,6 @@ async function apiGet(path: string): Promise<any> {
   const resp = await fetch(`${WORKER_URL}${path}`, {
     headers: { ...authHeaders() },
   });
-  if (resp.status === 401) {
-    window.dispatchEvent(new Event('auth-expired'));
-    throw new Error('AUTH_EXPIRED');
-  }
   if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
   return resp.json();
 }
@@ -146,10 +142,6 @@ async function apiPost(path: string, fields: Record<string, any>): Promise<any> 
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ fields }),
   });
-  if (resp.status === 401) {
-    window.dispatchEvent(new Event('auth-expired'));
-    throw new Error('AUTH_EXPIRED');
-  }
   if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
   return resp.json();
 }
@@ -160,10 +152,6 @@ async function apiPut(path: string, record_id: string, fields: Record<string, an
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ record_id, fields }),
   });
-  if (resp.status === 401) {
-    window.dispatchEvent(new Event('auth-expired'));
-    throw new Error('AUTH_EXPIRED');
-  }
   if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
   return resp.json();
 }
@@ -173,10 +161,6 @@ async function apiDelete(path: string, record_id: string): Promise<any> {
     method: 'DELETE',
     headers: { ...authHeaders() },
   });
-  if (resp.status === 401) {
-    window.dispatchEvent(new Event('auth-expired'));
-    throw new Error('AUTH_EXPIRED');
-  }
   if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
   return resp.json();
 }
@@ -390,10 +374,6 @@ export async function cloudUploadMedia(recordId: string, file: Blob, fileName: s
     });
     const respText = await resp.text();
     console.log('[上传] Worker 响应:', resp.status, respText.slice(0, 500));
-    if (resp.status === 401) {
-      window.dispatchEvent(new Event('auth-expired'));
-      throw new Error('AUTH_EXPIRED');
-    }
     if (!resp.ok) throw new Error(`上传失败: HTTP ${resp.status}`);
     const data = JSON.parse(respText);
     if (!data.ok) throw new Error(data.error || data.detail || '上传失败');
@@ -863,7 +843,6 @@ export async function cloudDeleteChatSession(sessionId?: string): Promise<boolea
       headers: { ...authHeaders() },
     });
     if (resp.status === 401) {
-      window.dispatchEvent(new Event('auth-expired'));
       throw new Error('AUTH_EXPIRED');
     }
     return resp.ok;
