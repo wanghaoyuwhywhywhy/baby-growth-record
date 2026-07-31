@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
 import { login } from '@/lib/auth';
@@ -17,11 +17,14 @@ const SILENT_ACCOUNT = 'admin';
 const SILENT_PASSWORD = 'admin123';
 
 // 静默登录：用 admin 账号拿 token 存入 localStorage，供需要鉴权的云端接口使用
-async function ensureAdminAuth() {
-  // 已有 token 时不重复登录
-  if (localStorage.getItem('auth_token')) return;
+// 加 3 秒超时兜底，避免网络异常卡死
+async function ensureAdminAuth(): Promise<void> {
   try {
-    const res = await login(SILENT_ACCOUNT, SILENT_PASSWORD);
+    const loginPromise = login(SILENT_ACCOUNT, SILENT_PASSWORD);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('登录超时')), 3000)
+    );
+    const res = await Promise.race([loginPromise, timeoutPromise]);
     if (!res.ok) {
       console.warn('静默登录失败:', res.error);
     }
@@ -93,26 +96,29 @@ function ScrollToTop() {
 export default function App() {
   const initApp = useAppStore((s) => s.initApp);
   const initialized = useAppStore((s) => s.initialized);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     checkStaleCache();
     setupAutoUpdate();
   }, []);
 
-  // 后台静默登录拿 token（不阻塞页面，疫苗/AI 接口需要鉴权）
+  // 先静默登录拿 token（最多等3秒），再初始化数据（疫苗/AI/记录等接口需要鉴权）
   useEffect(() => {
-    ensureAdminAuth();
+    (async () => {
+      await ensureAdminAuth();
+      setAuthReady(true);
+    })();
   }, []);
 
-  // 立即初始化数据（不等待登录）
+  // token 就绪后初始化数据
   useEffect(() => {
-    initApp();
-  }, [initApp]);
+    if (authReady) initApp();
+  }, [authReady, initApp]);
 
   // initialized 变为 true 时（数据加载完成），滚动到顶部
   useEffect(() => {
     if (initialized) {
-      // 延迟确保 DOM 布局完成后再滚动（手机浏览器尤其需要）
       requestAnimationFrame(() => {
         setTimeout(() => {
           window.scrollTo(0, 0);
@@ -128,7 +134,7 @@ export default function App() {
       <div className="page-container flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
-          <p className="text-sm text-muted">加载中...</p>
+          <p className="text-sm text-muted">{authReady ? '加载中...' : '准备中...'}</p>
         </div>
       </div>
     );
