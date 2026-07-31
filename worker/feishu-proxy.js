@@ -3628,6 +3628,19 @@ async function deleteBabyAssociations(babyId, env, operatorAccount) {
 async function ensureAIChatSessionTable(token, env) {
   if (aiSessionTableIdCache) return aiSessionTableIdCache;
 
+  // Cache API 边缘缓存（跨 isolate 共享，避免每次冷启动都列表查询飞书 API）
+  try {
+    const cacheKey = new Request('https://cache.internal/ai-session-table-id');
+    const cached = await caches.default.match(cacheKey);
+    if (cached) {
+      const id = await cached.text();
+      if (id) {
+        aiSessionTableIdCache = id;
+        return id;
+      }
+    }
+  } catch (e) {}
+
   const appToken = env.FEISHU_BASE_TOKEN;
   const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
 
@@ -3671,6 +3684,11 @@ async function ensureAIChatSessionTable(token, env) {
     } catch (e) {
       console.error('[ensureAIChatSessionTable] 补充字段失败:', e.message);
     }
+    try {
+      const cacheKey = new Request('https://cache.internal/ai-session-table-id');
+      const cacheResp = new Response(aiSessionTableIdCache, { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'max-age=600' } });
+      caches.default.put(cacheKey, cacheResp.clone()).catch(() => {});
+    } catch (e) {}
     return aiSessionTableIdCache;
   }
 
@@ -3688,12 +3706,30 @@ async function ensureAIChatSessionTable(token, env) {
   if (!aiSessionTableIdCache) {
     throw new Error('创建AI会话表成功但未获取到 table_id');
   }
+  try {
+    const cacheKey = new Request('https://cache.internal/ai-session-table-id');
+    const cacheResp = new Response(aiSessionTableIdCache, { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'max-age=600' } });
+    caches.default.put(cacheKey, cacheResp.clone()).catch(() => {});
+  } catch (e) {}
   return aiSessionTableIdCache;
 }
 
 // 查找或创建"AI消息"表，返回表 ID
 async function ensureAIChatMessageTable(token, env) {
   if (aiMessageTableIdCache) return aiMessageTableIdCache;
+
+  // Cache API 边缘缓存（跨 isolate 共享，避免每次冷启动都列表查询飞书 API）
+  try {
+    const cacheKey = new Request('https://cache.internal/ai-message-table-id');
+    const cached = await caches.default.match(cacheKey);
+    if (cached) {
+      const id = await cached.text();
+      if (id) {
+        aiMessageTableIdCache = id;
+        return id;
+      }
+    }
+  } catch (e) {}
 
   const appToken = env.FEISHU_BASE_TOKEN;
   const listUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables`;
@@ -3735,6 +3771,11 @@ async function ensureAIChatMessageTable(token, env) {
     } catch (e) {
       console.error('[ensureAIChatMessageTable] 补充字段失败:', e.message);
     }
+    try {
+      const cacheKey = new Request('https://cache.internal/ai-message-table-id');
+      const cacheResp = new Response(aiMessageTableIdCache, { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'max-age=600' } });
+      caches.default.put(cacheKey, cacheResp.clone()).catch(() => {});
+    } catch (e) {}
     return aiMessageTableIdCache;
   }
 
@@ -3751,6 +3792,11 @@ async function ensureAIChatMessageTable(token, env) {
   if (!aiMessageTableIdCache) {
     throw new Error('创建AI消息表成功但未获取到 table_id');
   }
+  try {
+    const cacheKey = new Request('https://cache.internal/ai-message-table-id');
+    const cacheResp = new Response(aiMessageTableIdCache, { headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'max-age=600' } });
+    caches.default.put(cacheKey, cacheResp.clone()).catch(() => {});
+  } catch (e) {}
   return aiMessageTableIdCache;
 }
 
@@ -3760,9 +3806,11 @@ async function ensureAIChatMessageTable(token, env) {
 // DELETE : ?session_id=xxx 物理删除该会话及其所有消息；不传 session_id 则物理删除该账号所有"活跃"会话及其消息
 async function handleAIChatSessions(request, env, token, auth) {
   const appToken = env.FEISHU_BASE_TOKEN;
+  // 性能优化：按需调用 ensure*/accountId，避免 GET 会话列表时不必要的飞书 API 调用
+  // - GET/PUT 只需要会话表（用 accountName 过滤，不需要 accountId）
+  // - POST 需要会话表 + accountId（写入账号ID字段）
+  // - DELETE 需要会话表 + 消息表（清理消息）
   const tableId = await ensureAIChatSessionTable(token, env);
-  const messageTableId = await ensureAIChatMessageTable(token, env);
-  const accountId = await getAuthAccountId(auth, env);
 
   if (request.method === 'GET') {
     const filterStr = `CurrentValue.[账号名]="${auth.accountName}"`;
@@ -3798,6 +3846,7 @@ async function handleAIChatSessions(request, env, token, auth) {
     const fields = body.fields || {};
     // 强制服务端写入账号信息，避免前端伪造
     fields['账号名'] = auth.accountName || '';
+    const accountId = await getAuthAccountId(auth, env);
     if (accountId) fields['账号ID'] = accountId;
     if (!fields['创建时间']) fields['创建时间'] = Date.now();
     if (!fields['最后消息时间']) fields['最后消息时间'] = fields['创建时间'];
@@ -3839,6 +3888,7 @@ async function handleAIChatSessions(request, env, token, auth) {
   if (request.method === 'DELETE') {
     const urlObj = new URL(request.url);
     const sessionId = urlObj.searchParams.get('session_id'); // 业务层的"会话ID"字段，不是 record_id
+    const messageTableId = await ensureAIChatMessageTable(token, env);
 
     // 收集需要删除的会话 record_id 列表
     let toDeleteRecordIds = [];
