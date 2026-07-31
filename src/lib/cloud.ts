@@ -806,6 +806,19 @@ export async function cloudGetActiveChatSession(): Promise<ChatSession | null> {
   }
 }
 
+// 拉取当前账号全部历史会话列表（按最后消息时间倒序）
+export async function cloudGetAllChatSessions(): Promise<ChatSession[]> {
+  try {
+    const data = await apiGet('/api/ai-sessions?all=1');
+    if (data.code !== 0) return [];
+    const items = data.data?.items || [];
+    return items.map(feishuToChatSession);
+  } catch (e) {
+    console.warn('云端拉取AI会话列表失败:', e);
+    return [];
+  }
+}
+
 // 创建新会话
 export async function cloudCreateChatSession(input: {
   babyScope: '全部宝宝' | '指定宝宝';
