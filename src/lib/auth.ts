@@ -63,6 +63,8 @@ export function getAuthAccountId(): string | null {
 
 // 是否为编辑权限（基于当前宝宝的关联角色）
 export function isEditMode(): boolean {
+  // admin/superadmin 默认拥有全部编辑权限
+  if (isAdmin()) return true;
   const linkRoles = getAuthBabyLinkRoles();
   const currentBabyId = localStorage.getItem('current_baby_id');
   if (currentBabyId && linkRoles[currentBabyId]) {
@@ -78,6 +80,8 @@ export function isEditMode(): boolean {
 
 // 是否为当前宝宝的owner
 export function isCurrentBabyOwner(): boolean {
+  // admin/superadmin 默认视为 owner
+  if (isAdmin()) return true;
   const linkRoles = getAuthBabyLinkRoles();
   const currentBabyId = localStorage.getItem('current_baby_id');
   if (currentBabyId && linkRoles[currentBabyId]) {

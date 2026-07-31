@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
+import { login } from '@/lib/auth';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
 import TimelinePage from '@/pages/TimelinePage';
@@ -11,13 +12,21 @@ import SettingsPage from '@/pages/SettingsPage';
 import VaccinePage from '@/pages/VaccinePage';
 import AIChatPage from '@/pages/AIChatPage';
 
-// 登录已隐藏：默认以 admin 身份进入，确保 localStorage 中存在 admin 角色
-function ensureAdminRole() {
-  if (!localStorage.getItem('auth_role')) {
-    localStorage.setItem('auth_role', 'admin');
-  }
-  if (!localStorage.getItem('auth_account')) {
-    localStorage.setItem('auth_account', 'admin');
+// 登录已隐藏：后台静默用 admin 账号登录拿 token，UI 不显示登录页
+const SILENT_ACCOUNT = 'admin';
+const SILENT_PASSWORD = 'admin123';
+
+// 静默登录：用 admin 账号拿 token 存入 localStorage，供需要鉴权的云端接口使用
+async function ensureAdminAuth() {
+  // 已有 token 时不重复登录
+  if (localStorage.getItem('auth_token')) return;
+  try {
+    const res = await login(SILENT_ACCOUNT, SILENT_PASSWORD);
+    if (!res.ok) {
+      console.warn('静默登录失败:', res.error);
+    }
+  } catch (e) {
+    console.warn('静默登录异常:', e);
   }
 }
 
@@ -84,17 +93,25 @@ function ScrollToTop() {
 export default function App() {
   const initApp = useAppStore((s) => s.initApp);
   const initialized = useAppStore((s) => s.initialized);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    ensureAdminRole();
     checkStaleCache();
     setupAutoUpdate();
   }, []);
 
-  // 默认以 admin 身份初始化数据
+  // 先静默登录拿 token，再初始化数据（疫苗/AI 等接口需要鉴权）
   useEffect(() => {
-    initApp();
-  }, [initApp]);
+    (async () => {
+      await ensureAdminAuth();
+      setAuthReady(true);
+    })();
+  }, []);
+
+  // token 就绪后初始化数据
+  useEffect(() => {
+    if (authReady) initApp();
+  }, [authReady, initApp]);
 
   // initialized 变为 true 时（数据加载完成），滚动到顶部
   useEffect(() => {
@@ -115,7 +132,7 @@ export default function App() {
       <div className="page-container flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-3 border-coral/30 border-t-coral rounded-full animate-spin" />
-          <p className="text-sm text-muted">加载中...</p>
+          <p className="text-sm text-muted">{authReady ? '加载中...' : '登录中...'}</p>
         </div>
       </div>
     );
