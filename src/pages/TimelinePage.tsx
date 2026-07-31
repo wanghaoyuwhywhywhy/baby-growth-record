@@ -8,7 +8,7 @@ import { isEditMode } from '@/lib/auth';
 import CalendarPicker from '@/components/CalendarPicker';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
-import { FileText, Mic, Video, Camera, Play, Pause, Pencil, X, Calendar, Clock } from 'lucide-react';
+import { FileText, Mic, Video, Camera, Play, Pause, Pencil, X, Calendar, Clock, Trash2 } from 'lucide-react';
 import { getAuthBabyRelations } from '@/lib/auth';
 
 // 年龄里程碑标识：100天/200天/整月/周岁
@@ -443,7 +443,10 @@ function ScrollColumn({ items, value, onChange }: { items: number[]; value: numb
 // 编辑记录弹窗
 function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onClose: () => void; onSave: () => void }) {
   const updateRecord = useAppStore((s) => s.updateRecord);
+  const deleteRecord = useAppStore((s) => s.deleteRecord);
   const [saving, setSaving] = useState(false);
+  // 删除二次确认状态
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // 初始化为记录时间的本地时间，精确到秒
   const dt = new Date(record.记录时间);
@@ -487,6 +490,18 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
     setSecond(now.getSeconds());
     setViewYear(now.getFullYear());
     setViewMonth(now.getMonth());
+  }
+
+  async function handleDelete() {
+    setSaving(true);
+    try {
+      await deleteRecord(record.record_id);
+      onSave();
+      onClose();
+    } catch (e) {
+      console.error('删除记录失败:', e);
+    }
+    setSaving(false);
   }
 
   // 日历相关计算
@@ -662,28 +677,54 @@ function EditRecordModal({ record, onClose, onSave }: { record: DailyRecord; onC
         </div>
 
         {/* 底部按钮 */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleNow}
-            className="px-4 py-2.5 text-xs font-medium text-coral bg-coral/10 rounded-btn hover:bg-coral/20 active:scale-95 transition-all"
-          >
-            现在
-          </button>
-          <div className="flex-1" />
-          <button
-            onClick={onClose}
-            className="btn-secondary text-sm px-5"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="btn-primary text-sm px-5"
-          >
-            {saving ? '保存中...' : '确定'}
-          </button>
-        </div>
+        {confirmingDelete ? (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-red-500 font-medium flex-1">确认删除该记录？</span>
+            <button
+              onClick={() => setConfirmingDelete(false)}
+              className="btn-secondary text-sm px-4"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={saving}
+              className="text-sm px-4 py-2.5 text-white bg-red-500 rounded-btn hover:bg-red-600 active:scale-95 transition-all"
+            >
+              {saving ? '删除中...' : '确认删除'}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleNow}
+              className="px-4 py-2.5 text-xs font-medium text-coral bg-coral/10 rounded-btn hover:bg-coral/20 active:scale-95 transition-all"
+            >
+              现在
+            </button>
+            <div className="flex-1" />
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              className="w-9 h-9 flex items-center justify-center rounded-btn text-muted hover:text-red-500 hover:bg-red-50 transition-colors"
+              aria-label="删除"
+            >
+              <Trash2 size={16} />
+            </button>
+            <button
+              onClick={onClose}
+              className="btn-secondary text-sm px-5"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="btn-primary text-sm px-5"
+            >
+              {saving ? '保存中...' : '确定'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

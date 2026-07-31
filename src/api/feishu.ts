@@ -175,6 +175,11 @@ export const feishuAPI = {
     return updated;
   },
 
+  async deleteRecord(record_id: string): Promise<void> {
+    await dbDeleteRecord(record_id);
+    cloudDeleteRecord(record_id); // 后台推送到云端
+  },
+
   async createGrowthRecord(record: {
     测量日期: string;
     身高?: number;

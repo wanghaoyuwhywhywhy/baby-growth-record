@@ -28,6 +28,7 @@ interface AppState {
   fetchRecentRecords: () => Promise<DailyRecord[]>;
   createRecord: (data: { 记录内容: string; 分类: string; 是否为里程碑: boolean; 媒体类型?: ('text' | 'voice' | 'video' | 'photo')[]; 媒体附件?: string[]; 语音转文字?: string }) => Promise<DailyRecord>;
   updateRecord: (record_id: string, data: { 记录时间?: string; 分类?: string }) => Promise<DailyRecord | null>;
+  deleteRecord: (record_id: string) => Promise<void>;
   setFilterCategory: (category: string) => void;
 
   fetchGrowthRecords: () => Promise<void>;
@@ -71,29 +72,38 @@ export const useAppStore = create<AppState>((set, get) => ({
     const babies = await feishuAPI.getBabies();
     const { currentBabyId } = get();
     const stillExists = currentBabyId && babies.find((b) => b.record_id === currentBabyId);
+    const initialBabyId = stillExists ? currentBabyId : babies[0]?.record_id ?? null;
     set({
       babies,
-      currentBabyId: stillExists ? currentBabyId : babies[0]?.record_id ?? null,
+      currentBabyId: initialBabyId,
       initialized: true,
     });
-    // 保存当前宝宝ID到localStorage供权限判断
-    const newId = stillExists ? currentBabyId : babies[0]?.record_id ?? null;
-    if (newId) localStorage.setItem('current_baby_id', newId);
+    if (initialBabyId) localStorage.setItem('current_baby_id', initialBabyId);
+
+    // 疫苗数据是独立云端请求，与 syncFromCloud 并行发起，避免串行等待导致疫苗页加载慢
+    if (initialBabyId) {
+      get().fetchVaccines().catch(() => {});
+    }
+
     // 后台同步云端数据（不阻塞页面渲染）
     feishuAPI.syncFromCloud().then(async () => {
       const updatedBabies = await feishuAPI.getBabies();
       const { currentBabyId: cid } = get();
       const exists = cid && updatedBabies.find((b) => b.record_id === cid);
+      const newId = exists ? cid : updatedBabies[0]?.record_id ?? null;
       set({
         babies: updatedBabies,
-        currentBabyId: exists ? cid : updatedBabies[0]?.record_id ?? null,
+        currentBabyId: newId,
       });
-      // 并行刷新所有数据
+      // 记录/成长读本地 IndexedDB（sync 已更新），保证最新数据
       await Promise.all([
         get().fetchRecords(),
         get().fetchGrowthRecords(),
-        get().fetchVaccines(),
       ]);
+      // currentBabyId 变化时才重新拉疫苗（否则前面并行的疫苗请求结果可用）
+      if (newId !== initialBabyId && newId) {
+        await get().fetchVaccines();
+      }
     }).catch(() => {
       // 云端同步失败，不影响本地使用
     });
@@ -177,6 +187,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
     }
     return updated;
+  },
+
+  deleteRecord: async (record_id) => {
+    await feishuAPI.deleteRecord(record_id);
+    set((state) => ({
+      records: state.records.filter((r) => r.record_id !== record_id),
+    }));
   },
 
   setFilterCategory: (category: string) => {
