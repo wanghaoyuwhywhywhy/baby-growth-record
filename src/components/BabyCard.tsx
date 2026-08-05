@@ -24,22 +24,19 @@ export default function BabyCard({ baby }: BabyCardProps) {
 
   return (
     <div className="card-shadow p-4 mb-6 animate-fade-up">
-      <div className="flex items-center justify-between gap-2">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-sm shrink-0">🎂</span>
           <span className="text-sm text-muted truncate">{birthStr}</span>
         </div>
-        <span className="w-1 h-1 rounded-full bg-rule shrink-0" />
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-sm shrink-0">📅</span>
+          <span className="text-sm shrink-0">⏳</span>
           <span className="text-sm text-muted truncate">{age}</span>
         </div>
-        <span className="w-1 h-1 rounded-full bg-rule shrink-0" />
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-sm shrink-0">📏</span>
           <span className="text-sm text-muted truncate">{height != null ? `${height}cm` : '—'}</span>
         </div>
-        <span className="w-1 h-1 rounded-full bg-rule shrink-0" />
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-sm shrink-0">⚖️</span>
           <span className="text-sm text-muted truncate">{weight != null ? `${weight}kg` : '—'}</span>
