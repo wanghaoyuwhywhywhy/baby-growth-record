@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { type DailyRecord, type Baby } from '@/api/feishu';
-import BabyCard from '@/components/BabyCard';
 import RecordItem from '@/components/RecordItem';
 import FloatingButton from '@/components/FloatingButton';
 import UploadProgressPanel from '@/components/UploadProgressPanel';
@@ -9,6 +8,7 @@ import NavHeader from '@/components/NavHeader';
 import { useNavigate } from 'react-router-dom';
 import { Activity, Sparkles, Loader2, X, MessageCircle, Plus, RefreshCw } from 'lucide-react';
 import { analyzeBaby } from '@/lib/ai';
+import { calcAge } from '@/utils/date';
 
 export default function HomePage() {
   const currentBaby = useAppStore((s) => s.currentBaby);
@@ -156,17 +156,38 @@ export default function HomePage() {
 
   return (
     <div className="page-container">
-      <NavHeader title="嘻嘻成长记录" rightAction={
-        <button
-          onClick={handleForceRefresh}
-          disabled={forceRefreshing}
-          className="w-9 h-9 flex items-center justify-center rounded-full text-muted hover:bg-cream-dark transition-colors disabled:opacity-50"
-          aria-label="强制刷新"
-          title="清除缓存并刷新"
-        >
-          <RefreshCw size={18} className={forceRefreshing ? 'animate-spin' : ''} />
-        </button>
-      } />
+      <NavHeader
+        title="嘻嘻成长记录"
+        rightAction={
+          <button
+            onClick={handleForceRefresh}
+            disabled={forceRefreshing}
+            className="w-9 h-9 flex items-center justify-center rounded-full text-muted hover:bg-cream-dark transition-colors disabled:opacity-50"
+            aria-label="强制刷新"
+            title="清除缓存并刷新"
+          >
+            <RefreshCw size={18} className={forceRefreshing ? 'animate-spin' : ''} />
+          </button>
+        }
+        titleAction={
+          baby ? (
+            <span className="flex items-center gap-1.5 text-[11px] text-muted whitespace-nowrap">
+              <span className="flex items-center gap-0.5">
+                <span>🎂</span>
+                <span>{(() => {
+                  const d = new Date(baby.出生日期);
+                  return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
+                })()}</span>
+              </span>
+              <span className="w-0.5 h-0.5 rounded-full bg-rule" />
+              <span className="flex items-center gap-0.5">
+                <span>🌱</span>
+                <span>{calcAge(baby.出生日期)}</span>
+              </span>
+            </span>
+          ) : null
+        }
+      />
 
       <div className="mt-4">
         {/* 多宝宝切换标签 */}
@@ -190,10 +211,6 @@ export default function HomePage() {
             })}
           </div>
         )}
-
-        <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} className="mb-4">
-          {baby && <BabyCard baby={baby} />}
-        </div>
 
         {/* 四个快捷入口并排 */}
         <div className="grid grid-cols-4 gap-2.5 mb-3">
