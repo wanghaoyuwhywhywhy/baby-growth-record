@@ -171,20 +171,19 @@ export default function HomePage() {
         }
         titleAction={
           baby ? (
-            <span className="flex items-center gap-1.5 text-[11px] text-muted whitespace-nowrap">
-              <span className="flex items-center gap-0.5">
+            <div className="flex flex-col gap-0.5 text-[10px] text-muted leading-tight shrink-0">
+              <span className="flex items-center gap-0.5 whitespace-nowrap">
                 <span>🎂</span>
                 <span>{(() => {
                   const d = new Date(baby.出生日期);
                   return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
                 })()}</span>
               </span>
-              <span className="w-0.5 h-0.5 rounded-full bg-rule" />
-              <span className="flex items-center gap-0.5">
+              <span className="flex items-center gap-0.5 whitespace-nowrap">
                 <span>🌱</span>
                 <span>{calcAge(baby.出生日期)}</span>
               </span>
-            </span>
+            </div>
           ) : null
         }
       />

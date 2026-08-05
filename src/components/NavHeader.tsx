@@ -26,7 +26,7 @@ export default function NavHeader({ title, showBack = false, rightAction, titleA
           ) : (
             <span className="text-xl">👶</span>
           )}
-          <h1 className="text-lg font-outfit font-bold text-ink">{title}</h1>
+          <h1 className="text-lg font-outfit font-bold text-ink whitespace-nowrap shrink-0">{title}</h1>
           {titleAction}
         </div>
         <div className="flex items-center gap-2">
