@@ -14,5 +14,29 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // 兜底：主 JS 加载失败时（旧 SW 缓存了旧 HTML，引用的 JS hash 已不存在），
+      // 自动注销 Service Worker + 清除 Cache Storage 并刷新，避免白屏卡死
+      window.addEventListener('error', function (e) {
+        var el = e.target;
+        if (el && el.tagName === 'SCRIPT' && el.src && el.src.indexOf('/assets/') !== -1) {
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (regs) {
+              return Promise.all(regs.map(function (r) { return r.unregister(); }));
+            }).then(function () {
+              if ('caches' in window) {
+                return caches.keys().then(function (keys) {
+                  return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+                });
+              }
+            }).then(function () {
+              window.location.reload();
+            });
+          } else {
+            window.location.reload();
+          }
+        }
+      }, true);
+    </script>
   </body>
 </html>
