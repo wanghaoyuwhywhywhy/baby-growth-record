@@ -26,8 +26,8 @@ export default defineConfig(({ mode }) => ({
       injectRegister: false,
       includeAssets: ['favicon.svg', 'icons/icon-192.png', 'icons/icon-512.png'],
       manifest: {
-        name: '宝宝成长记录',
-        short_name: '成长记录',
+        name: '嘻嘻成长记录',
+        short_name: '嘻嘻成长记录',
         description: '记录宝宝成长的每一个瞬间',
         theme_color: '#FF7B7B',
         background_color: '#FFF8F5',

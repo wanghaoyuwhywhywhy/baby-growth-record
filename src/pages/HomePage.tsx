@@ -127,7 +127,7 @@ export default function HomePage() {
   if (babies.length === 0) {
     return (
       <div className="page-container">
-        <NavHeader title="宝宝成长记录" rightAction={
+        <NavHeader title="嘻嘻成长记录" rightAction={
           <button
             onClick={handleForceRefresh}
             disabled={forceRefreshing}
