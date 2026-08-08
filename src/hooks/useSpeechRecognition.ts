@@ -93,12 +93,21 @@ export function useSpeechRecognition() {
 
     recognition.onerror = (event: Event) => {
       const err = event as unknown as { error?: string };
+      // 'aborted' 是正常停止/暂停触发的，不是真错误，静默处理
+      if (err.error === 'aborted') {
+        setIsListening(false);
+        return;
+      }
+      // 'no-speech' 在 continuous 模式下会周期性出现，静默处理避免打扰用户
       if (err.error === 'no-speech') {
-        setError('没有检测到语音，请重试');
-      } else if (err.error === 'not-allowed') {
+        return;
+      }
+      if (err.error === 'not-allowed') {
         setError('请允许麦克风权限');
       } else if (err.error === 'network') {
-        setError('网络错误，请检查连接');
+        setError('网络错误，语音识别需联网');
+      } else if (err.error === 'audio-capture') {
+        setError('麦克风被占用，语音识别不可用');
       } else {
         setError('语音识别出错: ' + (err.error || '未知错误'));
       }
