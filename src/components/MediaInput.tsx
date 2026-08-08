@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, ImagePlus, Video, X, Mic, Square } from 'lucide-react';
+import { Camera, ImagePlus, Video, X, Mic, Square, Pause, Play } from 'lucide-react';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 
 export interface MediaItem {
@@ -23,6 +23,7 @@ export default function MediaInput({
   mediaItems,
 }: MediaInputProps) {
   const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -43,18 +44,21 @@ export default function MediaInput({
     resetTranscript,
   } = useSpeechRecognition();
 
-  // 录音时长计时
+  // 录音时长计时（暂停时不计时）
   useEffect(() => {
-    if (isRecording) {
+    if (isRecording && !isPaused) {
       timerRef.current = window.setInterval(() => {
         setRecordingDuration(d => d + 1);
       }, 1000);
-    } else {
+    } else if (!isRecording) {
       clearInterval(timerRef.current);
       setRecordingDuration(0);
+    } else {
+      // 暂停状态：停止计时但不清零
+      clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
-  }, [isRecording]);
+  }, [isRecording, isPaused]);
 
   const formatDuration = (s: number) => {
     const m = Math.floor(s / 60);
@@ -116,12 +120,30 @@ export default function MediaInput({
       transcriptRef.current = transcript || interimTranscript || '';
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      setIsPaused(false);
     }
   }
 
   function toggleRecording() {
     if (isRecording) stopRecording();
     else startRecording();
+  }
+
+  // 暂停/继续录音（与语音识别同步）
+  function togglePause() {
+    const mr = mediaRecorderRef.current;
+    if (!mr || !isRecording) return;
+    if (!isPaused) {
+      // 暂停
+      if (mr.state === 'recording') mr.pause();
+      stopListening();
+      setIsPaused(true);
+    } else {
+      // 继续
+      if (mr.state === 'paused') mr.resume();
+      if (speechSupported) startListening();
+      setIsPaused(false);
+    }
   }
 
   // 通用文件选择（自动识别图片/视频）
@@ -178,15 +200,29 @@ export default function MediaInput({
               <span className="relative inline-flex rounded-full h-3 w-3 bg-coral"></span>
             </span>
             <span className="text-sm text-muted">
-              录音中 {formatDuration(recordingDuration)}
+              {isPaused ? '已暂停' : '录音中'} {formatDuration(recordingDuration)}
             </span>
           </div>
-          {liveTranscript && (
+          {liveTranscript && !isPaused && (
             <span className="text-xs text-coral/70 flex-1 truncate">{liveTranscript}</span>
           )}
+          {/* 暂停/继续按钮 */}
+          <button
+            onClick={togglePause}
+            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+              isPaused
+                ? 'bg-green-500 text-white'
+                : 'bg-ink/80 text-white'
+            }`}
+            aria-label={isPaused ? '继续录音' : '暂停录音'}
+          >
+            {isPaused ? <Play size={14} fill="white" /> : <Pause size={14} fill="white" />}
+          </button>
+          {/* 停止按钮 */}
           <button
             onClick={toggleRecording}
             className="w-8 h-8 rounded-full bg-coral text-white flex items-center justify-center"
+            aria-label="停止录音"
           >
             <Square size={14} fill="white" />
           </button>
