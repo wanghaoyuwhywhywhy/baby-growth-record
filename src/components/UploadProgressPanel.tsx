@@ -18,6 +18,7 @@ export default function UploadProgressPanel() {
   const panelOpen = useUploadStore((s) => s.panelOpen);
   const setPanelOpen = useUploadStore((s) => s.setPanelOpen);
   const removeGroup = useUploadStore((s) => s.removeGroup);
+  const clearAll = useUploadStore((s) => s.clearAll);
 
   const hasActiveUploads = groups.some((g) =>
     g.tasks.some((t) => t.status === 'pending' || t.status === 'uploading')
@@ -36,6 +37,9 @@ export default function UploadProgressPanel() {
     (sum, g) => sum + g.tasks.filter((t) => t.status === 'error').length,
     0
   );
+
+  // 是否全部完成（无活跃任务）—— 用于显示关闭按钮
+  const allDone = !hasActiveUploads;
 
   return (
     <div className="fixed bottom-20 left-4 right-4 z-50 max-w-lg mx-auto">
@@ -65,7 +69,20 @@ export default function UploadProgressPanel() {
                 ? `${doneTasks}个完成，${errorTasks}个失败`
                 : `全部上传完成 (${totalTasks})`}
           </span>
-          <ChevronUp size={16} className="flex-shrink-0 opacity-60" />
+          {allDone ? (
+            /* 全部完成时：显示关闭按钮，点击清空列表 */
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); clearAll(); }}
+              className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full hover:bg-black/10 transition-colors"
+              aria-label="关闭"
+            >
+              <X size={16} className="opacity-70" />
+            </span>
+          ) : (
+            <ChevronUp size={16} className="flex-shrink-0 opacity-60" />
+          )}
         </button>
       )}
 
@@ -83,12 +100,22 @@ export default function UploadProgressPanel() {
                 </span>
               )}
             </div>
-            <button
-              onClick={() => setPanelOpen(false)}
-              className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors"
-            >
-              <X size={16} className="text-muted" />
-            </button>
+            <div className="flex items-center gap-1">
+              {allDone && (
+                <button
+                  onClick={() => clearAll()}
+                  className="text-xs text-muted/60 hover:text-coral transition-colors px-2 py-1"
+                >
+                  全部清空
+                </button>
+              )}
+              <button
+                onClick={() => setPanelOpen(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-cream-dark transition-colors"
+              >
+                <X size={16} className="text-muted" />
+              </button>
+            </div>
           </div>
 
           {/* 任务列表 */}

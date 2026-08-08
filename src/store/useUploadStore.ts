@@ -30,6 +30,7 @@ interface UploadState {
   addGroup: (group: UploadGroup) => void;
   updateTask: (recordId: string, mediaId: string, updates: Partial<UploadTask>) => void;
   removeGroup: (recordId: string) => void;
+  clearAll: () => void;
   setPanelOpen: (open: boolean) => void;
   startUpload: (group: UploadGroup) => void;
   hasActiveUploads: () => boolean;
@@ -56,6 +57,12 @@ export const useUploadStore = create<UploadState>((set, get) => ({
 
   removeGroup: (recordId) => {
     set((state) => ({ groups: state.groups.filter((g) => g.recordId !== recordId) }));
+  },
+
+  // 清空所有已完成的分组（仅当无活跃上传任务时使用）
+  clearAll: () => {
+    if (get().hasActiveUploads()) return;
+    set({ groups: [], panelOpen: false });
   },
 
   setPanelOpen: (open) => set({ panelOpen: open }),
