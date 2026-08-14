@@ -146,17 +146,39 @@ export default function MediaInput({
     }
   }
 
+  // 视频大小上限 80MB：超过后 Cloudflare Workers 100MB 请求体限制 + multipart 包装 + 网络波动会极易失败
+  const MAX_VIDEO_SIZE = 80 * 1024 * 1024;
+  const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
+
   // 通用文件选择（自动识别图片/视频）
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files) return;
+    const skipped: string[] = [];
     Array.from(files).forEach((file) => {
       const isVideo = file.type.startsWith('video/');
+      // 大小检查：超过上限直接拒绝并提示，避免上传失败导致记录看不到视频
+      if (isVideo && file.size > MAX_VIDEO_SIZE) {
+        const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+        skipped.push(`视频 ${file.name || '未命名'}（${sizeMB}MB）`);
+        return;
+      }
+      if (!isVideo && file.size > MAX_IMAGE_SIZE) {
+        const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+        skipped.push(`图片 ${file.name || '未命名'}（${sizeMB}MB）`);
+        return;
+      }
       const id = `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const url = URL.createObjectURL(file);
       onMediaAdd({ id, type: isVideo ? 'video' : 'image', blob: file, url });
     });
     e.target.value = '';
+    if (skipped.length > 0) {
+      alert(
+        `以下文件超过大小限制已跳过：\n${skipped.join('\n')}\n\n` +
+        `视频建议 ≤ 80MB，可用手机自带"文件管理"或第三方 App 压缩后再上传。`
+      );
+    }
   }
 
   // 实时显示的转写文字

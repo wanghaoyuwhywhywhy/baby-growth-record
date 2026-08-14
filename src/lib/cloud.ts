@@ -126,41 +126,51 @@ function toTimestamp(dateStr: string): number {
   return new Date(dateStr).getTime();
 }
 
+// 给 fetch 加超时：避免后端卡住时前端一直转圈无响应（默认 30s）
+const DEFAULT_TIMEOUT_MS = 30000;
+
+function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 // API 调用
 
-async function apiGet(path: string): Promise<any> {
-  const resp = await fetch(`${WORKER_URL}${path}`, {
+async function apiGet(path: string, timeoutMs?: number): Promise<any> {
+  const resp = await fetchWithTimeout(`${WORKER_URL}${path}`, {
     headers: { ...authHeaders() },
-  });
+  }, timeoutMs);
   if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
   return resp.json();
 }
 
-async function apiPost(path: string, fields: Record<string, any>): Promise<any> {
-  const resp = await fetch(`${WORKER_URL}${path}`, {
+async function apiPost(path: string, fields: Record<string, any>, timeoutMs?: number): Promise<any> {
+  const resp = await fetchWithTimeout(`${WORKER_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ fields }),
-  });
+  }, timeoutMs);
   if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
   return resp.json();
 }
 
-async function apiPut(path: string, record_id: string, fields: Record<string, any>): Promise<any> {
-  const resp = await fetch(`${WORKER_URL}${path}`, {
+async function apiPut(path: string, record_id: string, fields: Record<string, any>, timeoutMs?: number): Promise<any> {
+  const resp = await fetchWithTimeout(`${WORKER_URL}${path}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ record_id, fields }),
-  });
+  }, timeoutMs);
   if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
   return resp.json();
 }
 
-async function apiDelete(path: string, record_id: string): Promise<any> {
-  const resp = await fetch(`${WORKER_URL}${path}?record_id=${encodeURIComponent(record_id)}`, {
+async function apiDelete(path: string, record_id: string, timeoutMs?: number): Promise<any> {
+  const resp = await fetchWithTimeout(`${WORKER_URL}${path}?record_id=${encodeURIComponent(record_id)}`, {
     method: 'DELETE',
     headers: { ...authHeaders() },
-  });
+  }, timeoutMs);
   if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
   return resp.json();
 }
@@ -231,6 +241,13 @@ export async function cloudCreateRecord(record: DailyRecord): Promise<string | n
     return recordId || null;
   } catch (e) {
     console.error('[cloudCreateRecord] 异常:', e);
+    // AbortError 是 fetchWithTimeout 超时触发；让上层知道具体原因
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error('请求超时（30秒），请检查网络后重试');
+    }
+    if (e instanceof TypeError) {
+      throw new Error(`网络错误：${e.message}，请检查网络后重试`);
+    }
     return null;
   }
 }
@@ -366,7 +383,8 @@ export async function cloudUploadMedia(recordId: string, file: Blob, fileName: s
     formData.append('file', file, fileName);
     formData.append('record_id', recordId);
 
-    console.log('[上传] 开始上传, recordId:', recordId, 'fileName:', fileName, 'fileSize:', file.size, 'fileType:', file.type);
+    const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+    console.log('[上传] 开始上传, recordId:', recordId, 'fileName:', fileName, 'fileSize:', sizeMB + 'MB', 'fileType:', file.type);
     const resp = await fetch(`${WORKER_URL}/api/upload`, {
       method: 'POST',
       headers: { ...authHeaders() },
@@ -374,7 +392,13 @@ export async function cloudUploadMedia(recordId: string, file: Blob, fileName: s
     });
     const respText = await resp.text();
     console.log('[上传] Worker 响应:', resp.status, respText.slice(0, 500));
-    if (!resp.ok) throw new Error(`上传失败: HTTP ${resp.status}`);
+    if (!resp.ok) {
+      // 413 = 超过 Cloudflare Workers 100MB 请求体限制
+      if (resp.status === 413) {
+        throw new Error(`文件过大（${sizeMB}MB），超过 100MB 上限，请先用手机压缩`);
+      }
+      throw new Error(`上传失败: HTTP ${resp.status}`);
+    }
     const data = JSON.parse(respText);
     if (!data.ok) throw new Error(data.error || data.detail || '上传失败');
     if (!data.file_token) throw new Error('上传成功但未获取到 file_token');
@@ -382,6 +406,13 @@ export async function cloudUploadMedia(recordId: string, file: Blob, fileName: s
     return data.file_token;
   } catch (e) {
     console.error('[上传] 云端上传媒体失败:', e);
+    // 浏览器原生 fetch 抛出的"Load failed"/"Failed to fetch"通常是网络层中断或请求体过大被网关截断
+    if (e instanceof TypeError) {
+      const hint = file.size > 80 * 1024 * 1024
+        ? `（文件 ${(file.size / 1024 / 1024).toFixed(1)}MB 可能过大，建议压缩到 80MB 以内）`
+        : '（网络中断，请检查 WiFi/移动数据后重试）';
+      throw new Error(`网络错误 ${e.message}${hint}`);
+    }
     throw e; // 向上抛出，让调用方处理
   }
 }

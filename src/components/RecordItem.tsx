@@ -58,47 +58,60 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
-    const attachments = record.媒体附件;
-    if (!attachments || attachments.length === 0) {
+    const attachments = record.媒体附件 || [];
+
+    let revoked = false;
+    let urls: string[] = [];
+    const cleanup = () => {
+      revoked = true;
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+
+    async function loadAll() {
+      const cloudTokens = attachments.filter(isCloudToken);
+      const cloudMedia: MediaInfo[] = [];
+
+      if (cloudTokens.length > 0) {
+        const mediaTypes = record.媒体类型 || ['text'];
+        const assigned = assignTokenTypes(cloudTokens, mediaTypes);
+        for (const m of assigned) {
+          cloudMedia.push({
+            ...m,
+            url: getCloudAssetUrl(record.record_id, m.id, m.type === 'image' ? 'photo' : m.type),
+          });
+        }
+      }
+
+      // 始终尝试本地兜底：上传失败时云端附件为空，但本地 IndexedDB 仍有 blob
+      // （重要：即使 attachments 为空也要尝试，避免"刷新后视频消失"）
+      const localItems = await feishuAPI.getMediaByRecord(record.record_id);
+      if (revoked) {
+        cleanup();
+        return;
+      }
+      // 同一 type 只显示一个（优先云端；云端缺啥就用本地补）
+      const typeToMedia = new Map<string, MediaInfo>();
+      for (const m of cloudMedia) typeToMedia.set(m.type, m);
+      for (const item of localItems) {
+        if (!typeToMedia.has(item.type)) {
+          const url = URL.createObjectURL(item.blob);
+          urls.push(url);
+          typeToMedia.set(item.type, { id: item.id, type: item.type, url });
+        }
+      }
+
+      setMediaList(Array.from(typeToMedia.values()));
+    }
+
+    // 没有任何附件也没媒体类型，纯文本记录 —— 直接清空
+    const hasMediaType = (record.媒体类型 || []).some(t => t === 'voice' || t === 'video' || t === 'photo');
+    if (attachments.length === 0 && !hasMediaType) {
       setMediaList([]);
       return;
     }
 
-    const cloudTokens = attachments.filter(isCloudToken);
-
-    if (cloudTokens.length > 0) {
-      const mediaTypes = record.媒体类型 || ['text'];
-      const assigned = assignTokenTypes(cloudTokens, mediaTypes);
-      // 生成带 type 参数的 URL
-      const media = assigned.map(m => ({
-        ...m,
-        url: getCloudAssetUrl(record.record_id, m.id, m.type === 'image' ? 'photo' : m.type),
-      }));
-      setMediaList(media);
-      return;
-    }
-
-    // 本地 fallback
-    let revoked = false;
-    let urls: string[] = [];
-    async function loadMedia() {
-      const items = await feishuAPI.getMediaByRecord(record.record_id);
-      if (revoked) {
-        urls.forEach((u) => URL.revokeObjectURL(u));
-        return;
-      }
-      const media = items.map((item) => {
-        const url = URL.createObjectURL(item.blob);
-        urls.push(url);
-        return { id: item.id, type: item.type, url };
-      });
-      setMediaList(media);
-    }
-    loadMedia();
-    return () => {
-      revoked = true;
-      urls.forEach((u) => URL.revokeObjectURL(u));
-    };
+    loadAll();
+    return cleanup;
   }, [record.record_id, record.媒体附件, record.媒体类型]);
 
   const voiceItems = mediaList.filter(m => m.type === 'voice');

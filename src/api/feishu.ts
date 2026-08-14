@@ -259,9 +259,29 @@ export const feishuAPI = {
     // 本地优先：不再清空 IndexedDB，改为按 record_id 增量 upsert。
     // 云端返回的同类数据会覆盖本地同 id 记录；本地独有（如离线新增尚未上传）的数据保留，
     // 因此首屏始终能立即读到上次已同步的本地数据，无需等待本次云端拉取完成。
+    //
+    // 关键：合并记录时保留本地"媒体附件"中的本地 ID（media_xxx 等前缀）。
+    // 场景：用户上传视频到云端失败 → 云端"附件"为空，但本地 IndexedDB 中 blob 还在。
+    // 如果直接用云端空附件覆盖本地，前端就再也看不到这个视频了。
+    // RecordItem 会优先用云端 token，本地 blob 兜底（同一 type 只展示一个）。
+    const isLocalMediaId = (id: string) => typeof id === 'string' && (
+      id.startsWith('media_') || id.startsWith('img_') || id.startsWith('vid_') || id.startsWith('voice_')
+    );
+    const localRecordsBeforeSync = await dbGetRecords();
+    const localRecordById = new Map(localRecordsBeforeSync.map(r => [r.record_id, r]));
+
+    const mergedCloudRecords = cloudRecords.map((cr) => {
+      const local = localRecordById.get(cr.record_id);
+      if (!local) return cr;
+      const localMediaIds = (local.媒体附件 || []).filter(isLocalMediaId);
+      if (localMediaIds.length === 0) return cr;
+      const cloudMediaIds = cr.媒体附件 || [];
+      return { ...cr, 媒体附件: [...cloudMediaIds, ...localMediaIds] };
+    });
+
     const [babiesSynced, recordsSynced, growthSynced] = await Promise.all([
       Promise.all(cloudBabies.map(b => dbAddBaby(b))).then(() => cloudBabies.length),
-      Promise.all(cloudRecords.map(r => dbAddRecord(r))).then(() => cloudRecords.length),
+      Promise.all(mergedCloudRecords.map(r => dbAddRecord(r))).then(() => mergedCloudRecords.length),
       Promise.all(cloudGrowth.map(g => dbAddGrowthRecord(g))).then(() => cloudGrowth.length),
     ]);
 
