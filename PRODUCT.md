@@ -6,6 +6,12 @@
 
 ## 版本记录
 
+### v2.12 (2026-08-19)
+**首页多图显示修复 + 全链路操作日志：**
+1. RecordItem 媒体合并逻辑用 `Map<type, MediaInfo>` 按 type 去重，导致多张照片（同 type=image）互相覆盖只剩 1 张；改为云端媒体全部展示、本地仅补充云端缺失的媒体类型
+2. Worker 新增 `logOp` 统一操作日志，覆盖请求入口 + 上传全链路（start/drive.ok/drive.fail/drive.notoken/record.update.fail/done）+ 记录创建/更新 + 媒体下载（asset.start/proxy.done/voice.done/各 fail），排查上传偶发失败
+3. 通过 `wrangler tail` 或 Cloudflare Workers 实时日志可查看 `[op]` 前缀日志
+
 ### v2.11 (2026-08-19)
 **日常记录新增「随拍」分类：**
 1. 前端 constants.ts CATEGORIES 新增「随拍」(📷 / #2DD4BF)，分类选择、筛选、展示、AI 自动分类同步生效
