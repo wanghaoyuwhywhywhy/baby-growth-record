@@ -13,6 +13,7 @@ export const CATEGORIES: Category[] = [
   { key: '学习', label: '学习', emoji: '📖', color: '#60A5FA' },
   { key: '玩耍', label: '玩耍', emoji: '🎮', color: '#F472B6' },
   { key: '健康', label: '健康', emoji: '❤️', color: '#FF7B7B' },
+  { key: '随拍', label: '随拍', emoji: '📷', color: '#2DD4BF' },
   { key: '其他', label: '其他', emoji: '✨', color: '#8B7D7A' },
 ];
 

@@ -3,6 +3,9 @@
  */
 const FEISHU_API = 'https://open.feishu.cn/open-apis';
 
+// 记录表「分类」单选字段所需选项（与前端 src/utils/constants.ts 保持一致）
+const RECORD_CATEGORIES = ['饮食', '睡眠', '语言', '运动', '学习', '玩耍', '健康', '随拍', '其他'];
+
 // 统一解析飞书文本字段（飞书可能返回字符串或富文本数组 [{text:'xxx',type:'text'}]）
 function getText(field) {
   if (!field) return '';
@@ -1939,6 +1942,39 @@ async function ensureRecordFields(token, env) {
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ field_name: '上传时间', type: 5 }),
     });
+  }
+
+  // 维护「分类」单选字段选项（type 3 = 单选）
+  const categoryField = fields.find(f => f.field_name === '分类');
+  if (!categoryField) {
+    await fetch(fieldsUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        field_name: '分类',
+        type: 3,
+        property: { options: RECORD_CATEGORIES.map(name => ({ name })) },
+      }),
+    });
+  } else if (categoryField.type === 3) {
+    // 仅在已是单选字段时合并选项，只新增缺失项，避免删除正在使用的选项
+    const existingOptions = (categoryField.property?.options || []).map(o => o.name);
+    const missing = RECORD_CATEGORIES.filter(name => !existingOptions.includes(name));
+    if (missing.length > 0) {
+      const mergedOptions = [
+        ...(categoryField.property?.options || []),
+        ...missing.map(name => ({ name })),
+      ];
+      await fetch(`${fieldsUrl}/${categoryField.field_id}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          field_name: '分类',
+          type: 3,
+          property: { options: mergedOptions },
+        }),
+      });
+    }
   }
 }
 
