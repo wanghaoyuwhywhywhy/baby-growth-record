@@ -6,6 +6,18 @@ const FEISHU_API = 'https://open.feishu.cn/open-apis';
 // 记录表「分类」单选字段所需选项（与前端 src/utils/constants.ts 保持一致）
 const RECORD_CATEGORIES = ['饮食', '睡眠', '语言', '运动', '学习', '玩耍', '健康', '随拍', '其他'];
 
+// 统一操作日志（Cloudflare Workers 实时日志 / wrangler tail 可见）
+function logOp(action, data = {}) {
+  const ts = new Date().toISOString();
+  const parts = Object.entries(data)
+    .map(([k, v]) => {
+      const val = typeof v === 'string' ? v : JSON.stringify(v);
+      return `${k}=${val}`;
+    })
+    .join(' ');
+  console.log(`[op] ${ts} ${action}${parts ? ' ' + parts : ''}`);
+}
+
 // 统一解析飞书文本字段（飞书可能返回字符串或富文本数组 [{text:'xxx',type:'text'}]）
 function getText(field) {
   if (!field) return '';
@@ -1257,6 +1269,7 @@ export default {
 
     const url = new URL(request.url);
     const path = url.pathname;
+    logOp('req', { method: request.method, path, query: url.search || '' });
 
     try {
       // 认证接口（不需要 token）
@@ -1832,6 +1845,7 @@ async function handleRecords(request, env, token, auth) {
     if (linkedBabyIds.length > 0) {
       const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
       if (!canWrite) {
+        logOp('record.create.denied', { account: auth.accountName, babyId: linkedBabyIds[0] });
         return { error: '只有owner或editor才能添加记录', code: 403 };
       }
     }
@@ -1840,7 +1854,9 @@ async function handleRecords(request, env, token, auth) {
     body.fields['创建时间'] = Date.now();
     body.fields['修改人账号'] = auth.accountName;
     body.fields['修改时间'] = Date.now();
+    logOp('record.create.start', { account: auth.accountName, category: body.fields['分类'] || '', mediaTypes: body.fields['媒体类型'] || [], attachmentCount: (body.fields['媒体附件'] || []).length });
     const result = await bitableRequest(env, token, 'POST', tableId, { fields: body.fields });
+    logOp('record.create.done', { account: auth.accountName, code: result.code, recordId: result.data?.record?.record_id || '' });
     return result;
   }
   if (request.method === 'PUT') {
@@ -1856,6 +1872,7 @@ async function handleRecords(request, env, token, auth) {
       if (linkedBabyIds.length > 0) {
         const canWrite = await canWriteBaby(_accountId, auth.accountName, linkedBabyIds[0], env);
         if (!canWrite) {
+          logOp('record.update.denied', { account: auth.accountName, recordId });
           return { error: '只有owner或editor才能编辑记录', code: 403 };
         }
       }
@@ -1863,6 +1880,7 @@ async function handleRecords(request, env, token, auth) {
     // 审计字段
     body.fields['修改人账号'] = auth.accountName;
     body.fields['修改时间'] = Date.now();
+    logOp('record.update', { account: auth.accountName, recordId, fields: Object.keys(body.fields || {}) });
     return await bitableRequest(env, token, 'PUT', tableId, { fields: body.fields }, recordId);
   }
   if (request.method === 'DELETE') {
@@ -3445,7 +3463,10 @@ async function handleUpload(request, env, token) {
   const file = formData.get('file');
   const recordId = formData.get('record_id');
 
-  if (!file || !recordId) return { error: 'file and record_id are required' };
+  if (!file || !recordId) {
+    logOp('upload.reject', { reason: 'missing file or record_id', recordId: String(recordId || '') });
+    return { error: 'file and record_id are required' };
+  }
 
   await ensureRecordFields(token, env);
 
@@ -3455,6 +3476,8 @@ async function handleUpload(request, env, token) {
   const fileSize = file.size || 0;
   const isImage = (file.type || '').startsWith('image/');
   const parentType = isImage ? 'bitable_image' : 'bitable_file';
+
+  logOp('upload.start', { recordId, fileName, fileSize, fileType: file.type || '', isImage });
 
   const driveForm = new FormData();
   driveForm.append('file_name', fileName);
@@ -3472,13 +3495,16 @@ async function handleUpload(request, env, token) {
 
   const uploadData = await uploadResp.json();
   if (uploadData.code !== 0) {
+    logOp('upload.drive.fail', { recordId, fileName, code: uploadData.code, msg: uploadData.msg, httpStatus: uploadResp.status });
     return { error: `Drive上传失败: ${uploadData.msg || '未知'}`, code: uploadData.code };
   }
 
   const fileToken = uploadData.data?.file_token;
   if (!fileToken) {
+    logOp('upload.drive.notoken', { recordId, fileName, respKeys: Object.keys(uploadData.data || {}) });
     return { error: '上传成功但未获取到 file_token' };
   }
+  logOp('upload.drive.ok', { recordId, fileName, fileToken });
 
   const recordUrl = `${FEISHU_API}/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`;
   const recordResp = await fetch(recordUrl, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -3502,9 +3528,11 @@ async function handleUpload(request, env, token) {
 
   const updateData = await updateResp.json();
   if (updateData.code !== 0) {
+    logOp('upload.record.update.fail', { recordId, fileToken, existingCount: existingTokens.length, code: updateData.code, msg: updateData.msg });
     return { ok: true, file_token: fileToken, warning: `附件已上传但写入记录失败: ${updateData.msg}` };
   }
 
+  logOp('upload.done', { recordId, fileToken, attachmentCount: allAttachments.length });
   return { ok: true, file_token: fileToken };
 }
 
@@ -3519,6 +3547,7 @@ async function handleAsset(request, env, token) {
     });
   }
 
+  logOp('asset.start', { fileToken, mediaType });
   try {
     // 使用 batch_get_tmp_download_url 获取临时下载链接
     const tmpUrl = `${FEISHU_API}/drive/v1/medias/batch_get_tmp_download_url?file_tokens=${encodeURIComponent(fileToken)}`;
@@ -3526,7 +3555,7 @@ async function handleAsset(request, env, token) {
     const tmpData = await tmpResp.json();
 
     if (tmpData.code !== 0 || !tmpData.data?.tmp_download_urls?.[0]?.tmp_download_url) {
-      console.error('[handleAsset] 获取临时链接失败:', JSON.stringify(tmpData));
+      logOp('asset.tmp_url.fail', { fileToken, mediaType, code: tmpData.code, msg: tmpData.msg });
       return new Response(JSON.stringify({ error: '获取文件下载链接失败' }), {
         status: 502,
         headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
@@ -3540,6 +3569,7 @@ async function handleAsset(request, env, token) {
     if (mediaType === 'voice') {
       const fileResp = await fetch(downloadUrl);
       if (!fileResp.ok) {
+        logOp('asset.voice.fail', { fileToken, httpStatus: fileResp.status });
         return new Response(JSON.stringify({ error: '语音文件下载失败' }), {
           status: 502,
           headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
@@ -3561,6 +3591,7 @@ async function handleAsset(request, env, token) {
         contentType = feishuContentType.replace(/^video\//, 'audio/');
       }
 
+      logOp('asset.voice.done', { fileToken, bytes: body.byteLength, contentType });
       return new Response(body, {
         headers: {
           'Content-Type': contentType,
@@ -3577,6 +3608,7 @@ async function handleAsset(request, env, token) {
     if (range) proxyHeaders['Range'] = range; // 转发 Range 以支持视频拖动进度
     const fileResp = await fetch(downloadUrl, { headers: proxyHeaders });
     if (!fileResp.ok && fileResp.status !== 206) {
+      logOp('asset.proxy.fail', { fileToken, mediaType, httpStatus: fileResp.status });
       return new Response(JSON.stringify({ error: '文件下载失败' }), {
         status: 502,
         headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },
@@ -3592,12 +3624,13 @@ async function handleAsset(request, env, token) {
     if (contentRange) outHeaders['Content-Range'] = contentRange;
     const contentLength = fileResp.headers.get('Content-Length');
     if (contentLength) outHeaders['Content-Length'] = contentLength;
+    logOp('asset.proxy.done', { fileToken, mediaType, httpStatus: fileResp.status, contentLength: contentLength || '' });
     return new Response(fileResp.body, {
       status: fileResp.status,
       headers: outHeaders,
     });
   } catch (e) {
-    console.error('[handleAsset] 异常:', e.message);
+    logOp('asset.error', { fileToken, mediaType, err: e.message });
     return new Response(JSON.stringify({ error: '文件下载异常' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json', ...getCORSHeaders(request) },

@@ -89,18 +89,18 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
         cleanup();
         return;
       }
-      // 同一 type 只显示一个（优先云端；云端缺啥就用本地补）
-      const typeToMedia = new Map<string, MediaInfo>();
-      for (const m of cloudMedia) typeToMedia.set(m.type, m);
+      // 云端媒体全部展示（支持多张照片）；本地仅补充云端缺失的媒体类型
+      const cloudTypes = new Set(cloudMedia.map(m => m.type));
+      const merged: MediaInfo[] = [...cloudMedia];
       for (const item of localItems) {
-        if (!typeToMedia.has(item.type)) {
+        if (!cloudTypes.has(item.type)) {
           const url = URL.createObjectURL(item.blob);
           urls.push(url);
-          typeToMedia.set(item.type, { id: item.id, type: item.type, url });
+          merged.push({ id: item.id, type: item.type, url });
         }
       }
 
-      setMediaList(Array.from(typeToMedia.values()));
+      setMediaList(merged);
     }
 
     // 没有任何附件也没媒体类型，纯文本记录 —— 直接清空
