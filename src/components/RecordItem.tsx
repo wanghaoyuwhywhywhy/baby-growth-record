@@ -55,7 +55,8 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
   const emoji = category?.emoji ?? '📝';
   const color = category?.color ?? '#8B7D7A';
   const [mediaList, setMediaList] = useState<MediaInfo[]>([]);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(-1);
+  const touchStartX = useRef<number | null>(null);
 
   useEffect(() => {
     const attachments = record.媒体附件 || [];
@@ -118,6 +119,18 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
   const imageItems = mediaList.filter(m => m.type === 'image');
   const videoItems = mediaList.filter(m => m.type === 'video');
 
+  // 全屏预览：键盘左右切换 / Esc 关闭
+  useEffect(() => {
+    if (previewIndex < 0) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setPreviewIndex(-1);
+      else if (e.key === 'ArrowLeft' && previewIndex > 0) setPreviewIndex(previewIndex - 1);
+      else if (e.key === 'ArrowRight' && previewIndex < imageItems.length - 1) setPreviewIndex(previewIndex + 1);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewIndex, imageItems.length]);
+
   return (
     <div className="flex items-start gap-3 py-3 group">
       <div
@@ -150,13 +163,13 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
         {/* 图片 */}
         {imageItems.length > 0 && (
           <div className="flex gap-2 mt-2 overflow-x-auto">
-            {imageItems.map((media) => (
+            {imageItems.map((media, index) => (
               <img
                 key={media.id}
                 src={media.url}
                 alt=""
                 className={`rounded-lg object-cover border border-rule cursor-pointer ${compact ? 'w-16 h-16' : 'w-20 h-20'}`}
-                onClick={() => setPreviewImage(media.url)}
+                onClick={() => setPreviewIndex(index)}
               />
             ))}
           </div>
@@ -176,13 +189,42 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
         )}
       </div>
 
-      {/* 图片全屏预览 */}
-      {previewImage && (
+      {/* 图片全屏预览（支持左右滑动切换） */}
+      {previewIndex >= 0 && previewIndex < imageItems.length && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-          onClick={() => setPreviewImage(null)}
+          onClick={() => setPreviewIndex(-1)}
+          onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+          onTouchEnd={(e) => {
+            const dx = e.changedTouches[0].clientX - (touchStartX.current ?? 0);
+            if (dx > 40 && previewIndex > 0) setPreviewIndex(previewIndex - 1);
+            else if (dx < -40 && previewIndex < imageItems.length - 1) setPreviewIndex(previewIndex + 1);
+            touchStartX.current = null;
+          }}
         >
-          <img src={previewImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
+          {previewIndex > 0 && (
+            <button
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/20 text-white text-xl flex items-center justify-center"
+              onClick={(e) => { e.stopPropagation(); setPreviewIndex(previewIndex - 1); }}
+            >‹</button>
+          )}
+          <img
+            src={imageItems[previewIndex].url}
+            alt=""
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+          {previewIndex < imageItems.length - 1 && (
+            <button
+              className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/20 text-white text-xl flex items-center justify-center"
+              onClick={(e) => { e.stopPropagation(); setPreviewIndex(previewIndex + 1); }}
+            >›</button>
+          )}
+          {imageItems.length > 1 && (
+            <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-xs">
+              {previewIndex + 1} / {imageItems.length}
+            </span>
+          )}
         </div>
       )}
     </div>
