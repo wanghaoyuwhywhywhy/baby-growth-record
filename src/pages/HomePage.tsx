@@ -8,7 +8,7 @@ import NavHeader from '@/components/NavHeader';
 import { useNavigate } from 'react-router-dom';
 import { Activity, Sparkles, Loader2, X, MessageCircle, Plus, RefreshCw } from 'lucide-react';
 import { analyzeBaby } from '@/lib/ai';
-import { unlockEditMode } from '@/lib/auth';
+import { unlockEditMode, lockEditMode, isEditMode } from '@/lib/auth';
 import { calcAge } from '@/utils/date';
 
 export default function HomePage() {
@@ -28,7 +28,7 @@ export default function HomePage() {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [forceRefreshing, setForceRefreshing] = useState(false);
 
-  // 连点5次左上角宝宝图标解锁编辑模式
+  // 连点10次左上角宝宝图标：切换编辑/只读模式（1秒内）
   const logoTapRef = useRef<{ count: number; timer: number | null }>({ count: 0, timer: null });
   function handleLogoClick() {
     const state = logoTapRef.current;
@@ -36,11 +36,15 @@ export default function HomePage() {
     if (state.timer) window.clearTimeout(state.timer);
     state.timer = window.setTimeout(() => {
       state.count = 0;
-    }, 1500);
-    if (state.count >= 5) {
+    }, 1000);
+    if (state.count >= 10) {
       state.count = 0;
       if (state.timer) { window.clearTimeout(state.timer); state.timer = null; }
-      unlockEditMode();
+      if (isEditMode()) {
+        lockEditMode();
+      } else {
+        unlockEditMode();
+      }
       window.location.reload();
     }
   }
