@@ -4,6 +4,8 @@ const WORKER_URL = 'https://api.tongxi.xyz';
 const AUTH_TOKEN_KEY = 'auth_token';
 // 隐秘路径解锁编辑模式的 localStorage 标记
 const EDIT_MODE_UNLOCKED_KEY = 'edit_mode_unlocked';
+// 编辑模式专用子域名
+const EDIT_HOSTNAME = 'admin.edit.tongxi.xyz';
 
 // 确保宝宝字段是字符串（飞书可能返回富文本数组格式）
 export function sanitizeBabyField(value: unknown): string {
@@ -93,11 +95,17 @@ export function isCurrentBabyOwner(): boolean {
 }
 
 // 是否为管理员
-// 无登录模式下（无 role 时）默认只读，需通过隐秘路径 /admin/edit 解锁后才有编辑权限
+// 无登录模式下（无 role 时）默认只读：
+// 1. 访问编辑子域名 admin.edit.tongxi.xyz 直接进入编辑模式
+// 2. 或通过隐秘路径 /admin/edit 解锁后 localStorage 标记持久化
 export function isAdmin(): boolean {
   const role = getAuthRole();
   if (role) return role === 'admin' || role === 'superadmin';
-  // 无登录模式：检查是否通过隐秘路径解锁编辑模式
+  // 无登录模式：编辑子域名直接解锁
+  if (typeof window !== 'undefined' && window.location.hostname === EDIT_HOSTNAME) {
+    return true;
+  }
+  // 兼容隐秘路径解锁标记
   return localStorage.getItem(EDIT_MODE_UNLOCKED_KEY) === '1';
 }
 
