@@ -5,7 +5,7 @@ import NavHeader from '@/components/NavHeader';
 import CalendarPicker from '@/components/CalendarPicker';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { Check, Calendar, Trash2 } from 'lucide-react';
-import { getAuthBabyLinkRoles } from '@/lib/auth';
+import { getAuthBabyLinkRoles, isEditMode } from '@/lib/auth';
 
 export default function BabyEditPage() {
   const navigate = useNavigate();
@@ -15,6 +15,13 @@ export default function BabyEditPage() {
 
   const { babies, addBaby, updateBaby, deleteBaby } = useAppStore();
   const editingBaby = isEdit ? babies.find((b) => b.record_id === editId) : null;
+
+  // 只读模式禁止访问：重定向回首页
+  useEffect(() => {
+    if (!isEditMode()) {
+      navigate('/', { replace: true });
+    }
+  }, [navigate]);
 
   const [name, setName] = useState('');
   const [birthDate, setBirthDate] = useState('');

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
+import { unlockEditMode } from '@/lib/auth';
 import HomePage from '@/pages/HomePage';
 import RecordPage from '@/pages/RecordPage';
 import TimelinePage from '@/pages/TimelinePage';
@@ -71,6 +72,17 @@ function ScrollToTop() {
   return null;
 }
 
+// 隐秘路径解锁编辑模式：访问 /admin/edit 后写入标记并跳转首页
+function EditModeUnlock() {
+  useEffect(() => {
+    unlockEditMode();
+    // reload 以确保所有组件重新读取权限状态
+    window.location.hash = '#/';
+    window.location.reload();
+  }, []);
+  return null;
+}
+
 export default function App() {
   const initApp = useAppStore((s) => s.initApp);
   const initialized = useAppStore((s) => s.initialized);
@@ -122,6 +134,7 @@ export default function App() {
         <Route path="/vaccine" element={<VaccinePage />} />
         <Route path="/chat" element={<AIChatPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/admin/edit" element={<EditModeUnlock />} />
       </Routes>
     </Router>
   );

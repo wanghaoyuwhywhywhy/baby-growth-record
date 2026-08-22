@@ -2,6 +2,8 @@ import type { Baby } from '@/api/feishu';
 
 const WORKER_URL = 'https://api.tongxi.xyz';
 const AUTH_TOKEN_KEY = 'auth_token';
+// 隐秘路径解锁编辑模式的 localStorage 标记
+const EDIT_MODE_UNLOCKED_KEY = 'edit_mode_unlocked';
 
 // 确保宝宝字段是字符串（飞书可能返回富文本数组格式）
 export function sanitizeBabyField(value: unknown): string {
@@ -91,11 +93,22 @@ export function isCurrentBabyOwner(): boolean {
 }
 
 // 是否为管理员
-// 无登录模式下（无 role 时）默认为 admin，保证编辑按钮可用
+// 无登录模式下（无 role 时）默认只读，需通过隐秘路径 /admin/edit 解锁后才有编辑权限
 export function isAdmin(): boolean {
   const role = getAuthRole();
-  if (!role) return true; // 无登录模式默认 admin
-  return role === 'admin' || role === 'superadmin';
+  if (role) return role === 'admin' || role === 'superadmin';
+  // 无登录模式：检查是否通过隐秘路径解锁编辑模式
+  return localStorage.getItem(EDIT_MODE_UNLOCKED_KEY) === '1';
+}
+
+// 解锁编辑模式（访问隐秘路径后调用）
+export function unlockEditMode(): void {
+  localStorage.setItem(EDIT_MODE_UNLOCKED_KEY, '1');
+}
+
+// 重新锁定为只读模式
+export function lockEditMode(): void {
+  localStorage.removeItem(EDIT_MODE_UNLOCKED_KEY);
 }
 
 // 保存认证信息

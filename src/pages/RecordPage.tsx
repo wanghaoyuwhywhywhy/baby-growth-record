@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
 import { useUploadStore, type UploadTask } from '@/store/useUploadStore';
@@ -6,6 +6,7 @@ import CategoryPicker from '@/components/CategoryPicker';
 import NavHeader from '@/components/NavHeader';
 import MediaInput, { type MediaItem } from '@/components/MediaInput';
 import { autoCategory, polishContent } from '@/lib/ai';
+import { isEditMode } from '@/lib/auth';
 import { Check, Sparkles, Wand2, Loader2 } from 'lucide-react';
 
 type MediaType = 'text' | 'voice' | 'video' | 'photo';
@@ -21,6 +22,13 @@ export default function RecordPage() {
   const [aiLoading, setAiLoading] = useState<'category' | 'polish' | null>(null);
   const { createRecord } = useAppStore();
   const navigate = useNavigate();
+
+  // 只读模式禁止访问：重定向回首页
+  useEffect(() => {
+    if (!isEditMode()) {
+      navigate('/', { replace: true });
+    }
+  }, [navigate]);
 
   const canSubmit = (content.trim().length > 0 || mediaItems.length > 0) && !submitting;
 
