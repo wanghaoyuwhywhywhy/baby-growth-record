@@ -8,6 +8,7 @@ import NavHeader from '@/components/NavHeader';
 import { useNavigate } from 'react-router-dom';
 import { Activity, Sparkles, Loader2, X, MessageCircle, Plus, RefreshCw } from 'lucide-react';
 import { analyzeBaby } from '@/lib/ai';
+import { unlockEditMode } from '@/lib/auth';
 import { calcAge } from '@/utils/date';
 
 export default function HomePage() {
@@ -26,6 +27,12 @@ export default function HomePage() {
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [forceRefreshing, setForceRefreshing] = useState(false);
+
+  // 双击左上角宝宝图标解锁编辑模式
+  function handleLogoDoubleClick() {
+    unlockEditMode();
+    window.location.reload();
+  }
 
   // 强制刷新：注销 Service Worker + 清除 Cache Storage，然后重载页面（保留业务数据）
   async function handleForceRefresh() {
@@ -127,7 +134,7 @@ export default function HomePage() {
   if (babies.length === 0) {
     return (
       <div className="page-container">
-        <NavHeader title="嘻嘻成长记录" rightAction={
+        <NavHeader title="嘻嘻成长记录" onLogoDoubleClick={handleLogoDoubleClick} rightAction={
           <button
             onClick={handleForceRefresh}
             disabled={forceRefreshing}
@@ -158,6 +165,7 @@ export default function HomePage() {
     <div className="page-container">
       <NavHeader
         title="嘻嘻成长记录"
+        onLogoDoubleClick={handleLogoDoubleClick}
         rightAction={
           <button
             onClick={handleForceRefresh}

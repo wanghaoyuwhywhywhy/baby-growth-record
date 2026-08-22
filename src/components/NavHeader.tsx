@@ -6,9 +6,10 @@ interface NavHeaderProps {
   showBack?: boolean;
   rightAction?: React.ReactNode;
   titleAction?: React.ReactNode;
+  onLogoDoubleClick?: () => void;
 }
 
-export default function NavHeader({ title, showBack = false, rightAction, titleAction }: NavHeaderProps) {
+export default function NavHeader({ title, showBack = false, rightAction, titleAction, onLogoDoubleClick }: NavHeaderProps) {
   const navigate = useNavigate();
 
   return (
@@ -24,7 +25,12 @@ export default function NavHeader({ title, showBack = false, rightAction, titleA
               <ArrowLeft size={20} className="text-ink" />
             </button>
           ) : (
-            <span className="text-xl">👶</span>
+            <span
+              className="text-xl select-none"
+              onDoubleClick={onLogoDoubleClick}
+            >
+              👶
+            </span>
           )}
           <h1 className="text-lg font-outfit font-bold text-ink whitespace-nowrap shrink-0">{title}</h1>
           {titleAction}
