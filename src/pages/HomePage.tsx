@@ -28,10 +28,21 @@ export default function HomePage() {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [forceRefreshing, setForceRefreshing] = useState(false);
 
-  // 双击左上角宝宝图标解锁编辑模式
-  function handleLogoDoubleClick() {
-    unlockEditMode();
-    window.location.reload();
+  // 连点5次左上角宝宝图标解锁编辑模式
+  const logoTapRef = useRef<{ count: number; timer: number | null }>({ count: 0, timer: null });
+  function handleLogoClick() {
+    const state = logoTapRef.current;
+    state.count += 1;
+    if (state.timer) window.clearTimeout(state.timer);
+    state.timer = window.setTimeout(() => {
+      state.count = 0;
+    }, 1500);
+    if (state.count >= 5) {
+      state.count = 0;
+      if (state.timer) { window.clearTimeout(state.timer); state.timer = null; }
+      unlockEditMode();
+      window.location.reload();
+    }
   }
 
   // 强制刷新：注销 Service Worker + 清除 Cache Storage，然后重载页面（保留业务数据）
@@ -134,7 +145,7 @@ export default function HomePage() {
   if (babies.length === 0) {
     return (
       <div className="page-container">
-        <NavHeader title="嘻嘻成长记录" onLogoDoubleClick={handleLogoDoubleClick} rightAction={
+        <NavHeader title="嘻嘻成长记录" onLogoClick={handleLogoClick} rightAction={
           <button
             onClick={handleForceRefresh}
             disabled={forceRefreshing}
@@ -165,7 +176,7 @@ export default function HomePage() {
     <div className="page-container">
       <NavHeader
         title="嘻嘻成长记录"
-        onLogoDoubleClick={handleLogoDoubleClick}
+        onLogoClick={handleLogoClick}
         rightAction={
           <button
             onClick={handleForceRefresh}
