@@ -297,14 +297,14 @@ export default function MediaInput({
         <button
           onClick={() => galleryInputRef.current?.click()}
           className="w-12 h-12 rounded-full bg-cream-dark text-ink flex items-center justify-center hover:bg-rule/50 transition-all"
-          aria-label="从相册选择"
+          aria-label="从相册选择图片"
         >
           <ImagePlus size={22} />
         </button>
         <input
           ref={galleryInputRef}
           type="file"
-          accept="image/*,video/*"
+          accept="image/*"
           multiple
           onChange={handleFileSelect}
           className="hidden"

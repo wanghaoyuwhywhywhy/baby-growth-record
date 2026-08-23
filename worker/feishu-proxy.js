@@ -3527,12 +3527,12 @@ async function uploadToFeishuDrive(token, file, fileName, appToken, isImage) {
   const uploadId = prepareData.data?.upload_id;
   // 飞书返回的 block_size 才是分片上传时要求的 size
   const blockSize = Number(prepareData.data?.block_size) || ESTIMATE_PART;
+  // 飞书返回的 block_num 是要求的分片总数，优先使用；缺失时根据 block_size 计算
+  const totalParts = Number(prepareData.data?.block_num) || Math.ceil(fileSize / blockSize);
   if (!uploadId) throw new Error('upload_prepare未返回upload_id');
 
-  // 用飞书要求的 block_size 重新计算分片
-  const totalParts = Math.ceil(fileSize / blockSize);
-
-  // 2. upload_part（逐片上传，size 参数严格等于该片实际字节数）
+  // 2. upload_part（逐片上传）
+  // 注意：飞书 seq 从 0 开始（官方文档），size 必须等于该片实际字节数
   for (let i = 0; i < totalParts; i++) {
     const start = i * blockSize;
     const end = Math.min(start + blockSize, fileSize);
@@ -3540,7 +3540,7 @@ async function uploadToFeishuDrive(token, file, fileName, appToken, isImage) {
     const chunk = file.slice(start, end);
     const blockForm = new FormData();
     blockForm.append('upload_id', uploadId);
-    blockForm.append('seq', String(i + 1));
+    blockForm.append('seq', String(i)); // 从 0 开始
     blockForm.append('size', String(chunkSize));
     blockForm.append('file', chunk, fileName);
 
