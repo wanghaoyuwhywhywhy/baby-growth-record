@@ -3502,10 +3502,10 @@ async function uploadToFeishuDrive(token, file, fileName, appToken, isImage) {
   }
 
   // 大文件走分片上传：prepare -> upload_part * N -> finish
-  const PART_SIZE = 8 * 1024 * 1024; // 8MB/片
-  const totalParts = Math.ceil(fileSize / PART_SIZE);
+  // 先 prepare 拿到飞书要求的 block_size，再用该 block_size 切片
+  const ESTIMATE_PART = 4 * 1024 * 1024; // 4MB 预估，飞书通常返回 4MB
 
-  // 1. upload_prepare
+  // 1. upload_prepare（飞书会返回实际 block_size）
   const prepareResp = await fetch('https://open.feishu.cn/open-apis/drive/v1/medias/upload_prepare', {
     method: 'POST',
     headers: {
@@ -3525,18 +3525,23 @@ async function uploadToFeishuDrive(token, file, fileName, appToken, isImage) {
     throw new Error(`upload_prepare失败(HTTP ${prepareResp.status}): ${prepareData.msg}`);
   }
   const uploadId = prepareData.data?.upload_id;
-  const blockSize = prepareData.data?.block_size || PART_SIZE;
+  // 飞书返回的 block_size 才是分片上传时要求的 size
+  const blockSize = Number(prepareData.data?.block_size) || ESTIMATE_PART;
   if (!uploadId) throw new Error('upload_prepare未返回upload_id');
 
-  // 2. upload_part（逐片上传）
+  // 用飞书要求的 block_size 重新计算分片
+  const totalParts = Math.ceil(fileSize / blockSize);
+
+  // 2. upload_part（逐片上传，size 参数严格等于该片实际字节数）
   for (let i = 0; i < totalParts; i++) {
-    const start = i * PART_SIZE;
-    const end = Math.min(start + PART_SIZE, fileSize);
+    const start = i * blockSize;
+    const end = Math.min(start + blockSize, fileSize);
+    const chunkSize = end - start;
     const chunk = file.slice(start, end);
     const blockForm = new FormData();
     blockForm.append('upload_id', uploadId);
     blockForm.append('seq', String(i + 1));
-    blockForm.append('size', String(end - start));
+    blockForm.append('size', String(chunkSize));
     blockForm.append('file', chunk, fileName);
 
     const partResp = await fetch('https://open.feishu.cn/open-apis/drive/v1/medias/upload_part', {
