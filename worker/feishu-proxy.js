@@ -3456,6 +3456,121 @@ ${vaccines.length > 0
   }
 }
 
+// 安全解析飞书响应：非 JSON 时返回 {code: -1, msg: bodyText}
+async function safeJson(resp) {
+  const text = await resp.text();
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    return { code: -1, msg: `HTTP ${resp.status} (非JSON): ${text.slice(0, 200)}`, _raw: text };
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return { code: -1, msg: `JSON解析失败 (HTTP ${resp.status}): ${text.slice(0, 200)}`, _raw: text };
+  }
+}
+
+// 分片上传飞书云盘（支持大文件，单文件最大 400MB）
+// upload_all 单文件限制 25MB，超过时改用分片上传
+async function uploadToFeishuDrive(token, file, fileName, appToken, isImage) {
+  const fileSize = file.size || 0;
+  const parentType = isImage ? 'bitable_image' : 'bitable_file';
+
+  // 小文件（<=20MB）走 upload_all，简单高效
+  const SMALL_FILE_THRESHOLD = 20 * 1024 * 1024;
+  if (fileSize <= SMALL_FILE_THRESHOLD) {
+    const driveForm = new FormData();
+    driveForm.append('file_name', fileName);
+    driveForm.append('parent_type', parentType);
+    driveForm.append('parent_node', appToken);
+    driveForm.append('size', String(fileSize));
+    driveForm.append('extra', JSON.stringify({ drive_route_token: appToken }));
+    driveForm.append('file', file, fileName);
+
+    const resp = await fetch('https://open.feishu.cn/open-apis/drive/v1/medias/upload_all', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: driveForm,
+    });
+    const data = await safeJson(resp);
+    if (data.code !== 0) {
+      throw new Error(`upload_all失败: ${data.msg}`);
+    }
+    const fileToken = data.data?.file_token;
+    if (!fileToken) throw new Error('upload_all成功但未获取file_token');
+    return fileToken;
+  }
+
+  // 大文件走分片上传：prepare -> upload_part * N -> finish
+  const PART_SIZE = 8 * 1024 * 1024; // 8MB/片
+  const totalParts = Math.ceil(fileSize / PART_SIZE);
+
+  // 1. upload_prepare
+  const prepareResp = await fetch('https://open.feishu.cn/open-apis/drive/v1/medias/upload_prepare', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      file_name: fileName,
+      parent_type: parentType,
+      parent_node: appToken,
+      size: fileSize,
+      extra: JSON.stringify({ drive_route_token: appToken }),
+    }),
+  });
+  const prepareData = await safeJson(prepareResp);
+  if (prepareData.code !== 0) {
+    throw new Error(`upload_prepare失败(HTTP ${prepareResp.status}): ${prepareData.msg}`);
+  }
+  const uploadId = prepareData.data?.upload_id;
+  const blockSize = prepareData.data?.block_size || PART_SIZE;
+  if (!uploadId) throw new Error('upload_prepare未返回upload_id');
+
+  // 2. upload_part（逐片上传）
+  for (let i = 0; i < totalParts; i++) {
+    const start = i * PART_SIZE;
+    const end = Math.min(start + PART_SIZE, fileSize);
+    const chunk = file.slice(start, end);
+    const blockForm = new FormData();
+    blockForm.append('upload_id', uploadId);
+    blockForm.append('seq', String(i + 1));
+    blockForm.append('size', String(end - start));
+    blockForm.append('file', chunk, fileName);
+
+    const partResp = await fetch('https://open.feishu.cn/open-apis/drive/v1/medias/upload_part', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: blockForm,
+    });
+    const partData = await safeJson(partResp);
+    if (partData.code !== 0) {
+      throw new Error(`upload_part ${i + 1}/${totalParts}失败(HTTP ${partResp.status}): ${partData.msg}`);
+    }
+  }
+
+  // 3. upload_finish
+  const finishResp = await fetch('https://open.feishu.cn/open-apis/drive/v1/medias/upload_finish', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      upload_id: uploadId,
+      block_num: totalParts,
+    }),
+  });
+  const finishData = await safeJson(finishResp);
+  if (finishData.code !== 0) {
+    throw new Error(`upload_finish失败(HTTP ${finishResp.status}): ${finishData.msg}`);
+  }
+  const fileToken = finishData.data?.file_token;
+  if (!fileToken) throw new Error('upload_finish成功但未获取file_token');
+  return fileToken;
+}
+
 async function handleUpload(request, env, token) {
   if (request.method !== 'POST') return { error: 'Method not allowed' };
 
@@ -3475,34 +3590,15 @@ async function handleUpload(request, env, token) {
   const fileName = file.name || 'upload.jpg';
   const fileSize = file.size || 0;
   const isImage = (file.type || '').startsWith('image/');
-  const parentType = isImage ? 'bitable_image' : 'bitable_file';
 
   logOp('upload.start', { recordId, fileName, fileSize, fileType: file.type || '', isImage });
 
-  const driveForm = new FormData();
-  driveForm.append('file_name', fileName);
-  driveForm.append('parent_type', parentType);
-  driveForm.append('parent_node', appToken);
-  driveForm.append('size', String(fileSize));
-  driveForm.append('extra', JSON.stringify({ drive_route_token: appToken }));
-  driveForm.append('file', file, fileName);
-
-  const uploadResp = await fetch('https://open.feishu.cn/open-apis/drive/v1/medias/upload_all', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}` },
-    body: driveForm,
-  });
-
-  const uploadData = await uploadResp.json();
-  if (uploadData.code !== 0) {
-    logOp('upload.drive.fail', { recordId, fileName, code: uploadData.code, msg: uploadData.msg, httpStatus: uploadResp.status });
-    return { error: `Drive上传失败: ${uploadData.msg || '未知'}`, code: uploadData.code };
-  }
-
-  const fileToken = uploadData.data?.file_token;
-  if (!fileToken) {
-    logOp('upload.drive.notoken', { recordId, fileName, respKeys: Object.keys(uploadData.data || {}) });
-    return { error: '上传成功但未获取到 file_token' };
+  let fileToken;
+  try {
+    fileToken = await uploadToFeishuDrive(token, file, fileName, appToken, isImage);
+  } catch (e) {
+    logOp('upload.drive.fail', { recordId, fileName, fileSize, error: e.message });
+    return { error: e.message };
   }
   logOp('upload.drive.ok', { recordId, fileName, fileToken });
 
