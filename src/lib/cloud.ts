@@ -397,7 +397,15 @@ export async function cloudUploadMedia(recordId: string, file: Blob, fileName: s
       if (resp.status === 413) {
         throw new Error(`文件过大（${sizeMB}MB），超过 100MB 上限，请先用手机压缩`);
       }
-      throw new Error(`上传失败: HTTP ${resp.status}`);
+      // 读取 Worker 返回的具体 error 字段（顶层 catch 会返回 {error: ...}）
+      let detail = '';
+      try {
+        const errJson = JSON.parse(respText);
+        detail = errJson?.error || errJson?.detail || errJson?.msg || '';
+      } catch {
+        detail = respText.slice(0, 200);
+      }
+      throw new Error(detail ? `上传失败(HTTP ${resp.status}): ${detail}` : `上传失败: HTTP ${resp.status}`);
     }
     const data = JSON.parse(respText);
     if (!data.ok) throw new Error(data.error || data.detail || '上传失败');

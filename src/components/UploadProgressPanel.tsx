@@ -168,7 +168,7 @@ export default function UploadProgressPanel() {
                           <span className="text-xs text-muted/50">{formatSize(task.fileSize)}</span>
                         </div>
                         {task.status === 'error' && task.error && (
-                          <p className="text-xs text-red-400 truncate">{task.error}</p>
+                          <p className="text-xs text-red-400 break-words whitespace-pre-wrap leading-tight mt-0.5">{task.error}</p>
                         )}
                       </div>
                       {task.status === 'uploading' && (
