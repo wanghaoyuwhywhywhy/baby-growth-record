@@ -102,12 +102,31 @@ export const useUploadStore = create<UploadState>((set, get) => ({
           ext = task.blob.type.includes('mp4') ? 'mp4' : 'webm';
         }
 
-        const fileToken = await cloudUploadMedia(group.recordId, task.blob, `${task.mediaId}.${ext}`);
-        if (fileToken) {
-          updateTask(group.recordId, task.mediaId, { status: 'success', progress: 100, fileToken });
-          fileTokens.push(fileToken);
-        } else {
-          throw new Error('未获取到 file_token');
+        // 模拟进度：Worker 内部分片上传到飞书的过程前端拿不到实际进度，
+        // 用估算耗时让 progress 从 40 缓慢增长到 90，避免大文件卡住视觉不动
+        const sizeMB = task.blob.size / 1024 / 1024;
+        // 估算总耗时（秒）：4MB/片每片约 1.5s + 2s 基础开销，限制在 [3, 120] 秒
+        const estimatedSeconds = Math.max(3, Math.min(120, (sizeMB / 4) * 1.5 + 2));
+        const intervalMs = 500;
+        const step = (90 - 40) / (estimatedSeconds * 1000 / intervalMs);
+        let fakeProgress = 40;
+        const fakeTimer = window.setInterval(() => {
+          fakeProgress = Math.min(90, fakeProgress + step);
+          updateTask(group.recordId, task.mediaId, { progress: Math.round(fakeProgress) });
+        }, intervalMs);
+
+        try {
+          const fileToken = await cloudUploadMedia(group.recordId, task.blob, `${task.mediaId}.${ext}`);
+          clearInterval(fakeTimer);
+          if (fileToken) {
+            updateTask(group.recordId, task.mediaId, { status: 'success', progress: 100, fileToken });
+            fileTokens.push(fileToken);
+          } else {
+            throw new Error('未获取到 file_token');
+          }
+        } catch (e) {
+          clearInterval(fakeTimer);
+          throw e;
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : '上传失败';
