@@ -21,17 +21,37 @@ interface BabyGrowthDB extends DBSchema {
     value: { id: string; type: 'image' | 'video' | 'voice'; blob: Blob; recordId: string; createdAt: string };
     indexes: { 'by-record': string };
   };
+  // 云端媒体 Blob 缓存：key = file_token，value = { blob, etag, contentType, size, lastUsedAt }
+  // 飞书 file_token 内容不可变，缓存长期有效；通过 LRU 限制总大小
+  mediaCache: {
+    key: string; // file_token
+    value: {
+      fileToken: string;
+      blob: Blob;
+      etag: string;
+      contentType: string;
+      size: number; // bytes
+      lastUsedAt: number; // Date.now()
+      createdAt: number;
+    };
+    indexes: { 'by-lastUsed': number };
+  };
 }
 
 const DB_NAME = 'baby-growth-record';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // bump: 新增 mediaCache store
+
+// 媒体缓存容量上限（防止 IndexedDB 无限增长）
+// 图片/视频容易占空间，这里设置保守值；可在设置页做清理入口
+export const MEDIA_CACHE_MAX_ITEMS = 500;      // 最多缓存 500 个文件
+export const MEDIA_CACHE_MAX_BYTES = 500 * 1024 * 1024; // 最多 500MB
 
 let dbPromise: Promise<IDBPDatabase<BabyGrowthDB>> | null = null;
 
 function getDB() {
   if (!dbPromise) {
     dbPromise = openDB<BabyGrowthDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
         if (!db.objectStoreNames.contains('babies')) {
           db.createObjectStore('babies', { keyPath: 'record_id' });
         }
@@ -46,6 +66,11 @@ function getDB() {
         if (!db.objectStoreNames.contains('media')) {
           const store = db.createObjectStore('media', { keyPath: 'id' });
           store.createIndex('by-record', 'recordId');
+        }
+        // v1 -> v2: 新增 mediaCache
+        if (!db.objectStoreNames.contains('mediaCache')) {
+          const store = db.createObjectStore('mediaCache', { keyPath: 'fileToken' });
+          store.createIndex('by-lastUsed', 'lastUsedAt');
         }
       },
     });
@@ -175,12 +200,105 @@ export async function dbDeleteMedia(id: string): Promise<void> {
 // 清空所有数据（同步时先清空再写入云端数据）
 export async function dbClearAll(): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['babies', 'records', 'growth', 'media'], 'readwrite');
+  const tx = db.transaction(['babies', 'records', 'growth', 'media', 'mediaCache'], 'readwrite');
   await Promise.all([
     tx.objectStore('babies').clear(),
     tx.objectStore('records').clear(),
     tx.objectStore('growth').clear(),
     tx.objectStore('media').clear(),
+    tx.objectStore('mediaCache').clear(),
     tx.done,
   ]);
+}
+
+// ======================== 云端媒体 Blob 缓存（mediaCache store） ========================
+
+export type MediaCacheEntry = {
+  fileToken: string;
+  blob: Blob;
+  etag: string;
+  contentType: string;
+  size: number;
+  lastUsedAt: number;
+  createdAt: number;
+};
+
+/** 读取缓存，命中时自动刷新 lastUsedAt（LRU 热度） */
+export async function dbGetMediaCache(fileToken: string): Promise<MediaCacheEntry | null> {
+  if (!fileToken) return null;
+  const db = await getDB();
+  const entry = await db.get('mediaCache', fileToken);
+  if (!entry) return null;
+  // 命中即更新 lastUsedAt，保持热度
+  const touched: MediaCacheEntry = { ...entry, lastUsedAt: Date.now() };
+  await db.put('mediaCache', touched);
+  return touched;
+}
+
+/** 写入缓存，并在超出上限时触发 LRU 清理 */
+export async function dbPutMediaCache(entry: MediaCacheEntry): Promise<void> {
+  const db = await getDB();
+  await db.put('mediaCache', entry);
+  // 异步 LRU 清理：不阻塞本次写入
+  setTimeout(() => { dbPruneMediaCache().catch(() => {}); }, 0);
+}
+
+/** 手动清空媒体缓存（设置页按钮调用） */
+export async function dbClearMediaCache(): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('mediaCache', 'readwrite');
+  await tx.objectStore('mediaCache').clear();
+  await tx.done;
+}
+
+/** 查询媒体缓存当前状态（用于设置页展示） */
+export async function dbGetMediaCacheStats(): Promise<{ items: number; bytes: number }> {
+  const db = await getDB();
+  const all = await db.getAll('mediaCache');
+  let bytes = 0;
+  for (const e of all) bytes += e.size || 0;
+  return { items: all.length, bytes };
+}
+
+/**
+ * LRU 清理：当条目数或总字节超出上限时，
+ * 按 lastUsedAt 升序删除最久未用的，直到回到阈值以下。
+ */
+export async function dbPruneMediaCache(): Promise<{ deleted: number; freedBytes: number }> {
+  const db = await getDB();
+  // 用 by-lastUsed 索引，从小到大（最久未用在前）
+  const all = await db.getAllFromIndex('mediaCache', 'by-lastUsed');
+  if (all.length === 0) return { deleted: 0, freedBytes: 0 };
+
+  let totalBytes = 0;
+  for (const e of all) totalBytes += e.size || 0;
+
+  if (all.length <= MEDIA_CACHE_MAX_ITEMS && totalBytes <= MEDIA_CACHE_MAX_BYTES) {
+    return { deleted: 0, freedBytes: 0 };
+  }
+
+  // 需要删除最旧的 N 个：目标是让两个指标都回到阈值内，且至少删到阈值 90%（避免抖动）
+  const targetItems = Math.floor(MEDIA_CACHE_MAX_ITEMS * 0.9);
+  const targetBytes = Math.floor(MEDIA_CACHE_MAX_BYTES * 0.9);
+  const needDelete = Math.max(0, all.length - targetItems);
+  // 先按条目数取最小删除数，再按字节数往后延伸
+  let deleteCount = needDelete;
+  let sumAfterDelete = totalBytes;
+  for (let i = 0; i < deleteCount; i++) sumAfterDelete -= all[i].size || 0;
+  while (deleteCount < all.length && sumAfterDelete > targetBytes) {
+    sumAfterDelete -= all[deleteCount].size || 0;
+    deleteCount++;
+  }
+  if (deleteCount === 0) return { deleted: 0, freedBytes: 0 };
+
+  const tx = db.transaction('mediaCache', 'readwrite');
+  let freed = 0;
+  for (let i = 0; i < deleteCount; i++) {
+    const key = all[i].fileToken;
+    freed += all[i].size || 0;
+    tx.objectStore('mediaCache').delete(key);
+  }
+  await tx.done;
+  console.info(`[mediaCache] LRU prune: deleted ${deleteCount} items, freed ${(freed / 1024 / 1024).toFixed(1)}MB`);
+  return { deleted: deleteCount, freedBytes: freed };
 }

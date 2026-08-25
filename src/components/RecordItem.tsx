@@ -3,13 +3,15 @@ import { type DailyRecord } from '@/api/feishu';
 import { formatDate } from '@/utils/date';
 import { CATEGORY_MAP } from '@/utils/constants';
 import { feishuAPI } from '@/api/feishu';
-import { getCloudAssetUrl } from '@/lib/cloud';
+import { getCloudAssetUrl, fetchCachedCloudAsset } from '@/lib/cloud';
 import { Play, Pause, Mic } from 'lucide-react';
 
 interface MediaInfo {
   id: string;
   type: 'image' | 'video' | 'voice';
   url: string;
+  /** 从本地缓存加载时为 true；纯 http 回退时为 false */
+  fromCache?: boolean;
 }
 
 // 判断是否为云端 file_token
@@ -18,28 +20,28 @@ function isCloudToken(token: string): boolean {
 }
 
 // 根据记录的媒体类型，将云端 tokens 分配到对应的媒体类型
-function assignTokenTypes(tokens: string[], mediaTypes: string[]): MediaInfo[] {
-  const result: MediaInfo[] = [];
+function assignTokenTypes(tokens: string[], mediaTypes: string[]): { id: string; type: 'image' | 'video' | 'voice' }[] {
+  const result: { id: string; type: 'image' | 'video' | 'voice' }[] = [];
   let idx = 0;
 
   // 按优先级分配：先 voice，再 video，最后 photo
   if (mediaTypes.includes('voice') && idx < tokens.length) {
-    result.push({ id: tokens[idx], type: 'voice', url: '' });
+    result.push({ id: tokens[idx], type: 'voice' });
     idx++;
   }
   if (mediaTypes.includes('video') && idx < tokens.length) {
-    result.push({ id: tokens[idx], type: 'video', url: '' });
+    result.push({ id: tokens[idx], type: 'video' });
     idx++;
   }
   if (mediaTypes.includes('photo')) {
     while (idx < tokens.length) {
-      result.push({ id: tokens[idx], type: 'image', url: '' });
+      result.push({ id: tokens[idx], type: 'image' });
       idx++;
     }
   }
   // 剩余未分配的 token 默认当图片
   while (idx < tokens.length) {
-    result.push({ id: tokens[idx], type: 'image', url: '' });
+    result.push({ id: tokens[idx], type: 'image' });
     idx++;
   }
   return result;
@@ -62,10 +64,10 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
     const attachments = record.媒体附件 || [];
 
     let revoked = false;
-    let urls: string[] = [];
+    let objectUrls: string[] = [];
     const cleanup = () => {
       revoked = true;
-      urls.forEach((u) => URL.revokeObjectURL(u));
+      objectUrls.forEach((u) => URL.revokeObjectURL(u));
     };
 
     async function loadAll() {
@@ -75,12 +77,38 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
       if (cloudTokens.length > 0) {
         const mediaTypes = record.媒体类型 || ['text'];
         const assigned = assignTokenTypes(cloudTokens, mediaTypes);
-        for (const m of assigned) {
-          cloudMedia.push({
-            ...m,
-            url: getCloudAssetUrl(record.record_id, m.id, m.type === 'image' ? 'photo' : m.type),
-          });
-        }
+
+        // === 云端媒体加载策略：IndexedDB 优先，失败则回退纯 URL（浏览器 HTTP 缓存）===
+        // 好处：
+        //   1) 命中缓存时：零延迟，无网络请求（尤其解决移动端 Safari 清 HTTP cache 的问题）
+        //   2) 未命中缓存：走网络，下载 blob 后写入 IndexedDB，下次即命中
+        //   3) fetchCachedCloudAsset 抛错：降级为直接用 getCloudAssetUrl（浏览器自己的缓存 + Worker 的
+        //      Cache-Control/ETag 也足够好，保证不会加载失败）
+        const loaded = await Promise.all(
+          assigned.map(async (m): Promise<MediaInfo> => {
+            const typeHint = m.type === 'image' ? 'photo' : m.type; // 'voice' | 'photo' | 'video'
+            try {
+              const { blob, fromCache } = await fetchCachedCloudAsset(
+                record.record_id,
+                m.id,
+                typeHint as 'voice' | 'photo' | 'video',
+              );
+              const url = URL.createObjectURL(blob);
+              objectUrls.push(url);
+              return { id: m.id, type: m.type, url, fromCache };
+            } catch (e) {
+              // 降级：直接用远程 URL，走浏览器原生缓存
+              console.warn('[RecordItem] fetchCachedCloudAsset 失败，降级为远程 URL:', m.id, e);
+              return {
+                id: m.id,
+                type: m.type,
+                url: getCloudAssetUrl(record.record_id, m.id, typeHint as 'voice' | 'photo' | 'video'),
+                fromCache: false,
+              };
+            }
+          }),
+        );
+        cloudMedia.push(...loaded);
       }
 
       // 始终尝试本地兜底：上传失败时云端附件为空，但本地 IndexedDB 仍有 blob
@@ -96,8 +124,8 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
       for (const item of localItems) {
         if (!cloudTypes.has(item.type)) {
           const url = URL.createObjectURL(item.blob);
-          urls.push(url);
-          merged.push({ id: item.id, type: item.type, url });
+          objectUrls.push(url);
+          merged.push({ id: item.id, type: item.type, url, fromCache: true });
         }
       }
 

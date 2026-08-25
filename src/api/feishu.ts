@@ -3,6 +3,7 @@ import {
   dbGetRecords, dbAddRecord, dbUpdateRecordMedia, dbDeleteRecord,
   dbGetGrowthRecords, dbGetAllGrowth, dbAddGrowthRecord, dbDeleteGrowthRecord,
   dbAddMedia, dbGetMediaByRecord, dbDeleteMedia,
+  dbGetMediaCacheStats, dbClearMediaCache,
 } from '@/lib/db';
 import {
   cloudGetBabies, cloudCreateBaby, cloudUpdateBaby, cloudDeleteBaby,
@@ -336,5 +337,22 @@ export const feishuAPI = {
 
   async deleteVaccine(record_id: string): Promise<boolean> {
     return cloudDeleteVaccine(record_id);
+  },
+
+  // ============ 本地媒体缓存管理 ============
+  /**
+   * 查询当前云端媒体缓存的大小（用于设置页展示）
+   * 注意：这是 IndexedDB 持久化缓存，不同于浏览器 HTTP 缓存
+   */
+  async getMediaCacheStats(): Promise<{ items: number; bytes: number }> {
+    return dbGetMediaCacheStats();
+  },
+
+  /**
+   * 手动清空云端媒体 Blob 缓存（设置页触发）
+   * 不影响结构化数据，也不删除上传失败时的本地临时媒体
+   */
+  async clearMediaCache(): Promise<void> {
+    await dbClearMediaCache();
   },
 };

@@ -1,14 +1,60 @@
 import { useState, useEffect } from 'react';
 import NavHeader from '@/components/NavHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock } from 'lucide-react';
+import { User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCircle, Clock, HardDrive, RefreshCw, Database } from 'lucide-react';
 import { getAuthAccount, isSuperAdmin } from '@/lib/auth';
 import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, cloudApproveAccount, cloudRejectAccount, type AccountRecord } from '@/lib/cloud';
+import { feishuAPI } from '@/api/feishu';
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
 
 export default function SettingsPage() {
   const accountName = getAuthAccount();
   const isSuperAdminUser = isSuperAdmin();
   const [deleteTarget, setDeleteTarget] = useState<AccountRecord | null>(null);
+
+  // 媒体缓存管理
+  const [cacheItems, setCacheItems] = useState(0);
+  const [cacheBytes, setCacheBytes] = useState(0);
+  const [cacheLoading, setCacheLoading] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+  const [showClearCacheConfirm, setShowClearCacheConfirm] = useState(false);
+
+  async function refreshCacheStats() {
+    setCacheLoading(true);
+    try {
+      const stats = await feishuAPI.getMediaCacheStats();
+      setCacheItems(stats.items);
+      setCacheBytes(stats.bytes);
+    } catch (e) {
+      console.warn('[Settings] 获取缓存统计失败:', e);
+    } finally {
+      setCacheLoading(false);
+    }
+  }
+
+  async function handleClearCache() {
+    setClearingCache(true);
+    try {
+      await feishuAPI.clearMediaCache();
+      setCacheItems(0);
+      setCacheBytes(0);
+    } catch (e) {
+      console.warn('[Settings] 清空缓存失败:', e);
+    } finally {
+      setClearingCache(false);
+      setShowClearCacheConfirm(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshCacheStats();
+  }, []);
 
   // 账号管理状态
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
@@ -172,6 +218,57 @@ export default function SettingsPage() {
             </div>
           </div>
           {/* 登录已隐藏，暂不展示退出登录按钮 */}
+        </div>
+
+        {/* 存储管理：媒体缓存展示 + 清理 */}
+        <div className="card-shadow p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-white shadow-soft">
+              <Database size={22} strokeWidth={2.5} />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-outfit font-bold text-ink">存储与缓存</h3>
+              <p className="text-xs text-muted">云端图片/视频的本地持久化缓存，加速二次加载</p>
+            </div>
+            <button
+              onClick={refreshCacheStats}
+              disabled={cacheLoading}
+              className="p-2 rounded-lg hover:bg-cream-dark/50 text-muted transition-colors disabled:opacity-40"
+              title="刷新缓存信息"
+            >
+              <RefreshCw size={16} className={cacheLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-4 bg-cream-light/50 rounded-xl p-4 mb-3 border border-rule/50">
+            <div className="flex-1">
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-2xl font-outfit font-bold text-ink tabular-nums">
+                  {cacheLoading ? '—' : formatBytes(cacheBytes)}
+                </span>
+                <HardDrive size={14} className="text-muted/60" />
+              </div>
+              <p className="text-xs text-muted">
+                {cacheLoading ? '统计中...' : `已缓存 ${cacheItems} 个媒体文件（图片/视频/语音）`}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowClearCacheConfirm(true)}
+              disabled={cacheLoading || cacheItems === 0}
+              className="px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5
+                         bg-white border border-rule text-muted hover:border-red-200 hover:text-red-500 hover:bg-red-50
+                         transition-all disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-muted disabled:hover:border-rule"
+            >
+              <Trash2 size={13} />
+              清空缓存
+            </button>
+          </div>
+
+          <div className="text-[11px] leading-relaxed text-muted/70">
+            <p>• 缓存机制：IndexedDB 持久化 + HTTP 强缓存（ETag + immutable），三层保障加载速度</p>
+            <p>• 一致性：飞书附件内容一经上传永不变化（替换附件生成新 file_token），缓存永远与云端一致</p>
+            <p>• 容量上限：500 个文件 / 500MB，超出自动按"最久未用"清理（LRU）</p>
+          </div>
         </div>
 
         {/* 账号管理（仅superadmin可见） */}
@@ -385,6 +482,19 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 清空缓存确认弹窗 */}
+      {showClearCacheConfirm && (
+        <ConfirmDialog
+          title="清空媒体缓存"
+          message={`将删除本地缓存的 ${cacheItems} 个媒体文件（约 ${formatBytes(cacheBytes)}），之后进入页面时将重新从云端加载。不会删除宝宝记录或上传失败的本地文件。`}
+          confirmText="确认清空"
+          confirmDanger
+          loading={clearingCache}
+          onConfirm={handleClearCache}
+          onClose={() => setShowClearCacheConfirm(false)}
+        />
       )}
     </div>
   );

@@ -3648,6 +3648,28 @@ async function handleAsset(request, env, token) {
     });
   }
 
+  // 基于 file_token 生成稳定的 ETag（同一个 file_token 内容永久不变）
+  // 飞书附件一旦上传，file_token 对应的内容不会变；替换附件会生成新的 file_token
+  async function computeETag(ft) {
+    // 16 位 hex 足够短，避免 header 过长；碰撞风险可忽略
+    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('v1:' + ft));
+    return 'W/"' + Array.from(new Uint8Array(hashBuffer)).slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('') + '"';
+  }
+  const etag = await computeETag(fileToken);
+
+  // 条件请求：If-None-Match 匹配则直接 304，节省带宽
+  const ifNoneMatch = request.headers.get('If-None-Match');
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'ETag': etag,
+        ...getCORSHeaders(request),
+      },
+    });
+  }
+
   logOp('asset.start', { fileToken, mediaType });
   try {
     // 使用 batch_get_tmp_download_url 获取临时下载链接
@@ -3665,8 +3687,14 @@ async function handleAsset(request, env, token) {
 
     const downloadUrl = tmpData.data.tmp_download_urls[0].tmp_download_url;
 
+    // 公共缓存头：飞书 file_token 内容不可变，设置 1 年强缓存 + immutable
+    // immutable 告诉浏览器：刷新页面也不需要重新验证，直接用缓存
+    const assetCacheHeaders = {
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'ETag': etag,
+    };
+
     // 语音文件需要代理下载并修正 Content-Type（飞书返回 video/webm，Safari 无法播放）
-    // 照片和视频直接 302 重定向到飞书 CDN，避免大文件代理
     if (mediaType === 'voice') {
       const fileResp = await fetch(downloadUrl);
       if (!fileResp.ok) {
@@ -3696,14 +3724,13 @@ async function handleAsset(request, env, token) {
       return new Response(body, {
         headers: {
           'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=3600',
+          ...assetCacheHeaders,
           ...getCORSHeaders(request),
         },
       });
     }
 
-    // 照片/视频：通过 Worker 流式代理返回（保持同源 api.tongxi.xyz，满足 CSP），
-    // 不再 302 重定向到飞书 CDN —— 否则最终 URL 落在飞书域名，被 media-src/img-src 白名单拦截导致加载失败。
+    // 照片/视频：通过 Worker 流式代理返回（保持同源 api.tongxi.xyz，满足 CSP）
     const proxyHeaders = {};
     const range = request.headers.get('Range');
     if (range) proxyHeaders['Range'] = range; // 转发 Range 以支持视频拖动进度
@@ -3717,7 +3744,7 @@ async function handleAsset(request, env, token) {
     }
     const outHeaders = {
       'Content-Type': fileResp.headers.get('Content-Type') || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
-      'Cache-Control': 'public, max-age=3600',
+      ...assetCacheHeaders,
       'Accept-Ranges': 'bytes',
       ...getCORSHeaders(request),
     };

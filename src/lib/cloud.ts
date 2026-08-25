@@ -433,6 +433,118 @@ export function getCloudAssetUrl(recordId: string, fileToken: string, type?: 'vo
   return `${WORKER_URL}/api/asset?record_id=${encodeURIComponent(recordId)}&file_token=${encodeURIComponent(fileToken)}${typeParam}`;
 }
 
+import {
+  dbGetMediaCache,
+  dbPutMediaCache,
+  type MediaCacheEntry,
+} from '@/lib/db';
+
+/**
+ * 加载云端媒体 Blob，优先读本地 IndexedDB 缓存，零延迟显示。
+ * 缓存未命中时再请求网络，并把响应写入缓存供下次使用。
+ *
+ * 一致性说明：飞书 file_token 内容不可变（替换附件会生成新 token），
+ * 因此本地缓存长期有效，不会出现"旧数据"问题。
+ *
+ * @returns Promise<{ blob: Blob; contentType: string; fromCache: boolean }>
+ */
+export async function fetchCachedCloudAsset(
+  recordId: string,
+  fileToken: string,
+  type?: 'voice' | 'photo' | 'video',
+): Promise<{ blob: Blob; contentType: string; fromCache: boolean }> {
+  if (!fileToken) throw new Error('fileToken is required');
+
+  // ---- 第 1 步：IndexedDB 本地缓存（最快，无网络）----
+  const cached = await dbGetMediaCache(fileToken);
+  if (cached) {
+    return {
+      blob: cached.blob,
+      contentType: cached.contentType,
+      fromCache: true,
+    };
+  }
+
+  // ---- 第 2 步：网络请求（带 ETag 条件验证，304 不下载 body）----
+  const url = getCloudAssetUrl(recordId, fileToken, type);
+  const headersInit: Record<string, string> = {};
+
+  // 正常这里 cached 为 null，暂时没 etag；预留接口以便后续扩展"后台验证"
+  // （例如：本地缓存先显示，后台 If-None-Match 验证，304 继续用，200 静默更新）
+
+  const resp = await fetchWithTimeout(url, { headers: headersInit });
+  if (!resp.ok && resp.status !== 304) {
+    throw new Error(`媒体加载失败: HTTP ${resp.status}`);
+  }
+
+  let blob: Blob;
+  let contentType: string;
+  let etag: string = resp.headers.get('ETag') || '';
+  let size: number = 0;
+
+  if (resp.status === 304) {
+    // 304 但本地没缓存？不太可能发生（304 需要先发 If-None-Match），防御式处理
+    throw new Error('服务器返回 304 但本地无缓存');
+  }
+
+  // 200：读取 blob
+  const arrayBuf = await resp.arrayBuffer();
+  contentType = resp.headers.get('Content-Type') || guessContentType(type, arrayBuf);
+  size = arrayBuf.byteLength;
+  blob = new Blob([arrayBuf], { type: contentType });
+
+  // 生成稳定 ETag（如果服务端没返回，按 file_token 自己算一个保底）
+  if (!etag) {
+    etag = 'local/' + fileToken.slice(0, 16);
+  }
+
+  // ---- 第 3 步：写入 IndexedDB 缓存（后台异步 LRU 清理）----
+  const entry: MediaCacheEntry = {
+    fileToken,
+    blob,
+    etag,
+    contentType,
+    size,
+    lastUsedAt: Date.now(),
+    createdAt: Date.now(),
+  };
+  dbPutMediaCache(entry).catch((e) => {
+    console.warn('[fetchCachedCloudAsset] 写入媒体缓存失败（可能是存储空间不足）:', e);
+  });
+
+  return { blob, contentType, fromCache: false };
+}
+
+// 根据 type 和文件头猜 Content-Type（服务端异常没返回时的兜底）
+function guessContentType(type: 'voice' | 'photo' | 'video' | undefined, header: ArrayBuffer): string {
+  const magic = new Uint8Array(header.slice(0, 12));
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  const isPNG = magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4E && magic[3] === 0x47;
+  if (isPNG) return 'image/png';
+  // JPEG: FF D8 FF
+  const isJPEG = magic[0] === 0xFF && magic[1] === 0xD8 && magic[2] === 0xFF;
+  if (isJPEG) return 'image/jpeg';
+  // GIF: 47 49 46 38
+  const isGIF = magic[0] === 0x47 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x38;
+  if (isGIF) return 'image/gif';
+  // WebP: 52 49 46 46 ... 57 45 42 50
+  const isRIFF = magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46;
+  if (isRIFF && magic[8] === 0x57 && magic[9] === 0x45 && magic[10] === 0x42 && magic[11] === 0x50) {
+    return 'image/webp';
+  }
+  // MP4: box size ... 66 74 79 70 = 'ftyp' at offset 4
+  if (magic[4] === 0x66 && magic[5] === 0x74 && magic[6] === 0x79 && magic[7] === 0x70) {
+    return type === 'voice' ? 'audio/mp4' : 'video/mp4';
+  }
+  // WebM: 1A 45 DF A3
+  const isWebM = magic[0] === 0x1A && magic[1] === 0x45 && magic[2] === 0xDF && magic[3] === 0xA3;
+  if (isWebM) return type === 'voice' ? 'audio/webm' : 'video/webm';
+
+  if (type === 'voice') return 'audio/webm';
+  if (type === 'video') return 'video/mp4';
+  return 'image/jpeg';
+}
+
 // 疫苗接种
 
 function feishuToVaccine(item: any): VaccineRecord {
