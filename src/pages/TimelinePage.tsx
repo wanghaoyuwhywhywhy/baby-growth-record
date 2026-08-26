@@ -3,7 +3,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { type DailyRecord } from '@/api/feishu';
 import { feishuAPI } from '@/api/feishu';
 import { CATEGORIES, CATEGORY_MAP } from '@/utils/constants';
-import { getCloudAssetUrl } from '@/lib/cloud';
+import { getCloudAssetUrl, fetchCachedCloudAsset } from '@/lib/cloud';
 import { isEditMode } from '@/lib/auth';
 import CalendarPicker from '@/components/CalendarPicker';
 import FloatingButton from '@/components/FloatingButton';
@@ -265,120 +265,188 @@ function VoicePlayer({ record }: { record: DailyRecord }) {
 }
 
 // 媒体预览组件（图片/视频）
+// 三项优化：
+// 1. 云端媒体走 IndexedDB 缓存（fetchCachedCloudAsset），命中秒开
+// 2. 全屏预览支持左右滑动切换（对齐 RecordItem 体验）
+// 3. IntersectionObserver 懒加载，最近记录的媒体优先加载，远端记录滚动到附近才加载
 function MediaPreview({ record }: { record: DailyRecord }) {
-  const [localImages, setLocalImages] = useState<{ id: string; url: string }[]>([]);
-  const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [imageUrls, setImageUrls] = useState<{ id: string; url: string }[]>([]);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(-1);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const startedRef = useRef(false);
+  const blobUrlsRef = useRef<string[]>([]);
 
   const mediaAttachments = record.媒体附件 || [];
   const cloudTokens = mediaAttachments.filter(isCloudToken);
-
-  useEffect(() => {
-    // 如果有云端 token，优先使用云端 URL，不需要加载本地
-    if (cloudTokens.length > 0) return;
-
-    let urls: string[] = [];
-    let revoked = false;
-    async function load() {
-      const items = await feishuAPI.getMediaByRecord(record.record_id);
-      if (revoked || items.length === 0) return;
-      const hasVideo = (record.媒体类型 || ['text']).includes('video');
-      if (hasVideo && items.length > 0) {
-        const u = URL.createObjectURL(items[0].blob);
-        urls.push(u);
-        setLocalVideoUrl(u);
-      } else {
-        const imgs = items.filter(i => i.type === 'image').map(i => {
-          const u = URL.createObjectURL(i.blob);
-          urls.push(u);
-          return { id: i.id, url: u };
-        });
-        setLocalImages(imgs);
-      }
-    }
-    load();
-    return () => { revoked = true; urls.forEach(u => URL.revokeObjectURL(u)); };
-  }, [record.record_id, record.媒体类型, cloudTokens.length]);
-
   const mediaTypes = record.媒体类型 || ['text'];
 
-  // 云端 URL
-  if (cloudTokens.length > 0) {
-    // 使用 assignTokenTypes 正确分配 token 类型
-    const assigned = assignTokenTypes(cloudTokens, mediaTypes);
-    const videoTokens = assigned.filter(a => a.type === 'video');
-    const imageTokens = assigned.filter(a => a.type === 'image');
-
-    if (videoTokens.length > 0) {
-      return (
-        <div className="mt-2">
-          <VideoWithRetry src={getCloudAssetUrl(record.record_id, videoTokens[0].id, 'video')} />
-        </div>
-      );
-    }
-
-    if (imageTokens.length > 0) {
-      return (
-        <div>
-          <div className="flex gap-2 mt-2 overflow-x-auto">
-            {imageTokens.map(t => (
-              <img
-                key={t.id}
-                src={getCloudAssetUrl(record.record_id, t.id, 'photo')}
-                alt=""
-                className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0 cursor-pointer"
-                onClick={() => setPreviewImage(getCloudAssetUrl(record.record_id, t.id, 'photo'))}
-              />
-            ))}
-          </div>
-          {/* 图片全屏预览 */}
-          {previewImage && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-              onClick={() => setPreviewImage(null)}
-            >
-              <img src={previewImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
-            </div>
-          )}
-        </div>
-      );
-    }
+  function trackBlob(u: string) {
+    if (u.startsWith('blob:')) blobUrlsRef.current.push(u);
   }
 
-  // 本地 fallback
-  if (localVideoUrl) {
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || startedRef.current) return;
+    let revoked = false;
+
+    const io = new IntersectionObserver((entries) => {
+      const [entry] = entries;
+      if (entry.isIntersecting && !startedRef.current) {
+        startedRef.current = true;
+        io.disconnect();
+        loadMedia();
+      }
+    }, { rootMargin: '300px' });
+    io.observe(el);
+
+    return () => { revoked = true; io.disconnect(); };
+
+    async function loadMedia() {
+      // 云端优先
+      if (cloudTokens.length > 0) {
+        const assigned = assignTokenTypes(cloudTokens, mediaTypes);
+        const videoTokens = assigned.filter(a => a.type === 'video');
+        const imageTokens = assigned.filter(a => a.type === 'image');
+
+        // 有视频就只显示视频（与原逻辑一致）
+        if (videoTokens.length > 0) {
+          try {
+            const { blob } = await fetchCachedCloudAsset(record.record_id, videoTokens[0].id, 'video');
+            if (revoked) return;
+            const u = URL.createObjectURL(blob);
+            trackBlob(u);
+            setVideoUrl(u);
+          } catch (e) {
+            if (revoked) return;
+            // 降级为远程 URL（仍走 Worker 的 ETag 强缓存）
+            setVideoUrl(getCloudAssetUrl(record.record_id, videoTokens[0].id, 'video'));
+          }
+          return;
+        }
+
+        // 图片：并行加载，命中 IndexedDB 缓存秒开
+        if (imageTokens.length > 0) {
+          const imgs = await Promise.all(imageTokens.map(async (t): Promise<{ id: string; url: string } | null> => {
+            try {
+              const { blob } = await fetchCachedCloudAsset(record.record_id, t.id, 'photo');
+              if (revoked) return null;
+              const u = URL.createObjectURL(blob);
+              trackBlob(u);
+              return { id: t.id, url: u };
+            } catch (e) {
+              if (revoked) return null;
+              // 降级远程 URL
+              return { id: t.id, url: getCloudAssetUrl(record.record_id, t.id, 'photo') };
+            }
+          }));
+          const valid = imgs.filter((x): x is { id: string; url: string } => x !== null);
+          if (!revoked && valid.length > 0) setImageUrls(valid);
+        }
+        return;
+      }
+
+      // 本地 fallback
+      try {
+        const items = await feishuAPI.getMediaByRecord(record.record_id);
+        if (revoked || items.length === 0) return;
+        const hasVideo = mediaTypes.includes('video');
+        if (hasVideo && items.length > 0) {
+          const u = URL.createObjectURL(items[0].blob);
+          trackBlob(u);
+          setVideoUrl(u);
+        } else {
+          const imgs = items.filter(i => i.type === 'image').map(i => {
+            const u = URL.createObjectURL(i.blob);
+            trackBlob(u);
+            return { id: i.id, url: u };
+          });
+          setImageUrls(imgs);
+        }
+      } catch (e) {
+        // 忽略本地加载失败
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 卸载时释放所有 blob URL
+  useEffect(() => {
+    return () => {
+      blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
+      blobUrlsRef.current = [];
+    };
+  }, []);
+
+  // 视频
+  if (videoUrl) {
     return (
-      <div className="mt-2">
-        <video src={localVideoUrl} controls playsInline className="w-full max-h-48 rounded-lg" />
+      <div className="mt-2" ref={containerRef}>
+        <VideoWithRetry src={videoUrl} />
       </div>
     );
   }
-  if (localImages.length > 0) {
+
+  // 图片
+  if (imageUrls.length > 0) {
     return (
-      <div>
+      <div ref={containerRef}>
         <div className="flex gap-2 mt-2 overflow-x-auto">
-          {localImages.map(img => (
+          {imageUrls.map((img, index) => (
             <img
               key={img.id}
               src={img.url}
               alt=""
               className="w-20 h-20 rounded-lg object-cover border border-rule flex-shrink-0 cursor-pointer"
-              onClick={() => setPreviewImage(img.url)}
+              onClick={() => setPreviewIndex(index)}
             />
           ))}
         </div>
-        {previewImage && (
+        {/* 图片全屏预览（支持左右滑动切换） */}
+        {previewIndex >= 0 && previewIndex < imageUrls.length && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-            onClick={() => setPreviewImage(null)}
+            onClick={() => setPreviewIndex(-1)}
+            onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+            onTouchEnd={(e) => {
+              const dx = e.changedTouches[0].clientX - (touchStartX.current ?? 0);
+              if (dx > 40 && previewIndex > 0) setPreviewIndex(previewIndex - 1);
+              else if (dx < -40 && previewIndex < imageUrls.length - 1) setPreviewIndex(previewIndex + 1);
+              touchStartX.current = null;
+            }}
           >
-            <img src={previewImage} alt="" className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg" />
+            {previewIndex > 0 && (
+              <button
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/20 text-white text-xl flex items-center justify-center"
+                onClick={(e) => { e.stopPropagation(); setPreviewIndex(previewIndex - 1); }}
+              >‹</button>
+            )}
+            <img
+              src={imageUrls[previewIndex].url}
+              alt=""
+              className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
+            {previewIndex < imageUrls.length - 1 && (
+              <button
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/20 text-white text-xl flex items-center justify-center"
+                onClick={(e) => { e.stopPropagation(); setPreviewIndex(previewIndex + 1); }}
+              >›</button>
+            )}
+            {imageUrls.length > 1 && (
+              <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-xs">
+                {previewIndex + 1} / {imageUrls.length}
+              </span>
+            )}
           </div>
         )}
       </div>
     );
   }
-  return null;
+
+  // 占位容器：保证 IntersectionObserver 有观察目标（进入视口后才开始加载）
+  return <div ref={containerRef} className="h-0" />;
 }
 
 // 滚轮列组件
