@@ -276,6 +276,7 @@ function MediaPreview({ record }: { record: DailyRecord }) {
   const [previewIndex, setPreviewIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
   const startedRef = useRef(false);
   const acquiredTokensRef = useRef<string[]>([]);
 
@@ -374,6 +375,15 @@ function MediaPreview({ record }: { record: DailyRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 全屏预览打开时锁定背景滚动，避免左右滑图时页面跟着上下滚动
+  useEffect(() => {
+    if (previewIndex >= 0) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [previewIndex]);
+
   // 卸载时仅释放引用计数，不立即 revoke；全局缓存留给页面切换复用
   useEffect(() => {
     return () => {
@@ -409,14 +419,19 @@ function MediaPreview({ record }: { record: DailyRecord }) {
         {/* 图片全屏预览（支持左右滑动切换） */}
         {previewIndex >= 0 && previewIndex < imageUrls.length && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 touch-none"
             onClick={() => setPreviewIndex(-1)}
-            onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+            onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; touchStartY.current = e.touches[0].clientY; }}
             onTouchEnd={(e) => {
               const dx = e.changedTouches[0].clientX - (touchStartX.current ?? 0);
-              if (dx > 40 && previewIndex > 0) setPreviewIndex(previewIndex - 1);
-              else if (dx < -40 && previewIndex < imageUrls.length - 1) setPreviewIndex(previewIndex + 1);
+              const dy = e.changedTouches[0].clientY - (touchStartY.current ?? 0);
+              // 只在水平滑动明显大于垂直滑动时才切换，避免误触
+              if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+                if (dx > 0 && previewIndex > 0) setPreviewIndex(previewIndex - 1);
+                else if (dx < 0 && previewIndex < imageUrls.length - 1) setPreviewIndex(previewIndex + 1);
+              }
               touchStartX.current = null;
+              touchStartY.current = null;
             }}
           >
             {previewIndex > 0 && (
