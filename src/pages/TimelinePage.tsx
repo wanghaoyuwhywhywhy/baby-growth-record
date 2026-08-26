@@ -4,6 +4,7 @@ import { type DailyRecord } from '@/api/feishu';
 import { feishuAPI } from '@/api/feishu';
 import { CATEGORIES, CATEGORY_MAP } from '@/utils/constants';
 import { getCloudAssetUrl, fetchCachedCloudAsset } from '@/lib/cloud';
+import { acquireBlobUrl, releaseBlobUrl } from '@/lib/blobUrlCache';
 import { isEditMode } from '@/lib/auth';
 import CalendarPicker from '@/components/CalendarPicker';
 import FloatingButton from '@/components/FloatingButton';
@@ -276,14 +277,14 @@ function MediaPreview({ record }: { record: DailyRecord }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const touchStartX = useRef<number | null>(null);
   const startedRef = useRef(false);
-  const blobUrlsRef = useRef<string[]>([]);
+  const acquiredTokensRef = useRef<string[]>([]);
 
   const mediaAttachments = record.媒体附件 || [];
   const cloudTokens = mediaAttachments.filter(isCloudToken);
   const mediaTypes = record.媒体类型 || ['text'];
 
-  function trackBlob(u: string) {
-    if (u.startsWith('blob:')) blobUrlsRef.current.push(u);
+  function trackAcquire(token: string) {
+    acquiredTokensRef.current.push(token);
   }
 
   useEffect(() => {
@@ -315,8 +316,8 @@ function MediaPreview({ record }: { record: DailyRecord }) {
           try {
             const { blob } = await fetchCachedCloudAsset(record.record_id, videoTokens[0].id, 'video');
             if (revoked) return;
-            const u = URL.createObjectURL(blob);
-            trackBlob(u);
+            const u = acquireBlobUrl(videoTokens[0].id, blob);
+            trackAcquire(videoTokens[0].id);
             setVideoUrl(u);
           } catch (e) {
             if (revoked) return;
@@ -332,8 +333,8 @@ function MediaPreview({ record }: { record: DailyRecord }) {
             try {
               const { blob } = await fetchCachedCloudAsset(record.record_id, t.id, 'photo');
               if (revoked) return null;
-              const u = URL.createObjectURL(blob);
-              trackBlob(u);
+              const u = acquireBlobUrl(t.id, blob);
+              trackAcquire(t.id);
               return { id: t.id, url: u };
             } catch (e) {
               if (revoked) return null;
@@ -353,13 +354,15 @@ function MediaPreview({ record }: { record: DailyRecord }) {
         if (revoked || items.length === 0) return;
         const hasVideo = mediaTypes.includes('video');
         if (hasVideo && items.length > 0) {
-          const u = URL.createObjectURL(items[0].blob);
-          trackBlob(u);
+          const token = `local:${items[0].id}`;
+          const u = acquireBlobUrl(token, items[0].blob);
+          trackAcquire(token);
           setVideoUrl(u);
         } else {
           const imgs = items.filter(i => i.type === 'image').map(i => {
-            const u = URL.createObjectURL(i.blob);
-            trackBlob(u);
+            const token = `local:${i.id}`;
+            const u = acquireBlobUrl(token, i.blob);
+            trackAcquire(token);
             return { id: i.id, url: u };
           });
           setImageUrls(imgs);
@@ -371,11 +374,11 @@ function MediaPreview({ record }: { record: DailyRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 卸载时释放所有 blob URL
+  // 卸载时仅释放引用计数，不立即 revoke；全局缓存留给页面切换复用
   useEffect(() => {
     return () => {
-      blobUrlsRef.current.forEach(u => URL.revokeObjectURL(u));
-      blobUrlsRef.current = [];
+      acquiredTokensRef.current.forEach(t => releaseBlobUrl(t));
+      acquiredTokensRef.current = [];
     };
   }, []);
 

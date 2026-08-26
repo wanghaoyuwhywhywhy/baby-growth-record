@@ -4,6 +4,7 @@ import { formatDate } from '@/utils/date';
 import { CATEGORY_MAP } from '@/utils/constants';
 import { feishuAPI } from '@/api/feishu';
 import { getCloudAssetUrl, fetchCachedCloudAsset } from '@/lib/cloud';
+import { acquireBlobUrl, releaseBlobUrl } from '@/lib/blobUrlCache';
 import { Play, Pause, Mic } from 'lucide-react';
 
 interface MediaInfo {
@@ -64,10 +65,11 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
     const attachments = record.媒体附件 || [];
 
     let revoked = false;
-    let objectUrls: string[] = [];
+    let acquiredTokens: string[] = [];
     const cleanup = () => {
       revoked = true;
-      objectUrls.forEach((u) => URL.revokeObjectURL(u));
+      // 仅释放引用计数，不立即 revoke；全局缓存留给页面切换复用，实现秒开
+      acquiredTokens.forEach((t) => releaseBlobUrl(t));
     };
 
     async function loadAll() {
@@ -93,8 +95,8 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
                 m.id,
                 typeHint as 'voice' | 'photo' | 'video',
               );
-              const url = URL.createObjectURL(blob);
-              objectUrls.push(url);
+              const url = acquireBlobUrl(m.id, blob);
+              acquiredTokens.push(m.id);
               return { id: m.id, type: m.type, url, fromCache };
             } catch (e) {
               // 降级：直接用远程 URL，走浏览器原生缓存
@@ -123,8 +125,9 @@ export default function RecordItem({ record, compact = false }: RecordItemProps)
       const merged: MediaInfo[] = [...cloudMedia];
       for (const item of localItems) {
         if (!cloudTypes.has(item.type)) {
-          const url = URL.createObjectURL(item.blob);
-          objectUrls.push(url);
+          const token = `local:${item.id}`;
+          const url = acquireBlobUrl(token, item.blob);
+          acquiredTokens.push(token);
           merged.push({ id: item.id, type: item.type, url, fromCache: true });
         }
       }

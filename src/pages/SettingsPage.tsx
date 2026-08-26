@@ -5,6 +5,7 @@ import { User, Plus, Trash2, Edit3, Shield, X, Loader2, Eye, EyeOff, Check, XCir
 import { getAuthAccount, isSuperAdmin } from '@/lib/auth';
 import { cloudGetAccounts, cloudCreateAccount, cloudUpdateAccount, cloudDeleteAccount, cloudApproveAccount, cloudRejectAccount, type AccountRecord } from '@/lib/cloud';
 import { feishuAPI } from '@/api/feishu';
+import { clearIdleBlobUrls } from '@/lib/blobUrlCache';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -42,6 +43,8 @@ export default function SettingsPage() {
     setClearingCache(true);
     try {
       await feishuAPI.clearMediaCache();
+      // 同步清理全局 blob URL 缓存中空闲的条目（正在显示的保留，避免画面闪断）
+      clearIdleBlobUrls();
       setCacheItems(0);
       setCacheBytes(0);
     } catch (e) {
