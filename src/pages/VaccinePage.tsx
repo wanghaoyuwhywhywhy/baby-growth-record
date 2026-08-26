@@ -3,7 +3,7 @@ import { useAppStore } from '@/store/useAppStore';
 import NavHeader from '@/components/NavHeader';
 import CalendarPicker from '@/components/CalendarPicker';
 import { feishuAPI, type VaccineRecord } from '@/api/feishu';
-import { isEditMode } from '@/lib/auth';
+import { useEditMode } from '@/lib/auth';
 import { Plus, X, Search, Calendar } from 'lucide-react';
 
 // 免费疫苗（免疫规划）— 2025版国家免疫规划
@@ -128,7 +128,7 @@ export default function VaccinePage() {
   const updateVaccineVaccinateDate = useAppStore((s) => s.updateVaccineVaccinateDate);
 
   const baby = currentBaby();
-  const canEdit = isEditMode();
+  const canEdit = useEditMode();
   const deleteVaccine = useAppStore((s) => s.deleteVaccine);
 
   // 日历弹窗状态

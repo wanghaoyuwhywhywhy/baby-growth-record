@@ -448,6 +448,31 @@ import {
  *
  * @returns Promise<{ blob: Blob; contentType: string; fromCache: boolean }>
  */
+// 全局媒体加载并发限制器：手机端多记录同时进入视口时，限制同时网络请求/解码数量，避免卡顿
+// 缓存命中不受限（秒回），仅对网络请求限流
+const MAX_MEDIA_CONCURRENCY = 3;
+let mediaRunningCount = 0;
+const mediaWaitQueue: (() => void)[] = [];
+
+function acquireMediaSlot(): Promise<void> {
+  if (mediaRunningCount < MAX_MEDIA_CONCURRENCY) {
+    mediaRunningCount++;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    mediaWaitQueue.push(() => {
+      mediaRunningCount++;
+      resolve();
+    });
+  });
+}
+
+function releaseMediaSlot(): void {
+  mediaRunningCount = Math.max(0, mediaRunningCount - 1);
+  const next = mediaWaitQueue.shift();
+  if (next) next();
+}
+
 export async function fetchCachedCloudAsset(
   recordId: string,
   fileToken: string,
@@ -466,53 +491,59 @@ export async function fetchCachedCloudAsset(
   }
 
   // ---- 第 2 步：网络请求（带 ETag 条件验证，304 不下载 body）----
-  const url = getCloudAssetUrl(recordId, fileToken, type);
-  const headersInit: Record<string, string> = {};
+  // 限流：手机端多记录同时进入视口时，避免移动网络并发争抢与超时
+  await acquireMediaSlot();
+  try {
+    const url = getCloudAssetUrl(recordId, fileToken, type);
+    const headersInit: Record<string, string> = {};
 
-  // 正常这里 cached 为 null，暂时没 etag；预留接口以便后续扩展"后台验证"
-  // （例如：本地缓存先显示，后台 If-None-Match 验证，304 继续用，200 静默更新）
+    // 正常这里 cached 为 null，暂时没 etag；预留接口以便后续扩展"后台验证"
+    // （例如：本地缓存先显示，后台 If-None-Match 验证，304 继续用，200 静默更新）
 
-  const resp = await fetchWithTimeout(url, { headers: headersInit });
-  if (!resp.ok && resp.status !== 304) {
-    throw new Error(`媒体加载失败: HTTP ${resp.status}`);
+    const resp = await fetchWithTimeout(url, { headers: headersInit });
+    if (!resp.ok && resp.status !== 304) {
+      throw new Error(`媒体加载失败: HTTP ${resp.status}`);
+    }
+
+    let blob: Blob;
+    let contentType: string;
+    let etag: string = resp.headers.get('ETag') || '';
+    let size: number = 0;
+
+    if (resp.status === 304) {
+      // 304 但本地没缓存？不太可能发生（304 需要先发 If-None-Match），防御式处理
+      throw new Error('服务器返回 304 但本地无缓存');
+    }
+
+    // 200：读取 blob
+    const arrayBuf = await resp.arrayBuffer();
+    contentType = resp.headers.get('Content-Type') || guessContentType(type, arrayBuf);
+    size = arrayBuf.byteLength;
+    blob = new Blob([arrayBuf], { type: contentType });
+
+    // 生成稳定 ETag（如果服务端没返回，按 file_token 自己算一个保底）
+    if (!etag) {
+      etag = 'local/' + fileToken.slice(0, 16);
+    }
+
+    // ---- 第 3 步：写入 IndexedDB 缓存（后台异步 LRU 清理）----
+    const entry: MediaCacheEntry = {
+      fileToken,
+      blob,
+      etag,
+      contentType,
+      size,
+      lastUsedAt: Date.now(),
+      createdAt: Date.now(),
+    };
+    dbPutMediaCache(entry).catch((e) => {
+      console.warn('[fetchCachedCloudAsset] 写入媒体缓存失败（可能是存储空间不足）:', e);
+    });
+
+    return { blob, contentType, fromCache: false };
+  } finally {
+    releaseMediaSlot();
   }
-
-  let blob: Blob;
-  let contentType: string;
-  let etag: string = resp.headers.get('ETag') || '';
-  let size: number = 0;
-
-  if (resp.status === 304) {
-    // 304 但本地没缓存？不太可能发生（304 需要先发 If-None-Match），防御式处理
-    throw new Error('服务器返回 304 但本地无缓存');
-  }
-
-  // 200：读取 blob
-  const arrayBuf = await resp.arrayBuffer();
-  contentType = resp.headers.get('Content-Type') || guessContentType(type, arrayBuf);
-  size = arrayBuf.byteLength;
-  blob = new Blob([arrayBuf], { type: contentType });
-
-  // 生成稳定 ETag（如果服务端没返回，按 file_token 自己算一个保底）
-  if (!etag) {
-    etag = 'local/' + fileToken.slice(0, 16);
-  }
-
-  // ---- 第 3 步：写入 IndexedDB 缓存（后台异步 LRU 清理）----
-  const entry: MediaCacheEntry = {
-    fileToken,
-    blob,
-    etag,
-    contentType,
-    size,
-    lastUsedAt: Date.now(),
-    createdAt: Date.now(),
-  };
-  dbPutMediaCache(entry).catch((e) => {
-    console.warn('[fetchCachedCloudAsset] 写入媒体缓存失败（可能是存储空间不足）:', e);
-  });
-
-  return { blob, contentType, fromCache: false };
 }
 
 // 根据 type 和文件头猜 Content-Type（服务端异常没返回时的兜底）

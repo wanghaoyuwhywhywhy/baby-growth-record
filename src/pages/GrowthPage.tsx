@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import type { GrowthRecord } from '@/api/feishu';
-import { isEditMode } from '@/lib/auth';
+import { useEditMode } from '@/lib/auth';
 import NavHeader from '@/components/NavHeader';
 import CalendarPicker from '@/components/CalendarPicker';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -53,7 +53,7 @@ function getAgeMarker(recordDate: string, birthDate: string): string | null {
 export default function GrowthPage() {
   const { currentBaby, growthRecords, fetchGrowthRecords, createGrowthRecord, updateGrowthRecord, deleteGrowthRecord } = useAppStore();
   const baby = currentBaby();
-  const canEdit = isEditMode();
+  const canEdit = useEditMode();
   const [showForm, setShowForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState<GrowthRecord | null>(null);
   const [measureDate, setMeasureDate] = useState(new Date().toISOString().split('T')[0]);

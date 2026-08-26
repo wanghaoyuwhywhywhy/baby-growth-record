@@ -1,4 +1,5 @@
 import type { Baby } from '@/api/feishu';
+import { useAppStore } from '@/store/useAppStore';
 
 const WORKER_URL = 'https://api.tongxi.xyz';
 const AUTH_TOKEN_KEY = 'auth_token';
@@ -104,11 +105,31 @@ export function isAdmin(): boolean {
 // 解锁编辑模式（访问隐秘路径后调用）
 export function unlockEditMode(): void {
   localStorage.setItem(EDIT_MODE_UNLOCKED_KEY, '1');
+  useAppStore.getState().setEditUnlocked(true);
 }
 
 // 重新锁定为只读模式
 export function lockEditMode(): void {
   localStorage.removeItem(EDIT_MODE_UNLOCKED_KEY);
+  useAppStore.getState().setEditUnlocked(false);
+}
+
+// 响应式编辑模式 hook：无登录模式靠 store.editUnlocked（切换不重载即生效）；
+// 登录态权限在登录时写入 localStorage 且固定不变，直接读取即可
+export function useEditMode(): boolean {
+  const editUnlocked = useAppStore((s) => s.editUnlocked);
+  const role = getAuthRole();
+  if (role === 'admin' || role === 'superadmin') return true;
+  const linkRoles = getAuthBabyLinkRoles();
+  const currentBabyId = localStorage.getItem('current_baby_id');
+  if (currentBabyId && linkRoles[currentBabyId]) {
+    const r = linkRoles[currentBabyId];
+    return r === 'owner' || r === 'editor' || editUnlocked;
+  }
+  for (const r of Object.values(linkRoles)) {
+    if (r === 'owner' || r === 'editor') return true;
+  }
+  return editUnlocked;
 }
 
 // 保存认证信息

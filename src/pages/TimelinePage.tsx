@@ -5,7 +5,7 @@ import { feishuAPI } from '@/api/feishu';
 import { CATEGORIES, CATEGORY_MAP } from '@/utils/constants';
 import { getCloudAssetUrl, fetchCachedCloudAsset } from '@/lib/cloud';
 import { acquireBlobUrl, releaseBlobUrl } from '@/lib/blobUrlCache';
-import { isEditMode } from '@/lib/auth';
+import { useEditMode } from '@/lib/auth';
 import CalendarPicker from '@/components/CalendarPicker';
 import FloatingButton from '@/components/FloatingButton';
 import NavHeader from '@/components/NavHeader';
@@ -862,7 +862,7 @@ export default function TimelinePage() {
   const [showAgePicker, setShowAgePicker] = useState(false);
   const [ageFilterLabel, setAgeFilterLabel] = useState<string | null>(null);
   const [editingRecord, setEditingRecord] = useState<DailyRecord | null>(null);
-  const editMode = isEditMode();
+  const editMode = useEditMode();
   const baby = currentBaby();
   const babyDob = baby?.出生日期;
 

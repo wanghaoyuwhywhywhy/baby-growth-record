@@ -45,7 +45,7 @@ export default function HomePage() {
       } else {
         unlockEditMode();
       }
-      window.location.reload();
+      // unlock/lock 已同步更新 store，各组件响应式切换，无需 reload
     }
   }
 

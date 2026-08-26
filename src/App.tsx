@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
 import { unlockEditMode } from '@/lib/auth';
 import HomePage from '@/pages/HomePage';
@@ -74,12 +74,11 @@ function ScrollToTop() {
 
 // 隐秘路径解锁编辑模式：访问 /admin/edit 后写入标记并跳转首页
 function EditModeUnlock() {
+  const navigate = useNavigate();
   useEffect(() => {
-    unlockEditMode();
-    // reload 以确保所有组件重新读取权限状态
-    window.location.hash = '#/';
-    window.location.reload();
-  }, []);
+    unlockEditMode(); // 同步更新 store，各组件响应式重渲染，无需 reload
+    navigate('/', { replace: true });
+  }, [navigate]);
   return null;
 }
 

@@ -6,7 +6,7 @@ import CategoryPicker from '@/components/CategoryPicker';
 import NavHeader from '@/components/NavHeader';
 import MediaInput, { type MediaItem } from '@/components/MediaInput';
 import { autoCategory, polishContent } from '@/lib/ai';
-import { isEditMode } from '@/lib/auth';
+import { useEditMode } from '@/lib/auth';
 import { Check, Sparkles, Wand2, Loader2 } from 'lucide-react';
 
 type MediaType = 'text' | 'voice' | 'video' | 'photo';
@@ -24,11 +24,12 @@ export default function RecordPage() {
   const navigate = useNavigate();
 
   // 只读模式禁止访问：重定向回首页
+  const editMode = useEditMode();
   useEffect(() => {
-    if (!isEditMode()) {
+    if (!editMode) {
       navigate('/', { replace: true });
     }
-  }, [navigate]);
+  }, [editMode, navigate]);
 
   const canSubmit = (content.trim().length > 0 || mediaItems.length > 0) && !submitting;
 

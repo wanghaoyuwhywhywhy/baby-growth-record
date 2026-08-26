@@ -14,6 +14,9 @@ interface AppState {
   lastSyncResult: { babies: number; records: number; growth: number } | null;
   cloudConnected: boolean | null;
   babyRelations: Record<string, string>; // babyId -> relation
+  // 无登录模式下编辑模式的响应式状态（镜像 localStorage 的 edit_mode_unlocked）
+  editUnlocked: boolean;
+  setEditUnlocked: (v: boolean) => void;
 
   currentBaby: () => Baby | null;
   initApp: () => Promise<void>;
@@ -59,6 +62,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastSyncResult: null,
   cloudConnected: null,
   babyRelations: {},
+  editUnlocked: (() => {
+    try { return localStorage.getItem('edit_mode_unlocked') === '1'; } catch { return false; }
+  })(),
 
   currentBaby: () => {
     const { babies, currentBabyId } = get();
@@ -129,6 +135,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setBabyRelations: (relations) => set({ babyRelations: relations }),
+
+  setEditUnlocked: (v) => set({ editUnlocked: v }),
 
   addBaby: async (data) => {
     const baby = await feishuAPI.createBaby(data);
